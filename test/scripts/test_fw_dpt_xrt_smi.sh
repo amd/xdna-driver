@@ -35,6 +35,14 @@
 # sufficient. Pass --xrt-smi <path> only when testing a
 # newer-than-installed in-tree build.
 #
+# One group -- "fw_dpt: cross-channel teardown" -- needs BOTH channels active at
+# the same time, so it runs only in the default (both) mode and is skipped
+# by -log and -trace. It is the regression test for the cross-channel SRCU
+# deadlock, and on a driver that still carries that bug it will briefly
+# wedge the device before recovering it by killing the readers parked in
+# the DPT watch path. See the block comment above
+# test_fw_dpt_cross_channel_teardown.
+#
 # The event-trace groups need a workload to make the firmware emit trace
 # events; they run the shim_test case selected by SHIM_TEST_CASE
 # ("multi-command preempt full ELF io test real kernel good run",
@@ -164,6 +172,64 @@ ORIG_LOG_LEVEL=""
 ORIG_TRACE_CAPTURED=0
 ORIG_TRACE_STATE=""
 ORIG_TRACE_CATS=""
+
+# ---------------------------------------------------------------------------
+# Cross-channel teardown group state
+# ---------------------------------------------------------------------------
+
+# Pid this script launched a deliberately-parked watcher under. This is
+# the ROOT of the watcher's process tree, which is not necessarily the
+# process that blocks inside the driver's wait_event_interruptible -- see
+# dpt_watcher_tree. On a driver with the cross-channel SRCU bug that parked
+# reader is the ONLY thing whose death lets a blocked
+# amdxdna_dpt_fini_chan() finish, so the EXIT/INT/TERM trap must always
+# release it: an interrupted run that leaves it behind leaves the device
+# wedged until somebody kills that reader by hand.
+DPT_PARKED_WATCHER_PID=""
+
+# Pid of the backgrounded, timed "configure --disable" under measurement.
+DPT_DISABLE_PID=""
+
+# Set to 1 once a teardown has been seen NOT to return even after every
+# reader found parked in the DPT watch path was released. It records an
+# observation, not a verdict on the host: teardown() re-checks whether the
+# device answers once its own cleanup has run, and only skips the DPT
+# state restore if it does not, because the configure ioctls that replay
+# the captured state would block on the dev_lock a still-blocked teardown
+# holds.
+DPT_DEVICE_WEDGED=0
+
+# Wall-clock budget for a DPT disable issued while a watcher is parked.
+# The verified-good figures on aie4 are ~200ms cross-channel and ~201ms
+# same-channel; 5000ms is deliberately generous headroom for a loaded CI host
+# while staying orders of magnitude below the "never returns" failure this
+# group exists to catch.
+DPT_TEARDOWN_BUDGET_MS=5000
+
+# Hard bound on how long an outstanding disable is tolerated before it is
+# declared wedged and the parked watcher is killed to recover the device.
+DPT_TEARDOWN_WEDGE_MS=15000
+
+# A park must hold across this many consecutive 250ms samples before it
+# counts as stable. A single snapshot is not enough: a watcher that is
+# merely between poll iterations can momentarily look parked, and firing
+# the teardown at that instant yields a meaningless "fast" measurement.
+DPT_PARK_STABLE_SAMPLES=8
+
+# Wall-clock budget for a watcher to reach a stable park, sampled every
+# 250ms. It has to cover draining whatever the ring already held before
+# the cursor reaches the tail, plus DPT_PARK_STABLE_SAMPLES of holding
+# still. Measured on npu4 the watcher was already parked at the first
+# sample and stable 2s later, so this is roughly 4x the observed
+# time-to-stable -- enough slack for a chattier ring or a loaded host
+# without making a genuine "never parks" failure slow to report.
+DPT_PARK_BUDGET_MS=10000
+
+# Wall-clock budget for the post-cleanup "does the device still answer"
+# probe. Generous because it only runs on a path that has already failed,
+# and an examine on a busy but healthy device is worth waiting out rather
+# than misreporting as wedged.
+DPT_PROBE_BUDGET_MS=20000
 
 # ---------------------------------------------------------------------------
 # Pretty-print helpers
@@ -806,14 +872,55 @@ teardown() {
     local rc=$?
     info "Cleaning up..."
 
+    # Release a deliberately-parked DPT watcher FIRST. If the cross-channel
+    # group was interrupted mid-measurement, a teardown may be blocked in
+    # synchronize_srcu holding dev_lock, and nothing else below can make
+    # progress until that reader drops its SRCU read lock.
+    dpt_release_parked_watcher
+
     local pat
     pat=$(dpt_consumer_pattern)
     pkill -TERM -f "${pat}" 2>/dev/null || true
     sleep 0.3
     pkill -KILL -f "${pat}" 2>/dev/null || true
 
-    # Best-effort: only meaningful once xrt-smi has been resolved.
-    if [[ -n "${XRT_SMI_BIN}" && -n "${BDF}" ]]; then
+    # The restore runs after BOTH kills above, and that order is
+    # load-bearing twice over. A reader left parked would have its channel
+    # woken and re-read behind the replay; and the replay's own configure
+    # invocations match the BDF-scoped consumer pattern pkilled just above,
+    # so a restore started any earlier would be killed by this very
+    # cleanup.
+    #
+    # Restoring is only meaningful once xrt-smi has been resolved, and only
+    # safe while the device still answers. restore_dpt_state() replays the
+    # captured configuration with configure ioctls, and those take the same
+    # xdna->dev_lock that a teardown blocked in synchronize_srcu is still
+    # holding. On a wedged device the replay would therefore block forever
+    # -- turning a reported failure into a trap that never returns, with no
+    # summary and no exit code, on shared lab hardware.
+    #
+    # When the cross-channel group could not get a teardown to return, the
+    # readers that were pinning it have just been killed above, so whether
+    # the device recovered is now a question with a cheap answer. Answer it
+    # instead of guessing: on hardware this cleanup did recover the device
+    # every time, and a reboot demanded wrongly on a shared lab host gets
+    # acted on and destroys somebody else's session.
+    if (( DPT_DEVICE_WEDGED )); then
+        info "cross-channel group reported an unfinished teardown; checking whether the" \
+             "device responds now that the parked readers are gone"
+        if dpt_device_responds; then
+            info "device RESPONDS after cleanup (xrt-smi examine returned 0):" \
+                 "killing the readers recovered it, and no reboot is indicated"
+            restore_dpt_state
+        else
+            info "device did NOT respond to a bounded xrt-smi examine after cleanup:" \
+                 "a blocked teardown is most likely still holding dev_lock"
+            info "skipping the DPT state restore: its configure ioctls would block on" \
+                 "that lock rather than put anything back, and the trap would never return"
+            info "the device is left as the tests left it; this host may need a reboot to" \
+                 "clear it, and nothing else here can"
+        fi
+    elif [[ -n "${XRT_SMI_BIN}" && -n "${BDF}" ]]; then
         restore_dpt_state
     fi
 
@@ -1759,6 +1866,685 @@ test_fw_trace_multi_watcher() {
 }
 
 # ---------------------------------------------------------------------------
+# Cross-channel teardown (SRCU domain split regression)
+#
+# fw_log and fw_trace used to share ONE device-wide dpt_srcu domain. A
+# watcher parks inside its SRCU read-side critical section --
+# amdxdna_dpt_enter() takes srcu_read_lock, then
+# amdxdna_dpt_get_data() sleeps in wait_event_interruptible() and only
+# amdxdna_dpt_exit() drops the lock, after the wait returns. Teardown
+# via amdxdna_dpt_fini_chan() wake_up_all()s only ITS OWN channel's waitqueue
+# and then calls synchronize_srcu(). On a shared domain that
+# synchronize_srcu also waited for the other channel's parked watcher, which
+# nothing in that path wakes, so disabling one channel never returned -- while
+# holding xdna->dev_lock, so every later ioctl piled up behind it.
+#
+# The assertion is a wall-clock one, because that is the only thing that
+# distinguishes the two behaviours: with per-channel domains the teardown
+# returns in ~200ms, and without them it does not return at all. Being
+# fast is necessary but not sufficient, though -- the disable must also
+# have exited 0. A command that errors out returns every bit as fast as
+# one that did the work, so on timing alone a broken teardown path would
+# be recorded as a pass having measured nothing about teardown at all.
+#
+# Both cases park a fw_trace watcher, because an idle trace ring is the
+# most reliable way to keep a watcher parked: with no workload the tail
+# stops advancing, so the watcher's cursor reaches the tail and it sleeps
+# instead of returning data. A chatty ring is the enemy here -- the
+# firmware writing wakes the watcher, it briefly drops the SRCU lock, and
+# a teardown can slip through, turning a real deadlock into a spurious
+# pass. fw_log is therefore held at level 1 (ERR) for the same reason.
+#
+# DANGER: on an unfixed driver this wedges the device. The blocked teardown
+# sits in uninterruptible D state inside synchronize_srcu() holding
+# dev_lock, and the only thing that frees it is killing every reader parked
+# in the domain -- not merely the one this group parked, since on a shared
+# domain readers left behind by earlier groups hold it open just as
+# effectively. Readers do sleep in wait_event_INTERRUPTIBLE, so a signal
+# reaches them.
+# Everything below is therefore bounded -- no unbounded wait anywhere, not
+# even in timeout(1), which would itself block reaping a D-state child.
+# The bare wait(1) calls are not an exception: each one only collects the
+# exit status of a pid that dpt_wait_pid_ms has already watched exit, so
+# there is nothing left for it to wait for. DPT_PARKED_WATCHER_PID is
+# tracked globally so the EXIT/INT/TERM trap releases the watcher's whole
+# process tree, reader included, even if this script is killed
+# mid-measurement.
+# ---------------------------------------------------------------------------
+
+# Bounded wait for pid $1 to exit, up to $2 milliseconds, polling at 50ms.
+# Returns 0 as soon as the pid is gone, 1 if it is still alive at the
+# deadline. Deliberately never waits indefinitely: this is what keeps the
+# wedge scenario recoverable.
+dpt_wait_pid_ms() {
+    local pid="$1" limit="$2" waited=0
+    while :; do
+        kill -0 "${pid}" 2>/dev/null || return 0
+        (( waited >= limit )) && return 1
+        sleep 0.05
+        waited=$((waited + 50))
+    done
+}
+
+# Whether /proc/<tid>/stack can be read at all on this kernel (needs
+# CONFIG_STACKTRACE, plus root). Without it there is no way to prove a
+# watcher really parked, and this group skips rather than assert on timing
+# it cannot attribute.
+#
+# The read has to be attempted, and nothing but the read decides: the mode
+# bits on /proc/self/stack say 0400 to its owner, but the open is gated on
+# CAP_SYS_ADMIN and is refused outright under kernel lockdown, so [[ -r ]]
+# answers yes where the read fails and the group would report "never
+# parked" on a kernel that simply cannot answer the question. It also
+# answers no where the read would succeed, because it tests the real uid
+# while the open uses the effective one, and the group would skip a check
+# the host could have run.
+dpt_stack_probe_available() {
+    cat /proc/self/stack >/dev/null 2>&1
+}
+
+# Echo the live pids of the watcher process tree rooted at $1, parents
+# before children, or nothing if the root is already gone.
+#
+# The pid a watcher is launched under is NOT necessarily the process that
+# blocks in the kernel. A stock install ships /opt/xilinx/xrt/bin/xrt-smi
+# as a POSIX shell wrapper that forks bin/unwrapped/xrt-smi and then sits
+# in wait4(), so $! names a /bin/sh: its state is S, but its stack is
+# do_wait and can never hold a DPT frame, and a signal delivered to it
+# does not reach the reader. Other installs -- and possibly future ones --
+# exec the binary directly, with no wrapper layer at all.
+#
+# Walking the subtree covers both without assuming either shape: with no
+# children the root is the only pid returned, which is exactly the
+# no-wrapper case. Callers re-walk on every sample rather than resolving
+# once, so a wrapper that has not forked yet at launch is simply picked up
+# by the next sample instead of being latched onto by a fixed sleep.
+dpt_watcher_tree() {
+    local pid="$1" kid
+    [[ -z "${pid}" ]] && return 0
+    kill -0 "${pid}" 2>/dev/null || return 0
+    printf '%s\n' "${pid}"
+    while read -r kid; do
+        [[ -n "${kid}" ]] || continue
+        dpt_watcher_tree "${kid}"
+    done < <(pgrep -P "${pid}" 2>/dev/null || true)
+    return 0
+}
+
+# Regex matching a kernel stack frame that means "parked in the amdxdna
+# DPT watch path". Matched as a SET rather than as amdxdna_dpt_get_data
+# exactly, because that function is static and the compiler is free to
+# inline it into amdxdna_get_fw_log / amdxdna_get_fw_trace, in which case
+# the sleeping frame carries the caller's name instead. It was observed
+# un-inlined on the npu4 build this group was validated against, but that
+# is one kernel built by one compiler and the set costs nothing.
+#
+# Shared by the park proof (dpt_parked_stack) and the recovery lever
+# (dpt_release_dpt_parked_readers) on purpose: the lever must recognise
+# exactly the state the proof calls "parked", or it would fail to release
+# readers the proof would have accepted.
+DPT_PARK_FRAME_RE='amdxdna_(dpt_get_data|get_fw_log|get_fw_trace)'
+
+# Echo "pid=<pid> tid=<tid> state=<S>" plus the kernel stack of the first
+# thread anywhere in the watcher tree rooted at $1 that is parked in the
+# DPT watch path, or nothing if no thread is.
+#
+# A park is two independent facts, and both are required: the thread is in
+# interruptible sleep (state S in /proc/<tid>/stat) and its kernel stack is
+# inside the amdxdna DPT get-data ioctl. State alone is far too weak --
+# xrt-smi sleeps in plenty of other places, and the shell wrapper that
+# dpt_watcher_tree exists to see past sits in wait4() in state S for its
+# whole life -- while the stack alone does not prove the thread is asleep
+# rather than passing through.
+dpt_parked_stack() {
+    local root="$1" pid tdir tid stat_line state stack
+    [[ -z "${root}" ]] && return 0
+    while read -r pid; do
+        for tdir in /proc/"${pid}"/task/*; do
+            [[ -r "${tdir}/stack" ]] || continue
+            stat_line=$(cat "${tdir}/stat" 2>/dev/null) || continue
+            # "pid (comm) state ...", and comm may itself contain spaces
+            # and parentheses, so split after the LAST ") ".
+            state="${stat_line##*') '}"
+            state="${state%% *}"
+            [[ "${state}" == "S" ]] || continue
+            stack=$(cat "${tdir}/stack" 2>/dev/null) || continue
+            grep -qE "${DPT_PARK_FRAME_RE}" <<<"${stack}" || continue
+            tid=$(basename "${tdir}")
+            printf 'pid=%s tid=%s state=%s\n%s' \
+                "${pid}" "${tid}" "${state}" "${stack}"
+            return 0
+        done
+    done < <(dpt_watcher_tree "${root}")
+    return 0
+}
+
+# Launch an --event-trace --watch consumer and wait for it to park stably
+# inside the driver's wait_event_interruptible. Sets
+# DPT_PARKED_WATCHER_PID as soon as the process exists, so the trap can
+# release it even if parking never completes, and writes the proving
+# evidence to the file $3.
+#
+# MUST be called directly, never through $( ): the watcher has to be a
+# child of the calling shell so that DPT_PARKED_WATCHER_PID is visible to
+# the trap and so dpt_release_parked_watcher can wait on it. That is why
+# the evidence goes to a file instead of stdout.
+#
+# Returns: 0 parked stably, 1 never parked, 2 exited before parking,
+#          3 no stack evidence available on this kernel.
+dpt_park_trace_watcher() {
+    local out="$1" err="$2" evidence="$3"
+    local pid stack samples stable=0 i
+
+    : >"${out}"; : >"${err}"; : >"${evidence}"
+    xrt_smi --advanced examine -d "${BDF}" --event-trace --watch \
+        >"${out}" 2>"${err}" &
+    pid=$!
+    DPT_PARKED_WATCHER_PID="${pid}"
+
+    dpt_stack_probe_available || return 3
+
+    # The park is looked for anywhere in the watcher's process tree, not
+    # just in ${pid}, because ${pid} may be a shell wrapper -- see
+    # dpt_watcher_tree. ${pid} is still the right liveness check: it is the
+    # process this shell spawned, so its exit means the watcher run is
+    # over however many layers it had.
+    samples=$(( DPT_PARK_BUDGET_MS / 250 ))
+    for (( i = 0; i < samples; i++ )); do
+        kill -0 "${pid}" 2>/dev/null || return 2
+        stack=$(dpt_parked_stack "${pid}")
+        if [[ -n "${stack}" ]]; then
+            stable=$((stable + 1))
+            if (( stable >= DPT_PARK_STABLE_SAMPLES )); then
+                printf '%s' "${stack}" >"${evidence}"
+                return 0
+            fi
+        else
+            # Woke up: the ring is still advancing. Restart the streak so
+            # only a genuinely quiet, continuously parked watcher counts.
+            stable=0
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
+# Release the deliberately-parked watcher. This is the recovery lever for
+# the wedge scenario: a blocked amdxdna_dpt_fini_chan() cannot make
+# progress until this reader drops its SRCU read lock. Idempotent, safe to
+# call from the trap, and safe to call when nothing was ever parked.
+#
+# It signals the whole watcher tree, not just the pid the watcher was
+# launched under, and that is the safety-critical part rather than a
+# tidiness one: measured on npu4, a SIGTERM delivered to the shell wrapper
+# alone left the reader parked in wait_event_interruptible, so on an
+# unfixed driver this "recovery" would have stranded the board instead of
+# freeing it.
+#
+# The tree is snapshotted BEFORE the first signal. Killing the wrapper
+# reparents the reader to init, after which pgrep -P cannot find it and
+# the reader we most need to reach becomes invisible.
+dpt_release_parked_watcher() {
+    local root="${DPT_PARKED_WATCHER_PID}"
+    local pids=()
+    local pid i
+
+    [[ -z "${root}" ]] && return 0
+    DPT_PARKED_WATCHER_PID=""
+
+    while read -r pid; do
+        [[ -n "${pid}" ]] && pids+=("${pid}")
+    done < <(dpt_watcher_tree "${root}")
+
+    # Deepest first: the reader is what holds the SRCU read lock, and
+    # reaching it before the shell that reaps it keeps the wrapper around
+    # to be waited on rather than leaving an orphan behind.
+    for (( i = ${#pids[@]} - 1; i >= 0; i-- )); do
+        kill -TERM "${pids[i]}" 2>/dev/null || true
+    done
+    for (( i = ${#pids[@]} - 1; i >= 0; i-- )); do
+        if ! dpt_wait_pid_ms "${pids[i]}" 3000; then
+            kill -KILL "${pids[i]}" 2>/dev/null || true
+            dpt_wait_pid_ms "${pids[i]}" 3000 || true
+        fi
+    done
+    wait "${root}" 2>/dev/null || true
+}
+
+# Hard bound on how many ancestors dpt_proc_depth will walk. The walk is
+# for ORDERING only -- no ancestor is ever signalled -- but it still needs
+# a bound: an earlier version of this lever walked the parent chain until
+# it reached pid 1 and killed this script's own harness shell on the way.
+# Nothing legitimate in an xrt-smi launch is more than a handful of levels
+# deep, so a walk that exceeds this is a bug or a pid-reuse race, and the
+# right answer is to stop rather than to keep climbing.
+DPT_PROC_DEPTH_MAX=16
+
+# Echo how many ancestors pid $1 has, stopping at DPT_PROC_DEPTH_MAX, at
+# pid 1, or at the first unreadable /proc entry. Used only to sort kill
+# candidates deepest-first; the ancestors themselves are never touched.
+dpt_proc_depth() {
+    local pid="$1" depth=0 stat_line rest ppid
+    while (( depth < DPT_PROC_DEPTH_MAX )); do
+        [[ -n "${pid}" && "${pid}" != "0" && "${pid}" != "1" ]] || break
+        stat_line=$(cat "/proc/${pid}/stat" 2>/dev/null) || break
+        # "pid (comm) state ppid ...", and comm may contain spaces and
+        # parentheses, so split after the LAST ") ".
+        rest="${stat_line##*') '}"
+        read -r _ ppid _ <<<"${rest}"
+        [[ -n "${ppid}" ]] || break
+        pid="${ppid}"
+        depth=$((depth + 1))
+    done
+    printf '%s' "${depth}"
+}
+
+# Echo the tid of the first thread of pid $1 that is parked in the DPT
+# watch path (interruptible sleep plus a DPT_PARK_FRAME_RE frame), or
+# nothing. Same two-fact test as dpt_parked_stack, applied to one process
+# rather than to a process tree.
+dpt_parked_tid() {
+    local pid="$1" tdir stat_line state
+    [[ -n "${pid}" ]] || return 0
+    for tdir in /proc/"${pid}"/task/*; do
+        [[ -r "${tdir}/stack" ]] || continue
+        stat_line=$(cat "${tdir}/stat" 2>/dev/null) || continue
+        state="${stat_line##*') '}"
+        state="${state%% *}"
+        [[ "${state}" == "S" ]] || continue
+        grep -qE "${DPT_PARK_FRAME_RE}" "${tdir}/stack" 2>/dev/null || continue
+        basename "${tdir}"
+        return 0
+    done
+    return 0
+}
+
+# Release EVERY reader parked in this device's DPT watch path, not just the
+# one this group tracked, and echo how many were signalled.
+#
+# dpt_release_parked_watcher alone is not a recovery lever for a full-script
+# run. By the time this group runs, the earlier groups have left on the
+# order of twenty other --watch consumers parked in the DPT wait path, and
+# on a driver with the shared SRCU domain every one of them keeps that
+# domain occupied. Killing only the pid this group happens to have
+# bookkeeping for leaves the teardown blocked on all the others, so the
+# group would report a wedged device it could in fact have recovered.
+#
+# Readers are identified by their KERNEL STACK rather than by pid
+# bookkeeping. That is what makes this work at all here: these readers were
+# launched by earlier groups that kept no record of them, and stack identity
+# also survives the reparenting that defeats pgrep -P walking.
+#
+# SCOPE -- this runs on shared lab hosts, so a process is signalled only if
+# BOTH hold:
+#
+#   1. its command line matches dpt_consumer_pattern, i.e. it is an xrt-smi
+#      --firmware-log/--event-trace consumer aimed at THIS BDF. This is the
+#      same bar teardown()'s pkill already uses, and the candidate set comes
+#      from pgrep against that pattern rather than from a sweep of all of
+#      /proc, so a process that does not match is never even examined.
+#   2. it has a thread parked in DPT_PARK_FRAME_RE, the same frame set the
+#      park proof uses.
+#
+# The intersection is strictly narrower than the existing pkill: every
+# process this can kill, teardown()'s pkill would already have killed.
+# Notably the disable under measurement cannot be caught by it even though
+# its command line does match (1): it is blocked in synchronize_srcu, which
+# is an uninterruptible D-state wait under amdxdna_dpt_fini_chan, so it
+# fails both the state and the frame half of (2). It is excluded by pid as
+# well, so that guarantee does not rest on reading stacks correctly.
+dpt_release_dpt_parked_readers() {
+    local pat cand tid depth
+    local -a ordered=()
+    local entry pid i signalled=0
+
+    pat=$(dpt_consumer_pattern)
+
+    while read -r cand; do
+        [[ -n "${cand}" ]] || continue
+        # Never signal this script, the shell it runs in, or the very
+        # disable whose duration is being measured.
+        [[ "${cand}" == "$$" || "${cand}" == "${BASHPID}" ]] && continue
+        [[ -n "${DPT_DISABLE_PID}" && "${cand}" == "${DPT_DISABLE_PID}" ]] && continue
+        tid=$(dpt_parked_tid "${cand}")
+        [[ -n "${tid}" ]] || continue
+        depth=$(dpt_proc_depth "${cand}")
+        ordered+=("${depth} ${cand}")
+    done < <(pgrep -f "${pat}" 2>/dev/null || true)
+
+    (( ${#ordered[@]} == 0 )) && { printf '0'; return 0; }
+
+    # Deepest first, for the same reason dpt_release_parked_watcher does
+    # it: reach the reader that holds the SRCU read lock before any shell
+    # that would reap it.
+    local -a pids=()
+    while read -r entry; do
+        [[ -n "${entry}" ]] && pids+=("${entry#* }")
+    done < <(printf '%s\n' "${ordered[@]}" | sort -k1,1nr -k2,2n)
+
+    for pid in "${pids[@]}"; do
+        kill -TERM "${pid}" 2>/dev/null && signalled=$((signalled + 1))
+    done
+    for (( i = 0; i < ${#pids[@]}; i++ )); do
+        if ! dpt_wait_pid_ms "${pids[i]}" 3000; then
+            kill -KILL "${pids[i]}" 2>/dev/null || true
+            dpt_wait_pid_ms "${pids[i]}" 3000 || true
+        fi
+    done
+
+    printf '%s' "${signalled}"
+}
+
+# Quiesce the --watch consumers earlier groups left parked on this device,
+# using the same BDF-scoped pattern teardown() and pre_flight() use, and
+# wait a bounded time for them to go.
+#
+# This is a precondition for the cross-channel group rather than part of its
+# measurement: see the comment in test_fw_dpt_cross_channel_teardown for why
+# leftover readers have to be gone before the control runs.
+dpt_quiesce_leftover_readers() {
+    local pat pid
+    local -a leftover=()
+
+    pat=$(dpt_consumer_pattern)
+    while read -r pid; do
+        [[ -n "${pid}" ]] && leftover+=("${pid}")
+    done < <(pgrep -f "${pat}" 2>/dev/null || true)
+
+    (( ${#leftover[@]} == 0 )) && return 0
+
+    info "quiescing ${#leftover[@]} leftover DPT consumer(s) from earlier groups (BDF-scoped)"
+    pkill -TERM -f "${pat}" 2>/dev/null || true
+    for pid in "${leftover[@]}"; do
+        dpt_wait_pid_ms "${pid}" 3000 || true
+    done
+    pkill -KILL -f "${pat}" 2>/dev/null || true
+    for pid in "${leftover[@]}"; do
+        dpt_wait_pid_ms "${pid}" 3000 || true
+    done
+}
+
+# Bounded probe of whether the device still answers an ordinary xrt-smi
+# query. Used after cleanup to report what actually happened to the device
+# instead of guessing, and to decide whether restoring the captured DPT
+# state can be attempted at all. Returns 0 only if the device answered.
+#
+# Deliberately NOT timeout(1). The state this probe exists to detect is a
+# teardown still holding xdna->dev_lock, and everything behind that lock
+# blocks in mutex_lock(), which is TASK_UNINTERRUPTIBLE --
+# amdxdna_drm_get_info_ioctl() takes dev_lock unconditionally, so the
+# examine below is exactly such a caller. A child in D state is reaped by
+# no signal, and timeout(1) waits for the child it signalled, so it would
+# hang precisely in the case this probe has to answer. The measurement
+# path avoids timeout(1) for the same reason.
+#
+# So the examine runs as a background job watched by the same bounded
+# poll. A probe still running at the deadline is reported as "did not
+# respond": the process is left behind, because nothing can reap it until
+# the lock is released, but this function returns and the trap goes on to
+# print a summary and exit.
+#
+# The xrt_smi() wrapper is not used here: backgrounding a shell function
+# makes $! the pid of a subshell rather than of the examine itself.
+dpt_device_responds() {
+    local pid rc=0
+
+    [[ -n "${XRT_SMI_BIN}" && -n "${BDF}" ]] || return 1
+
+    LD_LIBRARY_PATH="$(xrt_smi_ld_path)" \
+        "${XRT_SMI_BIN}" examine -d "${BDF}" >/dev/null 2>&1 &
+    pid=$!
+
+    if ! dpt_wait_pid_ms "${pid}" "${DPT_PROBE_BUDGET_MS}"; then
+        # Best effort only: a task blocked on dev_lock will not take it.
+        kill -TERM "${pid}" 2>/dev/null || true
+        return 1
+    fi
+
+    # Collects the status of a pid already observed to have exited, so
+    # this cannot block.
+    wait "${pid}" || rc=$?
+    return "${rc}"
+}
+
+# Run "configure --<$1> --disable" in the background, recording its own
+# wall-clock duration in milliseconds into the file $2. Sets
+# DPT_DISABLE_PID to the background pid.
+#
+# The background job exits with the disable's own exit status, so the
+# caller can require the command to have SUCCEEDED and not merely to have
+# returned. Timing alone cannot tell a disable that failed fast from one
+# that succeeded fast, and only the latter says anything about teardown.
+# The duration is still stamped on the failing path, so a failure can be
+# reported with the measurement that produced it.
+#
+# Backgrounded on purpose rather than wrapped in timeout(1): on an unfixed
+# driver this command never returns until the parked watcher dies, and
+# timeout would be no help because it waits for a child that is stuck in
+# uninterruptible D state inside synchronize_srcu(). The caller polls with
+# dpt_wait_pid_ms and kills the watcher to recover.
+#
+# Like dpt_park_trace_watcher, this must be called directly rather than
+# through $( ), so the job stays a child of the calling shell and
+# DPT_DISABLE_PID survives for both the poll and the later wait.
+dpt_disable_timed_bg() {
+    local opt="$1" stamp="$2"
+    : >"${stamp}"
+    (
+        drc=0
+        t0=$(date +%s%N)
+        LD_LIBRARY_PATH="$(xrt_smi_ld_path)" \
+            "${XRT_SMI_BIN}" --advanced configure -d "${BDF}" \
+                "--${opt}" --disable >/dev/null 2>&1 || drc=$?
+        printf '%s' "$(( ($(date +%s%N) - t0) / 1000000 ))" >"${stamp}"
+        exit "${drc}"
+    ) &
+    DPT_DISABLE_PID=$!
+}
+
+# Park a trace watcher, then time a disable of the channel named by the
+# xrt-smi option $2 while that watcher is parked.
+#
+#   $1 case_label : label for the assertion text
+#   $2 opt        : "firmware-log" (cross-channel) or "event-trace"
+#                   (same-channel)
+dpt_measure_teardown() {
+    local case_label="$1" opt="$2"
+    local out="${TMPDIR_}/dpt_park_${opt}.out"
+    local err="${TMPDIR_}/dpt_park_${opt}.err"
+    local evidence="${TMPDIR_}/dpt_park_${opt}.stack"
+    local stamp="${TMPDIR_}/dpt_disable_${opt}.ms"
+    local rc dpid drc elapsed released
+
+    # Two jobs at once. Level 1 (ERR) is the quietest level the driver
+    # accepts, which keeps the firmware from writing while the watcher is
+    # trying to stay parked. Enabling also guarantees fw_log is ACTIVE, so
+    # that the cross-channel case really does tear a live handle down: on an
+    # already-disabled channel amdxdna_dpt_fini_chan() returns immediately
+    # without ever reaching synchronize_srcu, and the measurement would be
+    # fast for entirely the wrong reason.
+    if ! fw_log_set_level 1; then
+        fail "[${case_label}] configure --firmware-log --enable --log-level 1 failed"
+        return
+    fi
+
+    trace_force_disable
+    if ! xrt_smi --advanced configure -d "${BDF}" --event-trace --enable \
+            --categories all >/dev/null 2>&1; then
+        fail "[${case_label}] configure --event-trace --enable failed; cannot park a watcher"
+        return
+    fi
+
+    # Called directly, not through $( ), so DPT_PARKED_WATCHER_PID lands in
+    # this shell and the trap can always release the watcher.
+    rc=0
+    dpt_park_trace_watcher "${out}" "${err}" "${evidence}" || rc=$?
+    case "${rc}" in
+    0)  ;;
+    2)  dpt_release_parked_watcher
+        fail "[${case_label}] trace watcher exited before parking." \
+             "stderr: $(head -c 256 "${err}")"
+        return ;;
+    3)  dpt_release_parked_watcher
+        skip "[${case_label}] /proc/<tid>/stack unreadable (kernel without" \
+             "CONFIG_STACKTRACE?); the park cannot be proven, so the timing" \
+             "assertion below would be vacuous"
+        return ;;
+    *)  dpt_release_parked_watcher
+        fail "[${case_label}] trace watcher never parked in the DPT watch path;" \
+             "a teardown measured now would complete quickly for the wrong reason"
+        return ;;
+    esac
+
+    pass "[${case_label}] trace watcher parked in the DPT watch path (SRCU read lock held)"
+    emit_snippet "[${case_label}] parked watcher evidence:" "$(cat "${evidence}")" 4
+
+    dpt_disable_timed_bg "${opt}" "${stamp}"
+    dpid="${DPT_DISABLE_PID}"
+    info "[${case_label}] disabling --${opt} (pid=${dpid}) with the trace watcher parked"
+
+    if ! dpt_wait_pid_ms "${dpid}" "${DPT_TEARDOWN_WEDGE_MS}"; then
+        # The unfixed-driver signature: the teardown is blocked in
+        # synchronize_srcu holding dev_lock, and only a parked reader
+        # dropping its SRCU read lock can let it finish.
+        info "[${case_label}] disable still outstanding after ${DPT_TEARDOWN_WEDGE_MS}ms;" \
+             "releasing the parked watcher to try to unwedge the device"
+        dpt_release_parked_watcher
+        if dpt_wait_pid_ms "${dpid}" 10000; then
+            fail "[${case_label}] disable of --${opt} blocked for more than" \
+                 "${DPT_TEARDOWN_WEDGE_MS}ms and completed only once the parked watcher" \
+                 "was killed: the teardown waited on a reader it never woke"
+            return
+        fi
+
+        # The watcher this group tracked is not necessarily the only reader
+        # holding the domain: on a shared SRCU domain every reader parked by
+        # an earlier group counts too, and this group kept no pids for those.
+        info "[${case_label}] still outstanding after releasing this group's watcher;" \
+             "releasing every reader parked in this device's DPT watch path"
+        released=$(dpt_release_dpt_parked_readers)
+        info "[${case_label}] released ${released} parked DPT reader(s)"
+        if dpt_wait_pid_ms "${dpid}" 10000; then
+            fail "[${case_label}] disable of --${opt} blocked for more than" \
+                 "${DPT_TEARDOWN_WEDGE_MS}ms and completed only after releasing" \
+                 "${released} reader(s) parked in the DPT watch path: the teardown" \
+                 "waited on readers it never woke"
+            return
+        fi
+
+        # Say only what is known here. The teardown did not return inside
+        # the budget, so it may still hold dev_lock -- but cleanup has not
+        # run yet, and on hardware the ordinary teardown() has recovered
+        # this every time, so a verdict on the host belongs after cleanup
+        # and not in this message.
+        DPT_DEVICE_WEDGED=1
+        fail "[${case_label}] disable of --${opt} did not complete within" \
+             "${DPT_TEARDOWN_WEDGE_MS}ms, nor after releasing this group's watcher and" \
+             "${released} other reader(s) parked in the DPT watch path. The teardown may" \
+             "still hold dev_lock, in which case amdxdna ioctls will block. Cleanup will" \
+             "now try to recover the device and will report whether it responds" \
+             "afterwards -- read that result before concluding anything about this host"
+        return
+    fi
+
+    dpt_release_parked_watcher
+
+    elapsed=$(cat "${stamp}" 2>/dev/null || true)
+    if [[ -z "${elapsed}" ]]; then
+        fail "[${case_label}] disable of --${opt} returned but recorded no duration"
+        return
+    fi
+
+    # The job is already gone, so this only collects its status; it never
+    # blocks, and the wedge path above returns before reaching here. The
+    # status has to be checked before the timing is trusted: a disable
+    # that errored out in a few milliseconds is fast for a reason that
+    # says nothing at all about teardown, and on time alone it is
+    # indistinguishable from one that really did tear a live handle down.
+    drc=0
+    wait "${dpid}" || drc=$?
+    if (( drc != 0 )); then
+        fail "[${case_label}] disable of --${opt} FAILED with exit status ${drc}" \
+             "after ${elapsed}ms. The command errored out instead of tearing the" \
+             "channel down, so this run measured nothing about teardown -- note that" \
+             "this is NOT the deadlock signature, which is a disable that never" \
+             "returns at all"
+        return
+    fi
+
+    if (( elapsed <= DPT_TEARDOWN_BUDGET_MS )); then
+        pass "[${case_label}] disable of --${opt} succeeded in ${elapsed}ms" \
+             "(<=${DPT_TEARDOWN_BUDGET_MS}ms)"
+    else
+        fail "[${case_label}] disable of --${opt} took ${elapsed}ms," \
+             "over the ${DPT_TEARDOWN_BUDGET_MS}ms budget"
+    fi
+}
+
+test_fw_dpt_cross_channel_teardown() {
+    group "fw_dpt: cross-channel teardown with a watcher parked"
+
+    # Quiesce the readers earlier groups left parked BEFORE measuring
+    # anything. This is a precondition, not tidiness: the earlier watch
+    # groups leave on the order of twenty --watch consumers parked in the
+    # DPT wait path, and on a driver with the shared SRCU domain every one
+    # of them holds that domain open. Measured on hardware that is what
+    # made the same-channel case below -- which cannot deadlock on its own --
+    # block and wedge the device, and because a failure is fatal the
+    # cross-channel assertion this group exists for never ran at all.
+    #
+    # It cannot mask the wedge the group looks for, because the group
+    # recreates that condition itself immediately afterwards with a watcher
+    # of its own. What is removed is unrelated leftover readers, never the
+    # parked reader whose presence is the entire point. It does not weaken
+    # the anti-vacuous-pass guarantees either: those rest on proving this
+    # group's own park (a stable stack matching DPT_PARK_FRAME_RE) and on
+    # requiring the disable to have exited 0, and neither involves any
+    # other process.
+    dpt_quiesce_leftover_readers
+
+    # The same-channel control runs FIRST, deliberately. It drives the exact
+    # same park-then-measure machinery over the path that cannot deadlock
+    # by construction -- fini_chan wakes the very waitqueue its watcher
+    # sleeps on -- so it proves the harness can park a watcher and time a
+    # teardown at all. Without it a fast cross-channel result is
+    # indistinguishable from a reproducer that quietly never parked
+    # anything.
+    #
+    # Structurally sound is not the same as safe to run, though. With
+    # readers left parked in a shared domain by earlier groups, this
+    # same-channel case is the one that blocked and wedged the device on
+    # hardware; it is only the harmless case once the quiesce above has
+    # happened.
+    dpt_measure_teardown "same-channel control" "event-trace"
+
+    # THE DIRECTION IS DELIBERATE: park a TRACE watcher, tear down the LOG.
+    # Do not "simplify" this by swapping the channels. The reverse direction
+    # is not a detector at all: on an unfixed driver, park-trace then
+    # disable-log wedges reproducibly (~515ms to wedge), while park-log
+    # then disable-trace returned in ~503ms with status 0 on every attempt
+    # and never wedged.
+    #
+    # That asymmetry is understood, not luck. Tearing down event-trace
+    # makes the firmware log its own shutdown -- a parked watcher captured
+    # exactly these entries:
+    #
+    #     [0] I: Got stop event trace command
+    #     [H] I: Stopping event trace
+    #     [H] I: Event trace stopped successfully
+    #
+    # Those writes advance the log tail, which wakes the parked log reader,
+    # which drops its SRCU read lock, which lets the very teardown it was
+    # meant to block run to completion. Flipping the channels would turn this
+    # group into one that passes on the buggy driver it exists to catch.
+    dpt_measure_teardown "cross-channel" "firmware-log"
+
+    # Leave the device the way the other groups expect to find it.
+    trace_force_disable
+    fw_log_set_level 3 || true
+}
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -1838,6 +2624,13 @@ main() {
         test_fw_trace_examine_oneshot
         test_fw_trace_examine_watch
         test_fw_trace_multi_watcher
+    fi
+
+    # Needs fw_log and fw_trace active at the same time to tear one down
+    # while a watcher is parked on the other, so it has no meaning in the
+    # single-channel modes.
+    if [[ "${MODE}" == "both" ]]; then
+        test_fw_dpt_cross_channel_teardown
     fi
 }
 
