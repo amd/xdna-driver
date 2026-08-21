@@ -175,6 +175,8 @@ struct amdxdna_dev {
 	struct srcu_struct		dpt_srcu;
 	struct amdxdna_dpt __rcu	*fw_log;
 	struct amdxdna_dpt __rcu	*fw_trace;
+	/* Ring size for the next FW log publish, serialized by dev_lock. */
+	u32				fw_log_size;
 
 	/* Allow auto core dump for hardware contexts, if true. */
 	bool				auto_coredump;
