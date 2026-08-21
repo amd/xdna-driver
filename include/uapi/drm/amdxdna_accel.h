@@ -895,6 +895,15 @@ struct amdxdna_drm_get_array {
 	 * call sleeps in the kernel until new data is available, logging is
 	 * disabled, or a signal arrives.
 	 *
+	 * Returns -ESTALE if @offset predates a disable/enable cycle that
+	 * restarted the ring: that cursor can never be satisfied, and the
+	 * data emitted before the restart is lost. The metadata is still
+	 * written back, with @offset reset to the start of the live ring and
+	 * @size 0, so a caller resumes by storing it and reissuing the call.
+	 * Returns -ESHUTDOWN if logging is not enabled, or was disabled while
+	 * the call waited; that is terminal for the session, so a caller must
+	 * not retry it in a loop. Any other error leaves @buffer untouched.
+	 *
 	 * Access: requires CAP_SYS_ADMIN.
 	 *
 	 * %DRM_AMDXDNA_FW_LOG_CONFIG:
@@ -916,6 +925,15 @@ struct amdxdna_drm_get_array {
 	 * watch); the remainder receives the payload. When @watch is set the
 	 * call sleeps in the kernel until new data is available, tracing is
 	 * disabled, or a signal arrives.
+	 *
+	 * Returns -ESTALE if @offset predates a disable/enable cycle that
+	 * restarted the ring: that cursor can never be satisfied, and the
+	 * events emitted before the restart are lost. The metadata is still
+	 * written back, with @offset reset to the start of the live ring and
+	 * @size 0, so a caller resumes by storing it and reissuing the call.
+	 * Returns -ESHUTDOWN if tracing is not enabled, or was disabled while
+	 * the call waited; that is terminal for the session, so a caller must
+	 * not retry it in a loop. Any other error leaves @buffer untouched.
 	 *
 	 * Access: requires CAP_SYS_ADMIN.
 	 *
