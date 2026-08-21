@@ -141,6 +141,30 @@ TMPDIR_=""
 DEV_ID=""
 DEV_FAMILY=""
 
+# DPT configuration as found on the device, captured by save_dpt_state()
+# before anything here perturbs it and replayed by restore_dpt_state()
+# from the exit trap. The tests enable, disable and re-level both
+# features freely, so without this the device would be left disabled at
+# level 0 no matter how the operator had it set up.
+#
+# The two features are tracked independently: they are restored only if
+# they were captured, and they are captured only if the selected MODE
+# actually runs tests against them. That keeps a -log run from touching
+# event-trace at all, and keeps an unreadable status on one feature from
+# costing the other its restore.
+#
+# A _CAPTURED flag stays 0 when the pre-run state could not be read
+# completely enough to replay it. Leaving that feature alone is the safe
+# choice: the tests end with both features enabled, so declining to touch
+# it preserves the operator's enabled state, whereas guessing at a level
+# or a category list would not.
+ORIG_LOG_CAPTURED=0
+ORIG_LOG_STATE=""
+ORIG_LOG_LEVEL=""
+ORIG_TRACE_CAPTURED=0
+ORIG_TRACE_STATE=""
+ORIG_TRACE_CATS=""
+
 # ---------------------------------------------------------------------------
 # Pretty-print helpers
 # ---------------------------------------------------------------------------
@@ -335,6 +359,40 @@ fw_log_set_level() {
 fw_log_disable() {
     xrt_smi --advanced configure -d "${BDF}" --firmware-log --disable \
         >/dev/null 2>&1 || true
+}
+
+# Return "enabled"/"disabled" from xrt-smi examine --firmware-log
+# --status, or "unknown" if the call fails. Only the state token goes to
+# stdout.
+#
+# Note this is the driver's view of the enable bit, unlike
+# fw_log_confirmed_level() below, which reads the level back out of the
+# firmware's own log stream.
+fw_log_state_query() {
+    local out state
+    if ! out=$(xrt_smi --advanced examine -d "${BDF}" --firmware-log --status \
+                 2>/dev/null); then
+        echo "unknown"
+        return 1
+    fi
+    # pipefail is on and grep exits 1 on no match, so absorb that rather
+    # than letting an unparseable status kill the run.
+    state=$(grep -oE 'Firmware log status: (enabled|disabled)' <<<"${out}" \
+              | awk '{print $NF}' | head -n1) || true
+    echo "${state:-unknown}"
+}
+
+# Print the driver-reported firmware log level, or "" if not reported.
+fw_log_level_query() {
+    local out
+    if ! out=$(xrt_smi --advanced examine -d "${BDF}" --firmware-log --status \
+                 2>/dev/null); then
+        echo ""
+        return 1
+    fi
+    grep -oE 'Firmware log level: [0-9]+' <<<"${out}" \
+        | awk '{print $NF}' | head -n1 \
+        || true
 }
 
 # Regex matching a firmware level-change confirmation line in either
@@ -642,6 +700,85 @@ dpt_consumer_pattern() {
     fi
 }
 
+# Read the DPT configuration as found and stash it in the ORIG_* globals
+# for restore_dpt_state(). Must run before pre_flight() and before any
+# test, i.e. while the device still holds whatever the operator left
+# there.
+#
+# Only the features the selected MODE will actually exercise are read, so
+# a -log run neither queries nor later touches event-trace, and an
+# xrt-smi that lacks the unused subcommand cannot cost the used one its
+# restore.
+#
+# "enabled" is only captured alongside the detail needed to reproduce it
+# -- a level for firmware-log, a category list for event-trace. Reported
+# as enabled without that detail, the feature is left uncaptured rather
+# than replayed from a guess; see the ORIG_* declarations for why that is
+# the safe direction.
+save_dpt_state() {
+    local state level cats
+
+    if [[ "${MODE}" != "trace-only" ]]; then
+        state=$(fw_log_state_query) || true
+        level=$(fw_log_level_query) || true
+        if [[ "${state}" == "disabled" ]] \
+           || [[ "${state}" == "enabled" && "${level}" =~ ^[1-9][0-9]*$ ]]; then
+            ORIG_LOG_STATE="${state}"
+            ORIG_LOG_LEVEL="${level}"
+            ORIG_LOG_CAPTURED=1
+            info "pre-run firmware-log: ${state} (level ${level:-?})"
+        else
+            info "pre-run firmware-log state not readable (${state}, level ${level:-?}); leaving it as the tests leave it"
+        fi
+    fi
+
+    if [[ "${MODE}" != "log-only" ]]; then
+        state=$(trace_state_query) || true
+        cats=$(trace_state_query_categories) || true
+        if [[ "${state}" == "disabled" ]] \
+           || [[ "${state}" == "enabled" && -n "${cats}" && "${cats,,}" != "none" ]]; then
+            ORIG_TRACE_STATE="${state}"
+            ORIG_TRACE_CATS="${cats}"
+            ORIG_TRACE_CAPTURED=1
+            info "pre-run event-trace: ${state} (categories ${cats:-none})"
+        else
+            info "pre-run event-trace state not readable (${state}, categories ${cats:-none}); leaving it as the tests leave it"
+        fi
+    fi
+}
+
+# Put each captured DPT feature back the way save_dpt_state() found it.
+# Called from teardown() after the watchers are gone, so nothing
+# re-enables behind us. A feature that was never captured is not touched.
+#
+# Categories read back uppercase ("ALL", "CLKPWRGATING") while configure
+# spells the everything-keyword lowercase, so "ALL" is special-cased and
+# any real category list is replayed verbatim.
+restore_dpt_state() {
+    if (( ORIG_LOG_CAPTURED )); then
+        info "restoring firmware-log: ${ORIG_LOG_STATE} (level ${ORIG_LOG_LEVEL:-?})"
+        if [[ "${ORIG_LOG_STATE}" == "enabled" ]]; then
+            fw_log_set_level "${ORIG_LOG_LEVEL}" || true
+        else
+            fw_log_disable
+        fi
+    fi
+
+    if (( ORIG_TRACE_CAPTURED )); then
+        info "restoring event-trace: ${ORIG_TRACE_STATE} (categories ${ORIG_TRACE_CATS:-none})"
+        if [[ "${ORIG_TRACE_STATE}" == "enabled" ]]; then
+            local cats="${ORIG_TRACE_CATS}"
+            if [[ "${cats^^}" == "ALL" ]]; then
+                cats="all"
+            fi
+            xrt_smi --advanced configure -d "${BDF}" --event-trace --enable \
+                --categories "${cats}" >/dev/null 2>&1 || true
+        else
+            trace_force_disable
+        fi
+    fi
+}
+
 # Kill leftover xrt-smi --firmware-log / --event-trace consumers (scoped
 # to this device's BDF) from a previously aborted run (they pin
 # /dev/accel/* fds), and report the module refcount so a stuck value is
@@ -662,9 +799,9 @@ pre_flight() {
     info "refcnt before tests: $(cat /sys/module/amdxdna/refcnt 2>/dev/null || echo '?')"
 }
 
-# EXIT/INT/TERM trap: kill any watchers we spawned, disable both DPT
-# features via xrt-smi so the device is left quiescent, remove the temp
-# dir, and print the summary. Preserves the triggering exit code.
+# EXIT/INT/TERM trap: kill any watchers we spawned, put the DPT features
+# this run exercised back the way we found them, remove the temp dir, and
+# print the summary. Preserves the triggering exit code.
 teardown() {
     local rc=$?
     info "Cleaning up..."
@@ -677,8 +814,7 @@ teardown() {
 
     # Best-effort: only meaningful once xrt-smi has been resolved.
     if [[ -n "${XRT_SMI_BIN}" && -n "${BDF}" ]]; then
-        fw_log_disable
-        trace_force_disable
+        restore_dpt_state
     fi
 
     if [[ -n "${TMPDIR_}" && -d "${TMPDIR_}" ]]; then
@@ -1679,6 +1815,10 @@ main() {
     discover_device
     xrt_smi_init
     shim_test_init
+
+    # Capture before arming the trap that replays it, and before
+    # pre_flight() touches anything.
+    save_dpt_state
 
     TMPDIR_="$(mktemp -d -t fw-dpt-xrt-smi.XXXXXX)"
     trap teardown EXIT INT TERM
