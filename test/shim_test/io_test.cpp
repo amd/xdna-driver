@@ -1112,15 +1112,17 @@ TEST_tdr_partial_chain_abort(device::id_type id, std::shared_ptr<device>& sdev, 
 }
 
 /*
- * Single-command TDR unwind. bad_timeout hangs CERT and further single commands
- * fill the HSA queue; once full the next submit blocks before it publishes
- * anything (nothing reaches CERT). When the reset fires, that not-yet-published
- * command is returned -EAGAIN, which the shim surfaces as a system_error - the
- * caller may safely resubmit it. Deterministic - the blocked submit is unblocked
- * only by the reset.
+ * A not-yet-published submit is transparently retried across a TDR reset.
+ * bad_timeout hangs CERT and further single commands fill the HSA queue; once
+ * full the next submit blocks before it publishes anything (nothing reaches
+ * CERT). When the reset fires, the driver waits it out inside the submit and
+ * republishes onto the recreated context, so NO -EAGAIN reaches the shim and
+ * userspace never has to resubmit. Verify no submit throws, and that a command
+ * published after the reset completes - proving the ctx recovered.
+ * Deterministic - the blocked submit is unblocked only by the reset.
  */
 void
-TEST_tdr_single_submit_eagain(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+TEST_tdr_not_yet_published_retried(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
   hw_ctx hwctx{dev, "good"};
@@ -1146,20 +1148,29 @@ TEST_tdr_single_submit_eagain(device::id_type id, std::shared_ptr<device>& sdev,
   // Faulting job hangs CERT so the queue can't drain.
   hwq->submit_command(bad.get_bos()[IO_TEST_BO_CMD].tbo.get()->get());
 
-  // Fill the queue fast; once full the next submit blocks before it publishes
-  // anything, and the reset returns it -EAGAIN (surfaced as a system_error).
-  bool got_eagain = false;
+  // Fill the queue; once full a submit blocks before publishing. The TDR reset
+  // (triggered by the hung bad_timeout) recreates the ctx and the driver
+  // republishes the blocked command onto it - no submit should throw -EAGAIN.
   try {
     for (auto& g : goods)
       hwq->submit_command(g->get_bos()[IO_TEST_BO_CMD].tbo.get()->get());
   } catch (const std::system_error& e) {
     int code = e.code().value();
-    if (code != EAGAIN && code != -EAGAIN)
-      throw;
-    got_eagain = true;
+    if (code == EAGAIN || code == -EAGAIN)
+      throw std::runtime_error("submit returned -EAGAIN; the driver should wait "
+                               "out the reset and republish transparently");
+    throw;
   }
-  if (!got_eagain)
-    throw std::runtime_error("expected an in-flight submit to fail with -EAGAIN");
+
+  // The last command is published after the reset; it must complete, proving the
+  // ctx recovered transparently rather than the submit being rejected.
+  auto *last_bo = goods.back()->get_bos()[IO_TEST_BO_CMD].tbo.get();
+  hwq->wait_command(last_bo->get(), 0);
+  auto state = reinterpret_cast<ert_packet *>(last_bo->map())->state;
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("recovered submit state=") +
+      std::to_string(state) + ", expected COMPLETED=" +
+      std::to_string(ERT_CMD_STATE_COMPLETED));
 }
 
 /**
