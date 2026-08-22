@@ -12,6 +12,7 @@
 #include <linux/minmax.h>
 #include <linux/overflow.h>
 #include <linux/sched/mm.h>
+#include <linux/timekeeping.h>
 #include <linux/types.h>
 
 #include "aie.h"
@@ -153,33 +154,21 @@ static void aie4_unlink_cert_comp(struct amdxdna_hwctx *hwctx)
 	/* unlink hwctx_priv link with cert_comp */
 	WRITE_ONCE(priv->cert_comp, NULL);
 
-	/*
-	 * A cached ctx error means this disconnect is a TDR reset, not a suspend,
-	 * so bump ctx_error_gen to let wait_till_seq_completed() tell the two apart.
-	 * Placement matters: after the unlink (cert_comp == NULL) so a late
-	 * aie4_get_cert_comp() sees NULL and bails with -EAGAIN, and before
-	 * wake_up_all() so a woken waiter is guaranteed to observe the new value.
-	 * A parked waiter snapshotted ctx_error_gen before sleeping and the count
-	 * only increases, so it reads a changed value and returns -EAGAIN. A suspend
-	 * caches no error, so it does not bump; the waiter re-acquires the recreated
-	 * cert_comp and continues.
-	 */
 	if (cert_comp) {
-		if (priv->cached_ctx_error_valid)
-			WRITE_ONCE(priv->ctx_error_gen,
-				   READ_ONCE(priv->ctx_error_gen) + 1);
 		wake_up_all(&cert_comp->waitq);
 		kref_put(&cert_comp->kref, cert_comp_release);
 	}
 }
 
 /*
- * A TDR reset bumps ctx_error_gen in aie4_unlink_cert_comp(). Compare the current
- * value against a generation captured before an operation to tell whether a reset
- * landed since - the single predicate the submit/wait paths use to distinguish a
- * TDR (unwind with -EAGAIN) from a benign suspend/resume (retry).
+ * A TDR reset stamps ctx_error_gen in aie4_hwctx_cleanup_running_jobs() (which
+ * runs on reset/teardown but not on suspend). Compare the current value against a
+ * generation captured before an operation to tell whether a reset landed since -
+ * the single predicate the submit path uses to distinguish a TDR (unwind with
+ * -ECONNRESET) from a benign suspend/resume (waited out inline in
+ * wait_till_connected_hsa_not_full()).
  */
-static bool ctx_reset_since(struct amdxdna_hwctx_priv *priv, u32 gen)
+static bool ctx_reset_since(struct amdxdna_hwctx_priv *priv, u64 gen)
 {
 	return READ_ONCE(priv->ctx_error_gen) != gen;
 }
@@ -309,11 +298,6 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 			   resp.doorbell_offset);
 		mutex_unlock(&priv->io_lock);
 		hwctx->doorbell_offset = CTX_INVALID_DOORBELL;
-		/*
-		 * On a resume recreate a submitter may be parked in
-		 * wait_till_ctx_reconnected() waiting for the doorbell to come back;
-		 * wake it now that a valid doorbell is published.
-		 */
 		wake_up_all(&priv->job_list_wq);
 	} else {
 		/* User-mode submission: hand the doorbell to user space to ring. */
@@ -336,8 +320,8 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags
 	 * Drop the doorbell under io_lock, before the firmware destroy, so a
 	 * concurrent submitter - which reads and rings the doorbell under io_lock,
 	 * holding only hwctx_srcu, not dev_lock - either observes the disconnect
-	 * and bails with -EAGAIN, or finishes its ring on the still-valid doorbell and
-	 * moves its job onto running_job_list before this proceeds (so the reset
+	 * and blocks until reconnect, or finishes its ring on the still-valid doorbell
+	 * and moves its job onto running_job_list before this proceeds (so the reset
 	 * drain reaps it). This prevents ringing an INVALID/dead doorbell and orphaning
 	 * a late-submitted job past the drain. doorbell_base is a device-level
 	 * managed mapping; just poison the pointer. User-mode has no driver doorbell.
@@ -588,6 +572,16 @@ int aie4_hwctx_init(struct amdxdna_hwctx *hwctx)
 	if (priv->kernel_submit) {
 		/* kzalloc zeroes to NULL; poison to INVALID until create publishes it. */
 		WRITE_ONCE(priv->doorbell_addr, DOORBELL_ADDR_INVALID);
+		/*
+		 * Seed ctx_error_gen non-zero so a submitter's lazily-captured baseline
+		 * is never 0 (0 means "not captured"); otherwise the first reset on a
+		 * fresh ctx would be masked - the parked tail would re-capture the new
+		 * stamp and publish across the reset. Only aie4_hwctx_cleanup_running_jobs()
+		 * advances it thereafter; suspend/resume and TDR recreate go through
+		 * aie4_hwctx_create() and leave it untouched, so they are not mistaken
+		 * for a reset. Set before any submitter can run (ctx not yet published).
+		 */
+		priv->ctx_error_gen = ktime_get_ns();
 		mutex_init(&priv->io_lock);
 		INIT_LIST_HEAD(&priv->pending_job_list);
 		INIT_LIST_HEAD(&priv->running_job_list);
@@ -799,13 +793,11 @@ static u64 publish_cmd(struct amdxdna_hwctx *hwctx)
 
 static int wait_till_seq_completed(struct amdxdna_hwctx *hwctx, u64 seq)
 {
-	struct amdxdna_hwctx_priv *priv = hwctx->priv;
-	u32 err_gen = READ_ONCE(priv->ctx_error_gen);
 	struct cert_comp *cert_comp;
 	int ret;
 
 	/*
-	 * Freezable + interruptible: the submit path (wait_till_hsa_not_full)
+	 * Freezable + interruptible: the submit path (wait_till_connected_hsa_not_full)
 	 * reaches here while holding hwctx_srcu, and ctx teardown blocks on
 	 * synchronize_srcu(), so a signal (e.g. the app being killed) must be
 	 * able to unwind the wait - otherwise a full queue with a silent CERT
@@ -813,17 +805,6 @@ static int wait_till_seq_completed(struct amdxdna_hwctx *hwctx, u64 seq)
 	 * TASK_FREEZABLE lets the freezer suspend this wait in place during
 	 * S3/S4 instead of aborting the suspend.  Harmless for the job worker
 	 * kthread (never gets a signal; simply freezes/thaws around it).
-	 *
-	 * On wake, classify with the kref still held so check_cert_comp_linked()
-	 * stays ABA-safe. ctx_error_gen wins first: a TDR reset bumps it (in
-	 * aie4_unlink_cert_comp(), before the wake) even when firmware relinks the
-	 * same cert_comp object, which the pointer compare cannot see. A still-linked
-	 * comp with no ctx error is a real completion. Any other disconnect with no
-	 * ctx error is a benign suspend/resume; it also returns -EAGAIN, and the
-	 * caller waits for reconnection and retries (see submit_job_cmds()) rather
-	 * than re-waiting in place. The entry snapshot needs no lock: wait_event's
-	 * schedule() commits this read before any teardown can wake us, and
-	 * ctx_error_gen only ever increases.
 	 */
 	cert_comp = aie4_get_cert_comp(hwctx);
 	if (!cert_comp)
@@ -835,46 +816,63 @@ static int wait_till_seq_completed(struct amdxdna_hwctx *hwctx, u64 seq)
 		aie4_put_cert_comp(cert_comp);
 		return ret;	/* -ERESTARTSYS: signal on the submit path */
 	}
-	if (ctx_reset_since(priv, err_gen))
-		ret = -EAGAIN;			/* TDR reset */
-	else if (check_cert_comp_linked(hwctx, cert_comp))
+
+	if (check_cert_comp_linked(hwctx, cert_comp))
 		ret = 0;			/* real completion */
 	else
-		ret = -EAGAIN;			/* benign suspend/resume disconnect */
+		ret = -EAGAIN;			/* disconnect (suspend or TDR) */
 
 	aie4_put_cert_comp(cert_comp);
 	return ret;
 }
 
-static int wait_till_hsa_not_full(struct amdxdna_hwctx *hwctx)
-{
-	u64 wi = READ_ONCE(hwctx->priv->write_index);
-
-	if (wi < CTX_MAX_CMDS)
-		return 0;
-
-	return wait_till_seq_completed(hwctx, wi - CTX_MAX_CMDS);
-}
-
 /*
- * A non-TDR disconnect (a concurrent suspend) poisons doorbell_addr mid-submit;
- * sleep until resume republishes a valid doorbell (aie4_hwctx_create() sets it
- * under io_lock, then wakes job_list_wq) or a TDR advances ctx_error_gen; a
- * signal unwinds.  Gate on doorbell_addr - exactly what submit_one_cmd()
- * re-checks - so a wake means the retry can make progress: cert_comp is linked
- * before the doorbell in create(), so waiting on cert_comp instead could wake
- * with the doorbell still INVALID and spin.  Suspend/resume and TDR are
- * serialized under dev_lock and the submit holds a runtime-PM ref, so while
- * parked here only resume can fire.  Returns 0 (reconnected or reset) or
- * -ERESTARTSYS (signal).  Caller must not hold io_lock.
+ * Block until the HSA queue has a free slot AND the ctx is connected (doorbell
+ * valid), then return with io_lock held so the caller can publish. Called with
+ * io_lock held; io_lock is dropped across each sleep and re-acquired. A slot
+ * frees when CERT drains the oldest command (wait_till_seq_completed); a
+ * disconnect (suspend or the start of a TDR reset) is waited out on the doorbell
+ * (wait_event_freezable) rather than re-polled, so it never spins. Loops until
+ * both conditions hold; returns 0, or -ERESTARTSYS on a signal.
+ *
+ * The doorbell wait is intentionally unbounded and has no give-up/abort escape:
+ * it makes suspend/resume and a normal (recreate-succeeds) TDR transparent to
+ * userspace, and at wait time a transient disconnect cannot be told apart from a
+ * terminal one (a recreate that fails later) without breaking that transparency.
+ * If a reset's aie4_hwctx_create() fails and the ctx never reconnects, this
+ * sleeps until a signal; being interruptible (wait_event_freezable), killing the
+ * app unwinds it and drops hwctx_srcu, so ctx destroy (synchronize_srcu) is only
+ * blocked until then, not forever. Returning an error instead would be worse:
+ * -EAGAIN means "resubmit" (userspace would loop) and no errno cleanly marks a
+ * permanently dead ctx without also firing on benign suspend/resume disconnects.
  */
-static int wait_till_ctx_reconnected(struct amdxdna_hwctx *hwctx, u32 err_gen)
+static int wait_till_connected_hsa_not_full(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	u64 wi = READ_ONCE(priv->write_index);
+	bool hsa_not_full = !!(wi < CTX_MAX_CMDS);
 
-	return wait_event_freezable(priv->job_list_wq,
-				    READ_ONCE(priv->doorbell_addr) != DOORBELL_ADDR_INVALID ||
-				    ctx_reset_since(priv, err_gen));
+	do {
+		int ret;
+
+		mutex_unlock(&priv->io_lock);
+		if (!hsa_not_full) {
+			ret = wait_till_seq_completed(hwctx, wi - CTX_MAX_CMDS);
+			if (ret && ret != -EAGAIN) {
+				mutex_lock(&priv->io_lock);
+				return ret;
+			}
+			if (!ret)
+				hsa_not_full = true;
+		}
+		ret = wait_event_freezable(priv->job_list_wq,
+					   READ_ONCE(priv->doorbell_addr) !=
+					   DOORBELL_ADDR_INVALID);
+		mutex_lock(&priv->io_lock);
+		if (ret)
+			return ret;
+	} while (!hsa_not_full || READ_ONCE(priv->doorbell_addr) == DOORBELL_ADDR_INVALID);
+	return 0;
 }
 
 static int fill_indirect_pkt(struct amdxdna_hwctx_priv *priv, u64 slot_idx,
@@ -955,7 +953,7 @@ static void fill_direct_pkt(struct amdxdna_hwctx_priv *priv, u64 slot_idx,
  */
 static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 			  struct amdxdna_gem_obj *cmd_abo, bool last_of_chain,
-			  u64 *seq, u32 job_err_gen)
+			  u64 *seq, u64 *err_gen)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -996,37 +994,32 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 	}
 
 	/*
-	 * The queue may be full; the wait sleeps until CERT drains it.  Drop
-	 * io_lock across the sleep so the job worker (and other submitters) can
-	 * make progress, then re-acquire and re-check the ctx is still live.
+	 * Block until a queue slot is free and the ctx is connected (io_lock is
+	 * dropped across the sleeps inside and re-acquired). The only failure is a
+	 * signal interrupting the wait (-ERESTARTSYS), e.g. the app being killed.
 	 */
-	mutex_unlock(&priv->io_lock);
-	ret = wait_till_hsa_not_full(hwctx);
-	mutex_lock(&priv->io_lock);
-	if (ret)
+	ret = wait_till_connected_hsa_not_full(hwctx);
+	if (ret) {
+		XDNA_DBG(xdna, "Wait for queue slot / ctx reconnect interrupted, ret %d", ret);
 		return ret;
-	/*
-	 * doorbell_addr is poisoned to INVALID under io_lock on any disconnect;
-	 * INVALID => the ctx is disconnected. Nothing has been published for this
-	 * command yet, so return -EAGAIN and let the caller classify by ctx_error_gen:
-	 * a TDR reset (gen advanced) aborts a published prefix, while a suspend (gen
-	 * unchanged) waits for resume and retries the same sub-command.
-	 */
-	if (READ_ONCE(priv->doorbell_addr) == DOORBELL_ADDR_INVALID)
-		return -EAGAIN;
+	}
 
 	/*
+	 * Sample the ctx error generation lazily on the first published sub-command
+	 * (*err_gen == 0 means not captured yet), after the doorbell-valid check.
 	 * The doorbell gate only rejects a teardown in progress; a TDR reset that
 	 * already completed during the io_lock drop above has restored doorbell_addr
-	 * (no longer INVALID) and emptied the queue, so it would pass the gate.
-	 * job_err_gen is the generation sampled once under io_lock before this job
-	 * published anything; if it advanced, a reset landed somewhere during this
-	 * (possibly multi-sub-command) submission, so bail with -EAGAIN rather than
-	 * publish the remainder onto the recreated context. This makes the whole
-	 * chain atomic against a reset, not just each parked HSA-full wait.
+	 * and emptied the queue, so it would pass the gate. If ctx_error_gen advanced
+	 * against the captured baseline, a reset landed somewhere during this
+	 * (possibly multi-sub-command) submission, so bail with -ECONNRESET rather
+	 * than publish the remainder onto the recreated context. The baseline is
+	 * seeded non-zero at ctx init, so the *err_gen == 0 sentinel never collides
+	 * with a real captured value.
 	 */
-	if (ctx_reset_since(priv, job_err_gen))
-		return -EAGAIN;
+	if (*err_gen == 0)
+		*err_gen = READ_ONCE(priv->ctx_error_gen);
+	else if (ctx_reset_since(priv, *err_gen))
+		return -ECONNRESET;
 
 	slot_idx = priv->write_index & (CTX_MAX_CMDS - 1);
 	if (chained) {
@@ -1286,9 +1279,10 @@ static void aie4_hwctx_reset_hsa_idx(struct amdxdna_hwctx *hwctx)
  * faulting one.
  *
  * The caller must have already disconnected the context (aie4_hwctx_destroy()):
- * that keeps the running list stable and makes the pending submitters self-unwind
- * via the doorbell_addr==INVALID gate (-EAGAIN to resubmit, or ABORT for a partial
- * chain), so only the parked running list is drained here. destroy() also quiesces
+ * that keeps the running list stable; pending submitters are parked on the
+ * doorbell (they resume after the recreate, and a published-prefix chain then
+ * unwinds with -ECONNRESET), so only the parked running list is drained here.
+ * destroy() also quiesces
  * the worker, so the cancel_work_sync() below is a defensive no-op in that expected
  * ordering.
  */
@@ -1305,6 +1299,18 @@ void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx, bool errored)
 	 * touching the running list before we drain it.
 	 */
 	cancel_work_sync(&priv->job_work);
+
+	/*
+	 * Record this reset with a fresh, non-zero timestamp so a concurrent
+	 * submitter's ctx_reset_since() fires and it does not publish the rest of
+	 * its chain across the reset. No lock: the caller has already disconnected
+	 * the ctx (doorbell_addr == INVALID under io_lock), so this store is ordered
+	 * after any submitter's io_lock-held ctx_error_gen read and cannot race it;
+	 * the recreate that follows re-validates doorbell_addr under io_lock, which
+	 * publishes this store to any submitter that later observes a live doorbell.
+	 */
+	WRITE_ONCE(priv->ctx_error_gen, ktime_get_ns());
+
 	while ((job = next_running_job(hwctx))) {
 		if (timeout) {
 			job_timeout(job);
@@ -1379,21 +1385,20 @@ void aie4_hwctx_resume_jobs(struct amdxdna_hwctx *hwctx)
  * command_count and validate it against the payload size before walking the
  * handle array so a bogus count cannot drive an out-of-bounds read.
  */
-static int submit_job_cmds(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
-			   u32 err_gen)
+static int submit_job_cmds(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
 {
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_cmd_chain *payload;
 	u32 op = amdxdna_cmd_get_op(cmd_abo);
 	u32 payload_len, ccnt;
+	u64 err_gen = 0;
 	int ret;
 	u32 i;
 
 	/* Single cmd. */
 	if (op == ERT_START_DPU) {
-		ret = submit_one_cmd(hwctx, cmd_abo, true, &job->seq, err_gen);
+		ret = submit_one_cmd(hwctx, cmd_abo, true, &job->seq, &err_gen);
 		if (!ret)
 			job->aie4_job_state = AIE4_JOB_STATE_SUBMITTED;
 		return ret;
@@ -1412,7 +1417,7 @@ static int submit_job_cmds(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job
 	 * not per sub-command - so a chain's own entries never free a queue slot until
 	 * the whole chain has been published and run. A chain longer than the queue
 	 * could therefore never publish its tail: it would block forever in
-	 * wait_till_hsa_not_full() waiting for a slot that only frees at chain end.
+	 * wait_till_connected_hsa_not_full() waiting for a slot that only frees at chain end.
 	 * Reject ccnt > CTX_MAX_CMDS. Also validate against the payload size before
 	 * walking the handle array so a bogus count cannot drive an out-of-bounds read.
 	 */
@@ -1433,22 +1438,14 @@ static int submit_job_cmds(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job
 			break;
 		}
 		/*
-		 * A non-TDR -EAGAIN (ctx_error_gen unchanged) means a concurrent
-		 * suspend poisoned the doorbell before this sub-command was published.
-		 * Wait for resume to republish the doorbell, then retry the same
-		 * sub-command so the chain completes rather than aborting a published
-		 * prefix. A TDR (gen advanced) or a signal falls out and unwinds the
-		 * chain (aie4_cmd_submit aborts the prefix).
+		 * submit_one_cmd() blocks in wait_till_connected_hsa_not_full() until the
+		 * ctx is connected and a slot is free, so a concurrent suspend/disconnect
+		 * is waited out inline rather than returned here. It returns -ECONNRESET
+		 * if a TDR reset advanced ctx_error_gen after this chain published a prefix
+		 * (unwind), -ERESTARTSYS on a signal, or a validation error. Break on any;
+		 * a published prefix is then aborted by the job worker (see below).
 		 */
-		do {
-			ret = submit_one_cmd(hwctx, abo, i + 1 == ccnt, &job->seq,
-					     err_gen);
-			if (ret != -EAGAIN || ctx_reset_since(priv, err_gen))
-				break;
-			mutex_unlock(&priv->io_lock);
-			ret = wait_till_ctx_reconnected(hwctx, err_gen);
-			mutex_lock(&priv->io_lock);
-		} while (!ret);
+		ret = submit_one_cmd(hwctx, abo, i + 1 == ccnt, &job->seq, &err_gen);
 		amdxdna_gem_put_obj(abo);
 		if (ret)
 			break;
@@ -1456,6 +1453,15 @@ static int submit_job_cmds(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job
 	}
 	if (i == ccnt)
 		job->aie4_job_state = AIE4_JOB_STATE_SUBMITTED;
+
+	/*
+	 * As long as at least one sub-command was published, return success so the
+	 * caller enqueues the job on the running list; the job worker then reaps the
+	 * published prefix and reports the partial chain as failed (ABORT). Only when
+	 * nothing was published (i == 0) is the error returned to the caller.
+	 */
+	if (i > 0)
+		return 0;
 
 	return ret;
 }
@@ -1511,7 +1517,6 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct ww_acquire_ctx acquire_ctx;
 	struct amdxdna_gem_obj *abo;
-	u32 err_gen;
 	u32 op;
 	int ret;
 	int i;
@@ -1590,10 +1595,10 @@ retry:
 	 * suspend a parked submitter in place across S3/S4 rather than aborting
 	 * the suspend; still interruptible so a signal (app exit/kill/^C) unwinds
 	 * it and does not keep ctx teardown (synchronize_srcu) blocked.  No
-	 * disconnect check is needed here: submit_one_cmd() gates on doorbell_addr
-	 * under io_lock, so a submit onto a torn-down ctx fails with -EAGAIN without
-	 * publishing, and a TDR reset drains parked submitters via that gate plus
-	 * the head-of-list wake.
+	 * disconnect check is needed here: submit_one_cmd() waits on doorbell_addr in
+	 * wait_till_connected_hsa_not_full(), so a submit onto a torn-down ctx blocks
+	 * until reconnect instead of publishing onto a dead doorbell (a published-
+	 * prefix chain then unwinds with -ECONNRESET; a signal unwinds it meanwhile).
 	 */
 	enqueue_pending_job(hwctx, job);
 	ret = wait_event_freezable(priv->job_list_wq,
@@ -1604,63 +1609,30 @@ retry:
 	}
 
 	mutex_lock(&priv->io_lock);
-	/*
-	 * Sample the ctx error generation once under io_lock, before publishing
-	 * anything. submit_one_cmd() re-checks it after each per-sub-command io_lock
-	 * drop, and the partial-chain classification below reuses it, so a TDR reset
-	 * landing anywhere in this submission is caught and the chain is never split
-	 * across the reset.
-	 */
-	err_gen = READ_ONCE(priv->ctx_error_gen);
-	ret = submit_job_cmds(hwctx, job, err_gen);
-	if (job->aie4_job_state == AIE4_JOB_STATE_PENDING) {
+	ret = submit_job_cmds(hwctx, job);
+	if (ret) {
 		/*
-		 * No command was published; nothing for the worker to reap. Return
-		 * the error as-is: on a TDR reset this is -EAGAIN, and since the
-		 * command never reached CERT the caller can safely resubmit it on
-		 * the recreated context.
+		 * No command was published; nothing for the worker to reap. Nothing
+		 * reached CERT, so ret is a validation error (bad payload/BO) or a signal
+		 * (-ERESTARTSYS); return it as-is. A disconnect/reset does not reach here:
+		 * submit_one_cmd() waits it out, and a reset that lands after a prefix is
+		 * published takes the success path below.
 		 */
-		list_del(&job->aie4_job_list);
-		update_pending_head(priv);
 		mutex_unlock(&priv->io_lock);
-		/* Release the next pending submitter. */
-		wake_up_all(&priv->job_list_wq);
+		cancel_pending_job(hwctx, job);
 		goto signal_fence;
 	}
 
-	if (job->aie4_job_state == AIE4_JOB_STATE_SUBMITTING &&
-	    ret == -EAGAIN && ctx_reset_since(priv, err_gen)) {
-		/*
-		 * A chain published a prefix but a TDR reset tore the context down
-		 * mid-stream (ctx_error_gen advanced): submit_one_cmd hit the poisoned
-		 * doorbell or its per-sub-command ctx_error_gen re-check. A non-TDR
-		 * suspend is retried to completion inside submit_job_cmds(), so it does
-		 * not reach here. The prefix may already have executed on the AIE, so -
-		 * unlike a not-yet-published command - it cannot be safely resubmitted.
-		 * Report it ABORTed (a completion the app observes) rather than -EAGAIN.
-		 * Complete it inline rather than moving it to the running list: the reset
-		 * drain may already have run, so the worker might never reap it.
-		 * reset_umq_indices() advanced read_index past the prefix, so leave the
-		 * queue alone here.
-		 */
-		list_del(&job->aie4_job_list);
-		update_pending_head(priv);
-		*seq = job->seq;
-		mutex_unlock(&priv->io_lock);
-		wake_up_all(&priv->job_list_wq);
-		amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_ABORT);
-		atomic64_inc(&hwctx->job_submit_cnt);
-		job_done(job);
-		return 0;
-	}
-
 	/*
-	 * At least one command is in flight (SUBMITTED, or a chain that failed
-	 * mid-publish while the context was still connected - e.g. a bad
-	 * sub-command BO); move the job to the running list so the worker waits on
-	 * the last published seq and reaps it.  A partially-submitted chain stays
-	 * at AIE4_JOB_STATE_SUBMITTING so the worker reports it as failed after
-	 * draining its published prefix.
+	 * At least one command is in flight: either SUBMITTED, or a chain that
+	 * failed mid-publish (a bad sub-command BO, or a TDR reset that advanced
+	 * ctx_error_gen so submit_one_cmd() bailed with -ECONNRESET after publishing
+	 * a prefix). Move the job to the running list so the worker waits on the last
+	 * published seq and reaps it; a partial chain stays at
+	 * AIE4_JOB_STATE_SUBMITTING so the worker aborts it after draining the
+	 * prefix. On a TDR the prefix may already have executed on the AIE, so it
+	 * cannot be safely resubmitted - reporting it aborted (a completion the app
+	 * observes) is correct.
 	 */
 	list_move_tail(&job->aie4_job_list, &priv->running_job_list);
 	update_pending_head(priv);
