@@ -69,7 +69,7 @@ void TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_
 void TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_tdr_timeout_and_abort(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_tdr_partial_chain_abort(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
-void TEST_tdr_single_submit_eagain(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_tdr_not_yet_published_retried(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_io_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -1627,8 +1627,8 @@ std::vector<test_case> test_list {
   test_case{ "io test TDR: partial chain interrupted mid-publish is aborted", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_tdr_partial_chain_abort, {}
   },
-  test_case{ "io test TDR: not-yet-published submit returns -EAGAIN", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_tdr_single_submit_eagain, {}
+  test_case{ "io test TDR: not-yet-published submit is retried across reset", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_tdr_not_yet_published_retried, {}
   },
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
