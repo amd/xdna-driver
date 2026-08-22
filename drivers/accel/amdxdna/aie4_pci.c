@@ -1509,6 +1509,7 @@ pci_disable:
  *
  *                              | PF  | VF  | Classic
  * -----------------------------|-----|-----|--------
+ * -> dpt_reset_prepare         |  Y  |  Y  |   Y
  * -> hwctx_disconnect_all      |  -  |  Y  |   Y
  * -> mailbox_fini              |  Y  |  Y  |   Y
  * -> async_events_free         |  -  |  Y  |   Y
@@ -1527,6 +1528,19 @@ pci_disable:
  *      <- async_events_alloc   |  -  |  Y  |   Y
  * <- restore_sriov             |  Y  |  -  |   -
  * <- hwctx_reconnect_all       |  -  |  Y  |   Y
+ * <- dpt_reset_done            |  Y  |  Y  |   Y
+ *
+ * dpt_reset_prepare runs first: it sends no firmware messages, so it is
+ * safe even when the firmware is unresponsive, and it releases any parked
+ * watcher and stops the DPT poll timer before the rest of the teardown
+ * runs. Anything the firmware logs after that snapshot is lost, but no
+ * step below it sends a command, so there is nothing left to report. It
+ * mirrors dpt_reset_done, which cannot move earlier because
+ * amdxdna_dpt_resume_chan() re-attaches the ring over the mailbox.
+ *
+ * dpt_reset_done runs last and only when everything before it succeeded,
+ * so a failed reset leaves the DPT channels suspended rather than active
+ * on firmware that is not running.
  *
  * (*) fw_load is required but currently skipped for PF and Classic due to a
  *     firmware bug where reloading FW after FLR causes a hang; see
@@ -1538,6 +1552,9 @@ static void aie4_pf_reset_prepare(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	/* Release parked DPT watchers and stop the poll timer; see above. */
+	amdxdna_dpt_reset_prepare(xdna);
 
 	/*
 	 * PF has no hwctx. Just tear down the mailbox so no firmware
@@ -1565,6 +1582,15 @@ static void aie4_pf_reset_done(struct amdxdna_dev *xdna)
 	if (ret)
 		goto hw_stop;
 
+	/*
+	 * Restart DPT last and only here: on any failure above the channels
+	 * stay SUSPENDED, which turns a would-be watcher away with
+	 * -ESHUTDOWN rather than parking it on firmware that is not running.
+	 */
+	ret = amdxdna_dpt_reset_done(xdna);
+	if (ret)
+		XDNA_WARN(xdna, "DPT restart after reset failed: %d", ret);
+
 	XDNA_INFO(xdna, "reset done, service online");
 	return;
 
@@ -1579,6 +1605,9 @@ static void aie4_vf_reset_prepare(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	/* Release parked DPT watchers and stop the poll timer; see above. */
+	amdxdna_dpt_reset_prepare(xdna);
 
 	aie4_hwctx_disconnect_all(ndev);
 	aie4_mailbox_fini(ndev);
@@ -1607,6 +1636,15 @@ static void aie4_vf_reset_done(struct amdxdna_dev *xdna)
 	if (ret)
 		goto hw_clear;
 
+	/*
+	 * Restart DPT last and only here: on any failure above the channels
+	 * stay SUSPENDED, which turns a would-be watcher away with
+	 * -ESHUTDOWN rather than parking it on firmware that is not running.
+	 */
+	ret = amdxdna_dpt_reset_done(xdna);
+	if (ret)
+		XDNA_WARN(xdna, "DPT restart after reset failed: %d", ret);
+
 	XDNA_INFO(xdna, "reset done, service online");
 	return;
 
@@ -1622,6 +1660,9 @@ static void aie4_classic_reset_prepare(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	/* Release parked DPT watchers and stop the poll timer; see above. */
+	amdxdna_dpt_reset_prepare(xdna);
 
 	/*
 	 * In this situation, the firmware might be not responsive, thus
@@ -1657,6 +1698,15 @@ static void aie4_classic_reset_done(struct amdxdna_dev *xdna)
 	ret = aie4_hwctx_reconnect_all(ndev);
 	if (ret)
 		goto hw_clear;
+
+	/*
+	 * Restart DPT last and only here: on any failure above the channels
+	 * stay SUSPENDED, which turns a would-be watcher away with
+	 * -ESHUTDOWN rather than parking it on firmware that is not running.
+	 */
+	ret = amdxdna_dpt_reset_done(xdna);
+	if (ret)
+		XDNA_WARN(xdna, "DPT restart after reset failed: %d", ret);
 
 	XDNA_INFO(xdna, "reset done, service online");
 	return;
