@@ -938,8 +938,16 @@ static int amdxdna_dpt_suspend_chan(struct amdxdna_dev *xdna,
 	return 0;
 }
 
+/*
+ * Re-arm a SUSPENDED channel. @fresh selects which side of the firmware
+ * contract applies: PM suspend leaves the firmware ring state intact and
+ * resumes from the persisted offsets (@fresh false), whereas an FLR
+ * wipes only the firmware's in-SRAM state -- the footer cursors survive
+ * it and would still be resumed from -- so the ring is restarted from
+ * scratch (@fresh true).
+ */
 static int amdxdna_dpt_resume_chan(struct amdxdna_dev *xdna,
-				   struct amdxdna_dpt_chan *chan)
+				   struct amdxdna_dpt_chan *chan, bool fresh)
 {
 	struct amdxdna_dpt *dpt;
 	int ret;
@@ -962,9 +970,33 @@ static int amdxdna_dpt_resume_chan(struct amdxdna_dev *xdna,
 	mutex_unlock(&dpt->timer_lock);
 
 	/*
-	 * Resubmit the same buffer without clearing it. The handle is
-	 * already reachable through xdna->fw_*, so the backend's init
-	 * hook can reach it for msi/io_base storage.
+	 * Restart the ring the way amdxdna_dpt_publish() does at enable
+	 * time: zero the buffer, which also clears the footer state the
+	 * firmware would otherwise resume from (see amdxdna_dpt_suspend_chan),
+	 * and drop the host cursors with it. Doing this while the channel is
+	 * still SUSPENDED is what makes it safe: no reader can be admitted,
+	 * suspend already drained the ones that were, and both the poll
+	 * timer and the worker are stopped, so nothing else is looking at
+	 * the buffer or at tail / head right now.
+	 *
+	 * PMFW resets the firmware during an FLR with no driver message, so
+	 * the firmware that comes back has no record of the attachment, yet
+	 * the cursors it persisted in the footer survive and it resumes
+	 * incrementing them. The driver cannot vouch for ring contents
+	 * behind an inherited cursor, so a re-attached buffer starts zeroed.
+	 */
+	if (fresh) {
+		memset(to_cpu_addr(dpt->buf, 0), 0, to_buf_size(dpt->buf));
+		drm_clflush_virt_range(to_cpu_addr(dpt->buf, 0),
+				       to_buf_size(dpt->buf));
+		WRITE_ONCE(dpt->tail, 0);
+		dpt->head = 0;
+	}
+
+	/*
+	 * Resubmit the same buffer. The handle is already reachable through
+	 * xdna->fw_*, so the backend's init hook can reach it for msi/io_base
+	 * storage.
 	 */
 	ret = amdxdna_dpt_msg_init(dpt);
 	if (ret) {
@@ -1169,8 +1201,50 @@ int amdxdna_dpt_resume(struct amdxdna_dev *xdna)
 	 * aggregate the result so a failure on one does not skip the other;
 	 * each channel is a safe no-op when it is not active.
 	 */
-	ret = amdxdna_dpt_resume_chan(xdna, &xdna->fw_log);
-	ret2 = amdxdna_dpt_resume_chan(xdna, &xdna->fw_trace);
+	ret = amdxdna_dpt_resume_chan(xdna, &xdna->fw_log, false);
+	ret2 = amdxdna_dpt_resume_chan(xdna, &xdna->fw_trace, false);
+
+	return ret ? ret : ret2;
+}
+
+/*
+ * Quiesce both DPT channels for the duration of an FLR.
+ *
+ * Nothing in the reset path re-issues the per-channel firmware attach
+ * (amdxdna_dpt_msg_init), so once the reset firmware comes up it has no
+ * record of the rings and stops advancing their tails. A watcher parked
+ * in amdxdna_dpt_get_data() is woken only by amdxdna_dpt_update_tail()
+ * seeing that tail move, or by a status flip out of ACTIVE, and a reset
+ * performs neither: it sleeps until it is killed, pinning a runtime PM
+ * reference the whole time.
+ *
+ * Reuse the PM suspend path, which sends no mailbox traffic and so is
+ * safe even when the firmware is already unresponsive. It flips status
+ * before waking, so every watcher it releases re-evaluates
+ * amdxdna_dpt_watch_ready() and leaves; the synchronize_srcu() inside it
+ * waits only for readers its own wake_up_all() can release.
+ */
+int amdxdna_dpt_reset_prepare(struct amdxdna_dev *xdna)
+{
+	return amdxdna_dpt_suspend(xdna);
+}
+
+/*
+ * Bring the DPT channels back after an FLR, restarting each ring rather
+ * than resuming it.
+ *
+ * Callers must invoke this only once the reset has otherwise succeeded.
+ * Leaving a channel SUSPENDED is the safe outcome: amdxdna_dpt_enter()
+ * rejects that state, so a watcher gets -ESHUTDOWN instead of parking on
+ * firmware that is not running, which is the very failure this is meant
+ * to prevent. The same holds when the firmware attach itself fails.
+ */
+int amdxdna_dpt_reset_done(struct amdxdna_dev *xdna)
+{
+	int ret, ret2;
+
+	ret = amdxdna_dpt_resume_chan(xdna, &xdna->fw_log, true);
+	ret2 = amdxdna_dpt_resume_chan(xdna, &xdna->fw_trace, true);
 
 	return ret ? ret : ret2;
 }
