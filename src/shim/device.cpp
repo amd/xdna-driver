@@ -1813,6 +1813,38 @@ struct resource_info
   }
 };
 
+struct npu_load_info
+{
+  using result_type = query::npu_load::result_type;
+
+  // FW snapshot count today; buffer must fit driver-reported num_activity_counters.
+  static constexpr uint32_t k_max_activity_counters = 8;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    if (key != key_type::npu_load)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const size_t buf_size = offsetof(amdxdna_drm_query_aie_load, activity_counters) +
+      k_max_activity_counters * sizeof(uint64_t);
+    std::vector<char> buf(buf_size);
+    auto* load = reinterpret_cast<amdxdna_drm_query_aie_load*>(buf.data());
+    load->sample_duration_ms = 0;
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_AIE_LOAD,
+      .buffer_size = static_cast<uint32_t>(buf_size),
+      .buffer = reinterpret_cast<uintptr_t>(load),
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
+
+    return load->load_percent;
+  }
+};
+
 struct aie_coredump
 {
   using result_type = std::vector<char>;
@@ -2475,6 +2507,7 @@ initialize_query_table()
   emplace_func0_request<query::cert_firmware_version,          cert_firmware_version>();
   emplace_func1_request<query::sub_device_path,                sub_device_path>();
   emplace_func1_request<query::aie_coredump,                   aie_coredump>();
+  emplace_func0_request<query::npu_load,                       npu_load_info>();
   emplace_func1_request<query::aie_read,                       aie_read>();
   emplace_func1_request<query::aie_write,                      aie_write>();
   emplace_func0_getput<query::auto_coredump,                   auto_coredump>();

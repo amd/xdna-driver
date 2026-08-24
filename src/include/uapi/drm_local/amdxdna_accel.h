@@ -552,6 +552,20 @@ struct amdxdna_drm_query_firmware_version {
 	__u32 build; /* out */
 };
 
+#define AMDXDNA_AIE_LOAD_UNAVAILABLE		0xFFFFFFFFU
+
+/**
+ * struct amdxdna_drm_query_aie_load - AIE hardware utilization snapshot
+ */
+struct amdxdna_drm_query_aie_load {
+	__u32 sample_duration_ms; /* in */
+	__u32 load_percent; /* out */
+	__u64 timestamp_ms; /* out */
+	__u64 operations_per_second; /* out */
+	__u32 num_activity_counters; /* out */
+	__u64 activity_counters[]; /* out */
+};
+
 /**
  * struct amdxdna_drm_get_resource_info - Get info on some resources within NPU
  * @npu_clk_max: max H-Clocks
@@ -627,6 +641,7 @@ struct amdxdna_drm_get_info {
 #define	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE	13
 #define	DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION		14
 #define	DRM_AMDXDNA_GET_AUTO_COREDUMP			15
+#define	DRM_AMDXDNA_QUERY_AIE_LOAD			16
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
