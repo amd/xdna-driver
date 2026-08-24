@@ -59,8 +59,8 @@ module_param(max_col, int, 0644);
 MODULE_PARM_DESC(max_col, "Max column supported by this driver");
 
 int enable_debug_queue;
-module_param(enable_debug_queue, int, 0644);
-MODULE_PARM_DESC(enable_debug_queue, "Enable debug queue. It is disabled by default.");
+module_param(enable_debug_queue, int, 0444);
+MODULE_PARM_DESC(enable_debug_queue, "Enable debug queue (must be set before hwctx creation)");
 
 #define CTX_TIMER		(msecs_to_jiffies(1))	/* 1ms */
 #define VE2_RETRY_TIMEOUT_MS	5000	/* max wait for a free host-queue slot */
@@ -772,9 +772,7 @@ static struct host_queue_packet *
 dbg_queue_reserve_slot(struct amdxdna_dev *xdna, struct ve2_dbg_queue *queue, u64 *slot)
 {
 	struct host_queue_header *header = &queue->dbg_queue_p->hq_header;
-	struct ve2_hq_complete *hq_complete = &queue->hq_complete;
 	struct host_queue_packet *hq_entry = queue->dbg_queue_p->hq_entry;
-	enum ert_cmd_state state;
 	u64 outstanding;
 	u32 slot_idx;
 	u64 read_index;
@@ -799,15 +797,13 @@ dbg_queue_reserve_slot(struct amdxdna_dev *xdna, struct ve2_dbg_queue *queue, u6
 	}
 
 	slot_idx = queue->reserved_write_index % header->capacity;
-	state = (enum ert_cmd_state)hq_complete->hqc_mem[slot_idx];
-	if (state != ERT_CMD_STATE_INVALID) {
-		XDNA_DBG(xdna, "Slot %u is still in use with state %u", slot_idx, state);
-		mutex_unlock(&queue->hq_lock);
-		return ERR_PTR(-EBUSY);
-	}
 
+	/*
+	 * Slot availability is determined by read_index (ring math above).
+	 * CERT owns hqc_mem; track readiness in driver-local slot_ready.
+	 */
 	*slot = queue->reserved_write_index++;
-	hq_complete->hqc_mem[slot_idx] = ERT_CMD_STATE_NEW;
+	clear_bit(slot_idx, queue->slot_ready);
 	mutex_unlock(&queue->hq_lock);
 
 	return &hq_entry[slot_idx];
@@ -816,7 +812,6 @@ dbg_queue_reserve_slot(struct amdxdna_dev *xdna, struct ve2_dbg_queue *queue, u6
 static void dbg_queue_commit_slot(struct ve2_dbg_queue *queue, u64 slot)
 {
 	struct host_queue_header *header = &queue->dbg_queue_p->hq_header;
-	struct ve2_hq_complete *hq_complete = &queue->hq_complete;
 	struct host_queue_packet *hq_entry = queue->dbg_queue_p->hq_entry;
 	u32 capacity = header->capacity;
 	u32 slot_idx = slot % capacity;
@@ -825,13 +820,14 @@ static void dbg_queue_commit_slot(struct ve2_dbg_queue *queue, u64 slot)
 	mutex_lock(&queue->hq_lock);
 	pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 	dbg_queue_sync_packet_for_write(queue, slot_idx);
-	hq_complete->hqc_mem[slot_idx] = ERT_CMD_STATE_SUBMITTED;
+
+	/* Mark slot ready in driver-local tracking (cert owns hqc_mem) */
+	set_bit(slot_idx, queue->slot_ready);
 
 	while (header->write_index < queue->reserved_write_index) {
 		u32 next_idx = header->write_index % capacity;
-		enum ert_cmd_state st = hq_complete->hqc_mem[next_idx];
 
-		if (st != ERT_CMD_STATE_SUBMITTED)
+		if (!test_bit(next_idx, queue->slot_ready))
 			break;
 		header->write_index++;
 	}
@@ -891,10 +887,12 @@ static int ve2_create_dbg_queue(struct amdxdna_hwctx *hwctx)
 
 	mutex_init(&queue->hq_lock);
 	queue->reserved_write_index = 0;
+	bitmap_zero(queue->slot_ready, HOST_QUEUE_ENTRY);
 	queue->dbg_queue_dma_addr = dma_handle;
 	queue->hq_complete.hqc_mem =
 		(u64 *)((char *)queue->dbg_queue_p + sizeof(struct dbg_queue));
 	queue->hq_complete.hqc_dma_addr = dma_handle + sizeof(struct dbg_queue);
+	/* Zero hqc_mem so it starts clean for cert's completion writes. */
 	memset(queue->hq_complete.hqc_mem, 0, sizeof(u64) * HOST_QUEUE_ENTRY);
 	queue->dbg_queue_p->hq_header.data_address =
 		dma_handle + sizeof(struct host_queue_header);
@@ -985,7 +983,6 @@ cleanup_slot:
 		 dbg_queue->dbg_queue_p->hq_header.read_index,
 		 dbg_queue->dbg_queue_p->hq_header.write_index);
 	mutex_lock(&dbg_queue->hq_lock);
-	dbg_queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_INVALID;
 	dbg_queue_pkt_set_invalid(pkt);
 	dbg_queue_sync_packet_for_write(dbg_queue, slot_idx);
 	mutex_unlock(&dbg_queue->hq_lock);
@@ -1183,15 +1180,16 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(hwctx);
-	if (enable_debug_queue)
+
+	if (enable_debug_queue && vp && vp->dbg_queue.dbg_queue_p) {
+		timer_delete_sync(&vp->dbg_q_timer);
 		ve2_free_dbg_queue(hwctx);
+	}	
 
 	if (vp) {
 		u32 submitted = vp->submitted;
 		u32 completed = vp->completed;
 
-		if (enable_debug_queue)
-			timer_delete_sync(&vp->dbg_q_timer);
 		if (enable_polling)
 			timer_delete_sync(&vp->event_timer);
 		kfree(vp->hwctx_config);
