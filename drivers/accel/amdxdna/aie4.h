@@ -179,6 +179,8 @@ void aie4_free_notification(struct cert_comp *comp);
 /* aie4_message.c */
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev,
 			    struct amdxdna_drm_query_aie_metadata *metadata);
+int aie4_get_aie_activity_counters(struct amdxdna_dev_hdl *ndev,
+				   struct aie4_msg_get_aie_activity_counters_resp *counters);
 int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev,
 			   struct amdxdna_drm_query_aie_version *version);
 int aie4_query_npu_firmware_version(struct amdxdna_dev_hdl *ndev,
