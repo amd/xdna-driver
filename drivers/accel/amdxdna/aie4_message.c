@@ -61,6 +61,26 @@ int aie4_calibrate_clock(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+int aie4_get_aie_activity_counters(struct amdxdna_dev_hdl *ndev,
+				   struct aie4_msg_get_aie_activity_counters_resp *counters)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_aie_activity_counters,
+			AIE4_MSG_OP_GET_AIE_ACTIVITY_COUNTERS);
+	int ret;
+	u32 i;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		return ret;
+
+	counters->sample_state = resp.sample_state;
+	counters->timestamp_ms = resp.timestamp_ms;
+	for (i = 0; i < AIE4_AIE_ACTIVITY_COUNTERS; i++)
+		counters->activity_counters[i] = resp.activity_counters[i];
+
+	return 0;
+}
+
 int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev,
 			   struct amdxdna_drm_query_aie_version *aie_version)
 {

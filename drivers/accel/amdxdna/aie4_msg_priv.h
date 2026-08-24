@@ -52,6 +52,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_START_FW_LOG                     = 0x40003,
 	AIE4_MSG_OP_STOP_FW_LOG                      = 0x40004,
 	AIE4_MSG_OP_CALIBRATE_CLOCK                  = 0x40006,
+	AIE4_MSG_OP_GET_AIE_ACTIVITY_COUNTERS        = 0x40007,
 
 	/*
 	 * Async event carrying only ids, in the mailbox message itself. Sent
@@ -420,6 +421,28 @@ struct aie4_msg_calibrate_clock_req {
 
 struct aie4_msg_calibrate_clock_resp {
 	enum aie4_msg_status status;
+} __packed;
+
+struct aie4_msg_get_aie_activity_counters_req {
+	__u32 resv;
+} __packed;
+
+#define AIE4_AIE_ACTIVITY_COUNTERS		8
+#define AIE4_AIE_ACTIVITY_COUNTER_MODULUS	0xFFFFFFFF0ULL
+
+enum aie4_aie_activity_counters_sample_state {
+	AIE4_AIE_ACTIVITY_COUNTERS_STATE_UNSPECIFIED,
+	AIE4_AIE_ACTIVITY_COUNTERS_STATE_SAMPLED,
+	AIE4_AIE_ACTIVITY_COUNTERS_STATE_RAIL_OFF,
+	AIE4_AIE_ACTIVITY_COUNTERS_STATE_READ_FAILED,
+	AIE4_AIE_ACTIVITY_COUNTERS_STATE_RESET_SAMPLED,
+};
+
+struct aie4_msg_get_aie_activity_counters_resp {
+	enum aie4_msg_status status;
+	__u32 sample_state;
+	__u64 timestamp_ms;
+	__u64 activity_counters[AIE4_AIE_ACTIVITY_COUNTERS];
 } __packed;
 
 /*
