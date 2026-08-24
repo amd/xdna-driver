@@ -148,6 +148,11 @@ struct ve2_dbg_queue {
 	struct mutex			hq_lock;/* protect dbg queue submit and wait */
 	u64				reserved_write_index;
 	struct device			*alloc_dev;
+	/*
+	 * Driver-local slot readiness for ordered write_index advance.
+	 * hqc_mem is owned by CERT (firmware writes DBG_PKT_* completion there).
+	 */
+	DECLARE_BITMAP(slot_ready, HOST_QUEUE_ENTRY);
 };
 
 static inline void dbg_queue_sync_read_index_for_read(struct ve2_dbg_queue *queue)
