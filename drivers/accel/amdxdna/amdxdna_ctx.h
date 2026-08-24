@@ -239,7 +239,14 @@ struct amdxdna_drv_cmd {
 struct app_health_report;
 
 union amdxdna_job_priv {
-	struct app_health_report *aie2_health;
+	/* aie2 kernel submission */
+	struct {
+		struct app_health_report *health;
+		/* The fence to signal DRM scheduler that job is done */
+		struct dma_fence	*fence;
+		/* user can wait on this fence */
+		struct dma_fence	*out_fence;
+	} aie2;
 	/* aie4 kernel submission: queue linkage + job state */
 	struct {
 		struct list_head	list;
@@ -252,10 +259,6 @@ struct amdxdna_sched_job {
 	struct kref		refcnt;
 	struct amdxdna_hwctx	*hwctx;
 	struct mm_struct	*mm;
-	/* The fence to notice DRM scheduler that job is done by hardware */
-	struct dma_fence	*fence;
-	/* user can wait on this fence */
-	struct dma_fence	*out_fence;
 	bool			job_done;
 	bool			job_timeout;
 	u64			seq;
@@ -266,9 +269,11 @@ struct amdxdna_sched_job {
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
 };
 
-#define aie2_job_health priv.aie2_health
-#define aie4_job_list	priv.aie4.list
-#define aie4_job_state	priv.aie4.state
+#define aie2_job_health    priv.aie2.health
+#define aie2_job_fence     priv.aie2.fence
+#define aie2_job_out_fence priv.aie2.out_fence
+#define aie4_job_list      priv.aie4.list
+#define aie4_job_state     priv.aie4.state
 
 static inline u32
 amdxdna_cmd_get_op(struct amdxdna_gem_obj *abo)

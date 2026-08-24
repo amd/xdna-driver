@@ -19,55 +19,6 @@
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_pm.h"
 
-struct amdxdna_fence {
-	struct dma_fence	base;
-	spinlock_t		lock; /* for base */
-	struct device		*dev;
-};
-
-static const char *amdxdna_fence_get_driver_name(struct dma_fence *fence)
-{
-	return KBUILD_MODNAME;
-}
-
-static const char *amdxdna_fence_get_timeline_name(struct dma_fence *fence)
-{
-	struct amdxdna_fence *xdna_fence;
-
-	xdna_fence = container_of(fence, struct amdxdna_fence, base);
-
-	/* Use device name rather than hwctx name: the fence is published into
-	 * BO reservation objects via dma_resv_add_fence() and can outlive the
-	 * hwctx (e.g. when a BO is exported as a dma-buf and imported by
-	 * another process). The device outlives any individual context, so
-	 * dev_name() is safe to call at any point during the fence's lifetime.
-	 */
-	return dev_name(xdna_fence->dev);
-}
-
-static const struct dma_fence_ops fence_ops = {
-	.get_driver_name = amdxdna_fence_get_driver_name,
-	.get_timeline_name = amdxdna_fence_get_timeline_name,
-};
-
-static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
-{
-	struct amdxdna_fence *fence;
-
-	fence = kzalloc_obj(*fence);
-	if (!fence)
-		return NULL;
-
-	fence->dev = hwctx->client->xdna->ddev.dev;
-	spin_lock_init(&fence->lock);
-	/* Each job fence needs a unique context so dma_resv_add_fence() does not
-	 * evict a prior job's fence from a shared BO's reservation object when
-	 * two in-flight jobs touch the same BO.
-	 */
-	dma_fence_init(&fence->base, &fence_ops, &fence->lock, dma_fence_context_alloc(1), 0);
-	return &fence->base;
-}
-
 static void amdxdna_hwctx_release_expanded_heap(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
@@ -678,7 +629,6 @@ void amdxdna_job_cleanup(struct amdxdna_sched_job *job)
 	amdxdna_pm_suspend_put(job->hwctx->client->xdna);
 	amdxdna_arg_bos_put(job);
 	amdxdna_gem_put_obj(job->cmd_bo);
-	dma_fence_put(job->fence);
 	mmdrop(job->mm);
 	atomic64_inc(&job->hwctx->job_free_cnt);
 	wake_up(&job->hwctx->job_free_wq);
@@ -753,17 +703,11 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 	job->mm = current->mm;
 	mmgrab(job->mm);
 
-	job->fence = amdxdna_fence_create(hwctx);
-	if (!job->fence) {
-		XDNA_ERR(xdna, "Failed to create fence");
-		ret = -ENOMEM;
-		goto unlock_srcu;
-	}
 	kref_init(&job->refcnt);
 
 	ret = xdna->dev_info->ops->cmd_submit(hwctx, job, seq);
 	if (ret)
-		goto put_fence;
+		goto unlock_srcu;
 
 	/*
 	 * The amdxdna_hwctx_destroy_rcu() will release hwctx and associated
@@ -776,8 +720,6 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 
 	return 0;
 
-put_fence:
-	dma_fence_put(job->fence);
 unlock_srcu:
 	srcu_read_unlock(&client->hwctx_srcu, idx);
 	amdxdna_pm_suspend_put(xdna);
