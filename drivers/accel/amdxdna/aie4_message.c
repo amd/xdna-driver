@@ -258,9 +258,9 @@ int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode)
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_WARN(ndev->aie.xdna,
-			  "Failed to set power mode %u, ret:%d", power_mode, ret);
+			  "Failed to set power mode %u, ret %d", (u32)power_mode, ret);
 	else
-		XDNA_DBG(ndev->aie.xdna, "Power mode set to %u", power_mode);
+		XDNA_DBG(ndev->aie.xdna, "Power mode set to %u", (u32)power_mode);
 
 	return ret;
 }
@@ -281,7 +281,7 @@ int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable)
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_WARN(ndev->aie.xdna,
-			  "Failed to set force preemption, ret:%d", ret);
+			  "Failed to set force preemption, ret %d", ret);
 	else
 		XDNA_DBG(ndev->aie.xdna, "Force preemption=%d", enable);
 
