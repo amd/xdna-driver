@@ -926,6 +926,8 @@ struct event_trace
             throw xrt_core::system_error(EINTR, "Query interrupted by user");
           else if (e.get_code() == ESHUTDOWN)
             throw xrt_core::system_error(ESHUTDOWN, "Event trace disabled during query");
+          else if (e.get_code() == ESTALE)
+            throw xrt_core::system_error(ESTALE, "Event trace ring restarted during query");
           else if (e.get_code() == EPERM)
             throw xrt_core::system_error(EPERM, "Must be root to access event trace");
           throw std::runtime_error("Failed to get event_trace");
@@ -1055,6 +1057,8 @@ struct firmware_log
             throw xrt_core::system_error(EINTR, "Query interrupted by user");
           else if (e.get_code() == ESHUTDOWN)
             throw xrt_core::system_error(ESHUTDOWN, "Firmware log disabled during query");
+          else if (e.get_code() == ESTALE)
+            throw xrt_core::system_error(ESTALE, "Firmware log ring restarted during query");
           else if (e.get_code() == EPERM)
             throw xrt_core::system_error(EPERM, "Must be root to access firmware log");
           throw std::runtime_error("Failed to get firmware log");
