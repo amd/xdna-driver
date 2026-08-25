@@ -944,6 +944,7 @@ int submit_command_to_dbg_queue(struct amdxdna_hwctx *hwctx, u32 opcode, u32 aie
 
 	hdr = &pkt->xrt_header;
 	hdr->common_header.opcode = opcode;
+	hdr->common_header.chain_flag = LAST_CMD;
 	hdr->completion_signal =
 		(u64)(dbg_queue->hq_complete.hqc_dma_addr + slot_idx * sizeof(u64));
 	hdr->common_header.count = sizeof(struct rw_mem);
