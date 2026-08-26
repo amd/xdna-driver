@@ -243,12 +243,12 @@ amdxdna_set_auto_coredump_mode(struct amdxdna_client *client,
 	struct amdxdna_drm_attribute_state state = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_client *tmp_client;
+	u32 buf_sz;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
-	if (args->buffer_size < sizeof(state))
-		return -EINVAL;
-	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), sizeof(state)))
+	buf_sz = min(args->buffer_size, sizeof(state));
+	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), buf_sz))
 		return -EFAULT;
 
 	if (state.state > 1)
