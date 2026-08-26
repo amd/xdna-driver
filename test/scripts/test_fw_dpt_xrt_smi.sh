@@ -231,6 +231,19 @@ DPT_PARK_BUDGET_MS=10000
 # than misreporting as wedged.
 DPT_PROBE_BUDGET_MS=20000
 
+# How long a parked watcher is watched for CPU consumption, and how much
+# CPU it is allowed to spend in that window.
+#
+# A watcher that is caught up is supposed to be blocked in the driver's
+# wait_event_interruptible, so its correct consumption is zero and any
+# nonzero figure is either a chatty ring or a spin. 250ms out of 5000ms is
+# 5% of one core: orders of magnitude above what waking for a few log
+# lines costs, and orders of magnitude below the ~100% of a core that a
+# reader retrying a failing ioctl with no delay actually burned on
+# hardware. The gap is wide enough that this needs no tuning per board.
+DPT_IDLE_WINDOW_MS=5000
+DPT_IDLE_CPU_BUDGET_MS=250
+
 # ---------------------------------------------------------------------------
 # Pretty-print helpers
 # ---------------------------------------------------------------------------
@@ -1971,6 +1984,43 @@ dpt_watcher_tree() {
     return 0
 }
 
+# Clock ticks per second, for turning the /proc CPU counters into
+# milliseconds. getconf is in coreutils on every host this runs on; the
+# fallback is the value Linux has used on x86 for its whole history and
+# only matters if getconf is missing entirely.
+DPT_CLK_TCK="$(getconf CLK_TCK 2>/dev/null || echo 100)"
+
+# Echo the CPU time in milliseconds consumed so far by every live thread
+# in the watcher tree rooted at $1, or 0 if nothing is readable.
+#
+# Threads are summed rather than sampling the root process, for the same
+# reason dpt_watcher_tree exists: the pid a watcher was launched under may
+# be a shell wrapper that consumes nothing while the reader underneath it
+# spins. Both utime and stime count, because a reader retrying a failing
+# ioctl in a tight loop spends most of its time in the kernel and would
+# barely register on utime alone.
+#
+# A thread that exits between the walk and the read simply drops out of
+# the sum; callers that need a total across an exit keep the largest
+# reading they saw rather than the last.
+dpt_tree_cpu_ms() {
+    local root="$1" pid tdir stat_line rest utime stime total=0
+    [[ -n "${root}" ]] || { printf '0'; return 0; }
+    while read -r pid; do
+        for tdir in /proc/"${pid}"/task/*; do
+            stat_line=$(cat "${tdir}/stat" 2>/dev/null) || continue
+            # "pid (comm) state ...", and comm may contain spaces and
+            # parentheses, so split after the LAST ") ". utime and stime
+            # are then the 12th and 13th fields of what remains.
+            rest="${stat_line##*') '}"
+            read -r _ _ _ _ _ _ _ _ _ _ _ utime stime _ <<<"${rest}"
+            [[ "${utime}" =~ ^[0-9]+$ && "${stime}" =~ ^[0-9]+$ ]] || continue
+            total=$(( total + utime + stime ))
+        done
+    done < <(dpt_watcher_tree "${root}")
+    printf '%s' "$(( total * 1000 / DPT_CLK_TCK ))"
+}
+
 # Regex matching a kernel stack frame that means "parked in the amdxdna
 # DPT watch path". Matched as a SET rather than as amdxdna_dpt_get_data
 # exactly, because that function is static and the compiler is free to
@@ -2019,11 +2069,12 @@ dpt_parked_stack() {
     return 0
 }
 
-# Launch an --event-trace --watch consumer and wait for it to park stably
-# inside the driver's wait_event_interruptible. Sets
+# Launch a --watch consumer on the DPT channel named by $1 (as the
+# xrt-smi flag, i.e. --firmware-log or --event-trace) and wait for it to
+# park stably inside the driver's wait_event_interruptible. Sets
 # DPT_PARKED_WATCHER_PID as soon as the process exists, so the trap can
 # release it even if parking never completes, and writes the proving
-# evidence to the file $3.
+# evidence to the file $4.
 #
 # MUST be called directly, never through $( ): the watcher has to be a
 # child of the calling shell so that DPT_PARKED_WATCHER_PID is visible to
@@ -2032,12 +2083,12 @@ dpt_parked_stack() {
 #
 # Returns: 0 parked stably, 1 never parked, 2 exited before parking,
 #          3 no stack evidence available on this kernel.
-dpt_park_trace_watcher() {
-    local out="$1" err="$2" evidence="$3"
+dpt_park_watcher() {
+    local feature="$1" out="$2" err="$3" evidence="$4"
     local pid stack samples stable=0 i
 
     : >"${out}"; : >"${err}"; : >"${evidence}"
-    xrt_smi --advanced examine -d "${BDF}" --event-trace --watch \
+    xrt_smi --advanced examine -d "${BDF}" "${feature}" --watch \
         >"${out}" 2>"${err}" &
     pid=$!
     DPT_PARKED_WATCHER_PID="${pid}"
@@ -2067,6 +2118,16 @@ dpt_park_trace_watcher() {
         sleep 0.25
     done
     return 1
+}
+
+# Park an --event-trace watcher. Kept as its own name because the
+# cross-channel teardown group's whole point is which channel is parked
+# and which is torn down, and a bare flag argument at those call sites
+# would make that direction easy to "simplify" by accident.
+#
+# Same call-site rule as dpt_park_watcher: never through $( ).
+dpt_park_trace_watcher() {
+    dpt_park_watcher "--event-trace" "$@"
 }
 
 # Release the deliberately-parked watcher. This is the recovery lever for
@@ -2545,6 +2606,125 @@ test_fw_dpt_cross_channel_teardown() {
 }
 
 # ---------------------------------------------------------------------------
+# Group: a watcher must sleep, not spin
+# ---------------------------------------------------------------------------
+
+# Require the watcher parked on the channel named by $1 (an xrt-smi flag)
+# to spend almost no CPU while it is caught up, and to still be parked at
+# the end of the window.
+dpt_assert_parked_watcher_idle() {
+    local feature="$1"
+    local tag="${feature#--}"
+    local out="${TMPDIR_}/idle_${tag}.out"
+    local err="${TMPDIR_}/idle_${tag}.err"
+    local evidence="${TMPDIR_}/idle_${tag}.stack"
+    local rc before after used stack
+
+    # Called directly, not through $( ), so DPT_PARKED_WATCHER_PID lands
+    # in this shell and the trap can always release the watcher.
+    rc=0
+    dpt_park_watcher "${feature}" "${out}" "${err}" "${evidence}" || rc=$?
+    case "${rc}" in
+    0)  ;;
+    2)  dpt_release_parked_watcher
+        fail "[${tag}] watcher exited before parking, so there is nothing" \
+             "to measure. stderr: $(head -c 256 "${err}")"
+        return ;;
+    3)  dpt_release_parked_watcher
+        skip "[${tag}] /proc/<tid>/stack unreadable; a CPU figure alone" \
+             "cannot distinguish a sleeping reader from a lucky one"
+        return ;;
+    *)  dpt_release_parked_watcher
+        fail "[${tag}] watcher never parked in the DPT watch path within" \
+             "${DPT_PARK_BUDGET_MS}ms"
+        return ;;
+    esac
+
+    before=$(dpt_tree_cpu_ms "${DPT_PARKED_WATCHER_PID}")
+    sleep $(( DPT_IDLE_WINDOW_MS / 1000 ))
+    after=$(dpt_tree_cpu_ms "${DPT_PARKED_WATCHER_PID}")
+    used=$(( after - before ))
+
+    # Re-prove the park at the END of the window. A reader that woke and
+    # started retrying would still be alive and could still show a low CPU
+    # figure if it had only just started, so the state matters as much as
+    # the number.
+    stack=$(dpt_parked_stack "${DPT_PARKED_WATCHER_PID}")
+    dpt_release_parked_watcher
+
+    if [[ -z "${stack}" ]]; then
+        emit_snippet "[${tag}] watcher output over the idle window:" \
+                     "$(cat "${out}")"
+        fail "[${tag}] watcher left the DPT wait path during a" \
+             "${DPT_IDLE_WINDOW_MS}ms idle window (${used}ms CPU used);" \
+             "a caught-up reader is supposed to stay blocked in the ioctl"
+        return
+    fi
+
+    if (( used > DPT_IDLE_CPU_BUDGET_MS )); then
+        emit_snippet "[${tag}] watcher output over the idle window:" \
+                     "$(cat "${out}")"
+        fail "[${tag}] watcher burned ${used}ms CPU over a" \
+             "${DPT_IDLE_WINDOW_MS}ms idle window (budget" \
+             "${DPT_IDLE_CPU_BUDGET_MS}ms) while parked: it is retrying" \
+             "the read rather than sleeping in it"
+        return
+    fi
+
+    pass "[${tag}] parked watcher stayed asleep: ${used}ms CPU over" \
+         "${DPT_IDLE_WINDOW_MS}ms, still in the DPT wait path afterwards"
+}
+
+# Every other watch assertion in this file is about output or about
+# teardown, so a reader that printed the right lines while retrying a
+# failing ioctl as fast as the CPU allowed passed all of them. That is
+# what shipped: a watcher spinning at ~100% of a core was found by hand,
+# not by this suite.
+#
+# The park proof cannot catch it on its own either. It only ever examines a
+# freshly started watcher on a live, quiet ring, which is precisely the
+# situation in which even a broken reader does sleep, and it reads state at
+# one moment rather than over an interval. What was missing is a CPU
+# budget, so that "asleep" is asserted as consumption rather than inferred
+# from a single well-chosen instant. Any spin that keeps a reader alive --
+# whichever error it is retrying -- shows up here as consumption.
+#
+# Only the firmware-log channel is exercised. Parking on the trace channel
+# needs shim_test traffic to park against, and "a parked reader must not
+# spend CPU" is shared code, so a second channel would buy a dependency
+# rather than coverage.
+test_fw_dpt_watcher_sleeps() {
+    group "fw_dpt: a parked watcher must sleep, not spin"
+
+    if ! dpt_stack_probe_available; then
+        skip "watcher sleep check: /proc/<tid>/stack unreadable (kernel" \
+             "without CONFIG_STACKTRACE?), so a park cannot be proven and" \
+             "a CPU budget alone would not say why"
+        return
+    fi
+
+    if [[ "${MODE}" == "trace-only" ]]; then
+        skip "watcher sleep check: needs the firmware-log channel"
+        return
+    fi
+
+    # Level 1 (ERR) is the quietest level the driver accepts, which keeps
+    # the firmware from writing while the watcher is supposed to be
+    # holding still. A chatty ring would spend real CPU legitimately and
+    # blunt the budget.
+    if ! fw_log_set_level 1; then
+        fail "configure --firmware-log --enable --log-level 1 failed;" \
+             "cannot park a watcher on a live channel"
+        return
+    fi
+
+    dpt_assert_parked_watcher_idle "--firmware-log"
+
+    # Leave the device the way the other groups expect to find it.
+    fw_log_set_level 3 || true
+}
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -2632,6 +2812,10 @@ main() {
     if [[ "${MODE}" == "both" ]]; then
         test_fw_dpt_cross_channel_teardown
     fi
+
+    # Last: it needs a quiet ring to measure against, which means dropping
+    # the log level under the other groups' feet.
+    test_fw_dpt_watcher_sleeps
 }
 
 main "$@"
