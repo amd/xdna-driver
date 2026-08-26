@@ -99,7 +99,7 @@ poll_command(xrt_core::buffer_handle *cmd) const
 {
   auto boh = static_cast<cmd_buffer*>(cmd);
   auto cmdpkt = reinterpret_cast<volatile ert_packet *>(boh->vaddr());
-  if (cmdpkt->state >= ERT_CMD_STATE_COMPLETED) {
+  if (ert_cmd_state_is_terminal(cmdpkt->state)) {
     XRT_TRACE_POINT_LOG(poll_command_done);
     return 1;
   }

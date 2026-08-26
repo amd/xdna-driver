@@ -12,6 +12,35 @@
 
 namespace shim_xdna {
 
+// Not a >= comparison against ERT_CMD_STATE_COMPLETED: the enum grows by
+// appending, so an in-flight state can sort above the terminal ones, as
+// ERT_CMD_STATE_SUBMITTED already does. Enumerating lets -Wswitch catch a
+// new state nobody has classified.
+inline bool
+ert_cmd_state_is_terminal(uint32_t state)
+{
+  switch (static_cast<ert_cmd_state>(state)) {
+  case ERT_CMD_STATE_NEW:
+  case ERT_CMD_STATE_QUEUED:
+  case ERT_CMD_STATE_RUNNING:
+  case ERT_CMD_STATE_SUBMITTED:
+    return false;
+  case ERT_CMD_STATE_COMPLETED:
+  case ERT_CMD_STATE_ERROR:
+  case ERT_CMD_STATE_ABORT:
+  case ERT_CMD_STATE_TIMEOUT:
+  case ERT_CMD_STATE_NORESPONSE:
+  case ERT_CMD_STATE_SKERROR:
+  case ERT_CMD_STATE_SKCRASHED:
+    return true;
+  case ERT_CMD_STATE_MAX:
+    break;
+  }
+  // The packet carries the state in 4 bits, so it need not be an enumerator.
+  // Treat anything else as terminal rather than wait on it forever.
+  return true;
+}
+
 class hwq : public xrt_core::hwqueue_handle
 {
 public:
