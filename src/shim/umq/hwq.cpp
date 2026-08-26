@@ -394,7 +394,7 @@ complete_command(xrt_core::buffer_handle *cmd) const
   // Single cmd completion, cmd state maybe updated by CERT (normal case), or by
   // driver (KMS + timeout), or by nobody (UMS + timeout).
   if (cmdpkt->opcode != ERT_CMD_CHAIN) {
-    if (cmdpkt->state < ERT_CMD_STATE_COMPLETED) {
+    if (!ert_cmd_state_is_terminal(cmdpkt->state)) {
       // CERT failed to set error state properly.
       if (is_kernel_mode_submission()) {
         // In KMS, it is not expected.
@@ -456,7 +456,7 @@ complete_command(xrt_core::buffer_handle *cmd) const
     }
   }
 
-  if (cmdpkt->state < ERT_CMD_STATE_COMPLETED) {
+  if (!ert_cmd_state_is_terminal(cmdpkt->state)) {
     // CERT failed to set error state properly.
     if (is_kernel_mode_submission()) {
       // In KMS, it is not expected.
