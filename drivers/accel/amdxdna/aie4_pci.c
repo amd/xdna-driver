@@ -2017,10 +2017,12 @@ static int aie4_set_force_preempt_state(struct amdxdna_client *client,
 					struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
-	struct amdxdna_drm_attribute_state state;
+	struct amdxdna_drm_attribute_state state = {};
+	u32 buf_sz;
 	int ret;
 
-	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), sizeof(state)))
+	buf_sz = min(args->buffer_size, sizeof(state));
+	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), buf_sz))
 		return -EFAULT;
 
 	if (state.state > 1)
