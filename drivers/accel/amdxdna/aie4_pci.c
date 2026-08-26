@@ -1201,10 +1201,13 @@ static void aie4_hwctx_suspend_all(struct amdxdna_dev_hdl *ndev, int clean_jobs)
 	amdxdna_for_each_client(xdna, client) {
 		idx = srcu_read_lock(&client->hwctx_srcu);
 		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
-			aie4_hwctx_destroy(hwctx, AIE4_HWCTX_NORMAL);
 			/* clean up workers and drain running jobs */
-			if (clean_jobs)
-				aie4_hwctx_cleanup_running_jobs(hwctx, false);
+			if (clean_jobs) {
+				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_ERROR);
+				aie4_hwctx_wait_for_running(hwctx);
+			} else {
+				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_NORMAL);
+			}
 		}
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}
@@ -1275,7 +1278,7 @@ static int aie4_hwctx_reconnect_all(struct amdxdna_dev_hdl *ndev)
 		idx = srcu_read_lock(&client->hwctx_srcu);
 		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 			/* when reset is done, safely abort all previously running jobs. */
-			aie4_hwctx_cleanup_running_jobs(hwctx, false);
+			aie4_hwctx_wait_for_running(hwctx);
 			XDNA_INFO(xdna, "aborting hwctx_id %lu", hwctx_id);
 
 			/* firmware is stateless, thus no need to send destroy request. */
