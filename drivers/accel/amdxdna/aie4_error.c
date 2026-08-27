@@ -232,9 +232,11 @@ static void aie4_async_ctx_error_cache(struct aie_device *aie,
 			memcpy(&priv->cached_ctx_error, ctx_err, sizeof(*ctx_err));
 			/*
 			 * Mark a ctx error cached: this flags the ensuing teardown as a
-			 * TDR reset (not a suspend), which aie4_unlink_cert_comp() uses to
-			 * bump ctx_error_gen at the disconnect so a broken submit wait
-			 * returns -EAGAIN instead of continuing as if suspended.
+			 * TDR reset (not a suspend), so aie4_hwctx_cleanup_running_jobs()
+			 * reports the faulting job as TIMEOUT with this health report
+			 * attached. The reset also stamps ctx_error_gen there, which
+			 * submit_one_cmd() checks to abort a chain whose prefix was published
+			 * before the reset (-ECONNRESET) rather than split it across the reset.
 			 */
 			priv->cached_ctx_error_valid = true;
 			mutex_unlock(&priv->io_lock);
