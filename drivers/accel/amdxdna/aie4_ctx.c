@@ -1080,6 +1080,7 @@ static void aie4_job_release(struct kref *ref)
 
 static void job_done(struct amdxdna_sched_job *job)
 {
+	amdxdna_io_stats_job_done(job->hwctx->client);
 	job->aie4_job_state = AIE4_JOB_STATE_DONE;
 	/*
 	 * Release the address-space reference taken at submit.  On SVA/IOMMU
@@ -1547,6 +1548,7 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	*seq = job->seq;
 	mutex_unlock(&priv->io_lock);
 
+	amdxdna_io_stats_job_start(client);
 	/* Release the next pending submitter and kick the reaper. */
 	wake_up_all(&priv->job_list_wq);
 	queue_work(priv->job_work_q, &priv->job_work);
