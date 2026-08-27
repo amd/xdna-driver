@@ -73,6 +73,8 @@ const char *amdxdna_dpt_kind_str(enum amdxdna_dpt_kind kind);
 #define XDNA_DPT_WARN(dpt, fmt, args...) XDNA_DPT_PRINTK(WARN, dpt, fmt, ##args)
 #define XDNA_DPT_INFO(dpt, fmt, args...) XDNA_DPT_PRINTK(INFO, dpt, fmt, ##args)
 #define XDNA_DPT_DBG(dpt,  fmt, args...) XDNA_DPT_PRINTK(DBG,  dpt, fmt, ##args)
+#define XDNA_DPT_ERR_RATELIMITED(dpt, fmt, args...) \
+	XDNA_DPT_PRINTK(ERR_RATELIMITED, dpt, fmt, ##args)
 
 #define XDNA_DPT_MBZ_DBG(dpt, ptr, sz)	XDNA_MBZ_DBG((dpt)->xdna, ptr, sz)
 
