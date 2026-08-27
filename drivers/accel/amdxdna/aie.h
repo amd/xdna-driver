@@ -28,6 +28,10 @@ struct aie_msg_ops {
 		      u8 row, u8 col, u32 aie_addr,
 		      dma_addr_t dram_addr, u32 size);
 
+	int (*query_status)(struct aie_device *aie,
+			    struct amdxdna_msg_buf_hdl *buf_hdl,
+			    u32 *cols_filled, u32 *resp_size);
+
 	int (*query_telemetry)(struct aie_device *aie, char __user *buf, u32 size,
 			       struct amdxdna_drm_query_telemetry_header *header);
 	/* Optional per-arch FW health/map hooks; leave NULL when unsupported. */
@@ -172,6 +176,9 @@ int amdxdna_get_aie_version(struct amdxdna_client *client,
 int amdxdna_get_firmware_version(struct amdxdna_client *client,
 				 struct amdxdna_drm_get_info *args,
 				 struct amdxdna_drm_query_firmware_version *version);
+int amdxdna_get_aie_status(struct aie_device *aie,
+			   struct amdxdna_client *client,
+			   struct amdxdna_drm_get_info *args);
 int amdxdna_get_telemetry(struct aie_device *aie, struct amdxdna_client *client,
 			  struct amdxdna_drm_get_info *args);
 int amdxdna_get_hwctx_status(struct aie_device *aie, struct amdxdna_client *client,

@@ -288,7 +288,8 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
 int aie2_add_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
-int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf, u32 size, u32 *cols_filled);
+int aie2_query_status(struct aie_device *aie, struct amdxdna_msg_buf_hdl *buf_hdl,
+		      u32 *cols_filled, u32 *resp_size);
 int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 			 char __user *buf, u32 size,
 			 struct amdxdna_drm_query_telemetry_header *header);

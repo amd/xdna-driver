@@ -973,6 +973,9 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		goto dev_exit;
 
 	switch (args->param) {
+	case DRM_AMDXDNA_QUERY_AIE_STATUS:
+		ret = amdxdna_get_aie_status(&ndev->aie, client, args);
+		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
 		ret = amdxdna_get_metadata(&ndev->aie, client, args);
 		break;

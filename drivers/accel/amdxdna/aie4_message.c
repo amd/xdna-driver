@@ -588,6 +588,34 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
+static int aie4_query_status(struct aie_device *aie,
+			     struct amdxdna_msg_buf_hdl *buf_hdl,
+			     u32 *cols_filled, u32 *resp_size)
+{
+	DECLARE_AIE_MSG(aie4_msg_aie_column_info, AIE4_MSG_OP_AIE_COLUMN_INFO);
+	struct amdxdna_dev *xdna = aie->xdna;
+	u32 aie_bitmap;
+	int ret;
+
+	aie_bitmap = GENMASK(aie->metadata.cols - 1, 0);
+
+	req.dump_buff_addr = to_dma_addr(buf_hdl, 0);
+	req.dump_buff_size = to_buf_size(buf_hdl);
+	req.pasid = 0;
+	req.aie4_col_bitmap = aie_bitmap;
+
+	ret = aie_send_mgmt_msg_wait(aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Error during NPU query, status %d", ret);
+		return ret;
+	}
+
+	*cols_filled = aie_bitmap;
+	*resp_size = resp.size;
+
+	return 0;
+}
+
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 {
 	if (AIE_FEATURE_ON(&ndev->aie, AIE4_GET_COREDUMP))
@@ -598,6 +626,7 @@ void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 		ndev->aie.msg_ops.rw_mem = aie4_rw_aie_mem;
 	}
 
+	ndev->aie.msg_ops.query_status = aie4_query_status;
 	ndev->aie.msg_ops.query_telemetry = aie4_query_telemetry;
 	/* aie4 has no fw_ctx_id <-> hwctx_id map and no per-ctx FW health. */
 	ndev->aie.hwctx_limit = 0;

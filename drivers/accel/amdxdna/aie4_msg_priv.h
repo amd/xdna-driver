@@ -40,6 +40,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_CONFIGURE_HW_CONTEXT             = 0x30005,
 	AIE4_MSG_OP_AIE_TILE_INFO                    = 0x30006,
 	AIE4_MSG_OP_AIE_VERSION_INFO                 = 0x30007,
+	AIE4_MSG_OP_AIE_COLUMN_INFO                  = 0x30008,
 	AIE4_MSG_OP_POWER_OVERRIDE                   = 0x3000B,
 	AIE4_MSG_OP_AIE_RW_ACCESS                    = 0x3000E,
 	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
@@ -318,6 +319,20 @@ struct aie4_msg_get_dpm_level_resp {
 } __packed;
 
 #define AIE4_WORK_BUFFER_MIN_SIZE      SZ_4M
+
+/* AIE4_MSG_OP_AIE_COLUMN_INFO */
+struct aie4_msg_aie_column_info_req {
+	__u64 dump_buff_addr;
+	__u32 dump_buff_size;
+	__u32 pasid;
+	__u32 rsvd;
+	__u32 aie4_col_bitmap;
+} __packed;
+
+struct aie4_msg_aie_column_info_resp {
+	enum aie4_msg_status status;
+	__u32 size;
+} __packed;
 
 /* Telemetry type for AIE4_MSG_OP_GET_TELEMETRY. */
 enum aie4_msg_telemetry_type {
