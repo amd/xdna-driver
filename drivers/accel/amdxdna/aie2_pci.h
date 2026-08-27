@@ -83,8 +83,6 @@ struct amdxdna_hwctx_priv {
 	struct drm_sched_entity		entity;
 
 	struct mutex			io_lock; /* protect seq and cmd order */
-	struct wait_queue_head		job_free_wq;
-	u32				num_pending;
 	u64				seq;
 	struct semaphore		job_sem;
 	bool				job_done;

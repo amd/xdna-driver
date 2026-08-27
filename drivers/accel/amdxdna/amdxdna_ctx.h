@@ -197,6 +197,7 @@ struct amdxdna_hwctx {
 
 	atomic64_t			job_submit_cnt;
 	atomic64_t			job_free_cnt ____cacheline_aligned_in_smp;
+	wait_queue_head_t		job_free_wq;
 
 	/* Saved core dump, captured automatically on timeout if device auto_coredump is set. */
 	char				*coredump;
@@ -331,7 +332,7 @@ int amdxdna_cmd_set_error(struct amdxdna_gem_obj *abo,
 			  enum ert_cmd_state error_state,
 			  void *err_data, size_t size);
 
-void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job);
+void amdxdna_job_cleanup(struct amdxdna_sched_job *job);
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 int amdxdna_hwctx_walk(struct amdxdna_client *client, void *arg,
 		       bool (*filter)(struct amdxdna_hwctx *hwctx, void *arg),
