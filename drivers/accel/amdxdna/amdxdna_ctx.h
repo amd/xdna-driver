@@ -203,20 +203,20 @@ struct amdxdna_hwctx {
 	char				*coredump;
 };
 
-static inline void
-amdxdna_hwctx_snapshot_counts(struct amdxdna_hwctx *hwctx,
-			      u64 *submitted, u64 *completed)
-{
-	/* Read completions first: avoid stale-submit false idle on concurrent submit. */
-	*completed = atomic64_read(&hwctx->job_free_cnt);
-	*submitted = atomic64_read(&hwctx->job_submit_cnt);
-}
-
 static inline u32
 amdxdna_hwctx_report_state(struct amdxdna_hwctx *hwctx,
-			   u64 submitted, u64 completed)
+			   u64 *submitted, u64 *completed)
 {
-	return (hwctx->fw_ctx_id == (u32)-1 || submitted == completed) ?
+	u64 s, c;
+
+	/* Read completions first: avoid stale-submit false idle on concurrent submit. */
+	c = atomic64_read(&hwctx->job_free_cnt);
+	s = atomic64_read(&hwctx->job_submit_cnt);
+	if (submitted)
+		*submitted = s;
+	if (completed)
+		*completed = c;
+	return (hwctx->fw_ctx_id == (u32)-1 || s == c) ?
 		AMDXDNA_HWCTX_STATE_IDLE : AMDXDNA_HWCTX_STATE_ACTIVE;
 }
 
@@ -333,6 +333,8 @@ int amdxdna_cmd_set_error(struct amdxdna_gem_obj *abo,
 			  void *err_data, size_t size);
 
 void amdxdna_job_cleanup(struct amdxdna_sched_job *job);
+bool amdxdna_client_has_pending_jobs(struct amdxdna_client *client);
+void amdxdna_client_wait_idle(struct amdxdna_client *client);
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 int amdxdna_hwctx_walk(struct amdxdna_client *client, void *arg,
 		       bool (*filter)(struct amdxdna_hwctx *hwctx, void *arg),
