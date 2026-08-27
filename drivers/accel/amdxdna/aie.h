@@ -203,19 +203,6 @@ struct amdxdna_msg_buf_hdl {
 struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32 size);
 void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl);
 
-/*
- * struct amdxdna_coredump_buf_entry - __packed to match firmware buffer_list
- */
-struct amdxdna_coredump_buf_entry {
-	u64				buf_addr;
-	u32				buf_size;
-	u32				reserved;
-} __packed;
-
-int amdxdna_get_coredump(struct aie_device *aie,
-			 struct amdxdna_client *client,
-			 struct amdxdna_drm_get_array *args);
-char *amdxdna_get_hwctx_coredump(struct aie_device *aie, struct amdxdna_hwctx *hwctx);
 int amdxdna_aie_tile_read(struct aie_device *aie,
 			  struct amdxdna_client *client,
 			  struct amdxdna_drm_get_array *args);
@@ -239,13 +226,5 @@ int aie_smu_set_dpm(struct smu_device *smu, u32 dpm_level);
 void amdxdna_io_stats_job_start(struct amdxdna_client *client);
 void amdxdna_io_stats_job_done(struct amdxdna_client *client);
 u64 amdxdna_io_stats_busy_time_ns(struct amdxdna_client *client);
-
-/*
- * Set or get the global auto core dump mode on device.
- */
-int amdxdna_get_auto_coredump_mode(struct amdxdna_client *client,
-				   struct amdxdna_drm_get_info *args);
-int amdxdna_set_auto_coredump_mode(struct amdxdna_client *client,
-				   struct amdxdna_drm_set_state *args);
 
 #endif /* _AIE_H_ */
