@@ -15,6 +15,7 @@
 #include <linux/pm_runtime.h>
 
 #include "aie.h"
+#include "amdxdna_coredump.h"
 #include "aie4_pci.h"
 #include "aie4_msg_priv.h"
 #include "amdxdna_ctx.h"
