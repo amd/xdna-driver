@@ -158,6 +158,12 @@ struct amdxdna_dev_hdl {
 struct aie4_msg_context_config_cert_logging;
 
 /* aie4_ctx.c */
+enum aie4_hwctx_flags {
+	AIE4_HWCTX_NORMAL = 0,
+	AIE4_HWCTX_GRACEFUL,
+	AIE4_HWCTX_DISCONNECT
+};
+
 int aie4_hwctx_init(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx);
 int aie4_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value,
@@ -165,7 +171,7 @@ int aie4_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value,
 int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
 int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int aie4_hwctx_create(struct amdxdna_hwctx *hwctx);
-void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx);
+void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags);
 void aie4_hwctx_resume_jobs(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx, bool errored);
 void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx *hwctx);
