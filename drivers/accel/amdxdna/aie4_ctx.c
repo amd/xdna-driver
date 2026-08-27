@@ -1099,7 +1099,6 @@ static void aie4_job_release(struct kref *ref)
 static void job_done(struct amdxdna_sched_job *job)
 {
 	job->aie4_job_state = AIE4_JOB_STATE_DONE;
-	dma_fence_signal(job->fence);
 	/*
 	 * Release the address-space reference taken at submit.  On SVA/IOMMU
 	 * platforms the device walks the submitter's page tables while the job
