@@ -2326,13 +2326,13 @@ struct function1_get : function0_get<QueryRequestType, Getter>
 };
 
 template <typename QueryRequestType, typename Getter>
-struct function4_get : virtual QueryRequestType
+struct function4_get : function0_get<QueryRequestType, Getter>
 {
+  using function0_get<QueryRequestType, Getter>::get;
   std::any
   get(const xrt_core::device* device, const std::any& param) const
   {
-    auto k = QueryRequestType::key;
-    return Getter::get(device, k, param);
+    return Getter::get(device, QueryRequestType::key, param);
   }
 };
 
@@ -2349,8 +2349,22 @@ struct function_putter : virtual QueryRequestType
   }
 };
 
+template <typename QueryRequestType, typename Putter>
+struct function4_putter : virtual QueryRequestType
+{
+  void
+  put(const xrt_core::device* device, const std::any& any) const
+  {
+    Putter::put(device, QueryRequestType::key, any);
+  }
+};
+
 template <typename QueryRequestType, typename GetPut>
 struct function0_getput : function0_get<QueryRequestType, GetPut>, function_putter<QueryRequestType, GetPut>
+{};
+
+template <typename QueryRequestType, typename GetPut>
+struct function4_getput : function0_get<QueryRequestType, GetPut>, function4_putter<QueryRequestType, GetPut>
 {};
 
 static std::map<xrt_core::query::key_type, std::unique_ptr<query::request>> query_tbl;
@@ -2395,6 +2409,14 @@ emplace_func0_getput()
   query_tbl.emplace(k, std::make_unique<function0_getput<QueryRequestType, GetPut>>());
 }
 
+template <typename QueryRequestType, typename GetPut>
+static void
+emplace_func4_getput()
+{
+  auto k = QueryRequestType::key;
+  query_tbl.emplace(k, std::make_unique<function4_getput<QueryRequestType, GetPut>>());
+}
+
 static void
 initialize_query_table()
 {
@@ -2428,14 +2450,14 @@ initialize_query_table()
   emplace_func0_getput<query::preemption,                      preemption>();
   emplace_func0_getput<query::frame_boundary_preemption,       frame_boundary_preemption>();
 
-  emplace_func1_request<query::event_trace_data,               event_trace>();
+  emplace_func4_request<query::event_trace_data,               event_trace>();
   emplace_func0_request<query::event_trace_version,            event_trace>();
   emplace_func0_request<query::event_trace_config,             event_trace>();
-  emplace_func0_getput<query::event_trace_state,               event_trace>();
-  emplace_func1_request<query::firmware_log_data,              firmware_log>();
+  emplace_func4_getput<query::event_trace_state,               event_trace>();
+  emplace_func4_request<query::firmware_log_data,              firmware_log>();
   emplace_func0_request<query::firmware_log_version,           firmware_log>();
   emplace_func0_request<query::firmware_log_config,            firmware_log>();
-  emplace_func0_getput<query::firmware_log_state,              firmware_log>();
+  emplace_func4_getput<query::firmware_log_state,              firmware_log>();
   emplace_func0_request<query::archive_path,                   archive_path>();
   emplace_func0_request<query::aie_telemetry,                  telemetry>();
   emplace_func0_request<query::misc_telemetry,                 telemetry>();
