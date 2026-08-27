@@ -135,6 +135,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		drm_mm_init(&client->dev_heap_mm, xdna->dev_info->dev_mem_base,
 			    xdna->dev_info->dev_heap_max_size);
 	mutex_init(&client->mm_lock);
+	INIT_LIST_HEAD(&client->bo_invalid_list);
 
 	mutex_lock(&xdna->client_lock);
 	mutex_lock(&xdna->dev_lock);
@@ -153,7 +154,8 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 
 void amdxdna_client_cleanup(struct amdxdna_client *client)
 {
-	struct amdxdna_gem_obj *heap;
+	struct amdxdna_gem_obj *abo, *tmp, *heap;
+	struct amdxdna_dev *xdna = client->xdna;
 	unsigned long heap_id;
 
 	list_del(&client->node);
@@ -164,8 +166,14 @@ void amdxdna_client_cleanup(struct amdxdna_client *client)
 	xa_for_each(&client->dev_heap_xa, heap_id, heap)
 		drm_gem_object_put(to_gobj(heap));
 	xa_destroy(&client->dev_heap_xa);
-	if (client->xdna->dev_info->dev_heap_max_size)
+	if (xdna->dev_info->dev_heap_max_size)
 		drm_mm_takedown(&client->dev_heap_mm);
+
+	down_write(&xdna->notifier_lock);
+	list_for_each_entry_safe(abo, tmp, &client->bo_invalid_list, node)
+		list_del_init(&abo->node);
+	up_write(&xdna->notifier_lock);
+
 	mutex_destroy(&client->mm_lock);
 	mmdrop(client->mm);
 	amdxdna_sva_fini(client);

@@ -68,6 +68,8 @@ struct amdxdna_gem_obj {
 	/* True, if BO is not shmem bo */
 	bool				private_buffer;
 	bool				readonly;
+
+	struct list_head		node;
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)
