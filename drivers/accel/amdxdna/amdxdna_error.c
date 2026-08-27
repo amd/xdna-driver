@@ -425,6 +425,15 @@ int amdxdna_async_events_alloc(struct aie_device *aie,
 		e->events = events;
 		e->aie = aie;
 
+		/*
+		 * amdxdna_alloc_msg_buff() does not zero. The decode path trusts
+		 * err_cnt and the payload it bounds, so a firmware write shorter
+		 * than the report would otherwise leave page contents to be
+		 * decoded into the cached error userspace reads back. The send
+		 * below flushes this range before arming firmware.
+		 */
+		memset(e->buf, 0, e->size);
+
 		ret = amdxdna_async_event_send(e);
 		if (ret) {
 			amdxdna_free_msg_buff(e->hdl);
