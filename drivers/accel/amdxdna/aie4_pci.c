@@ -4,6 +4,7 @@
  */
 
 #include "drm/amdxdna_accel.h"
+#include <drm/drm_cache.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_managed.h>
 #include <drm/drm_print.h>
@@ -1005,6 +1006,26 @@ dev_exit:
 	return ret;
 }
 
+/*
+ * Hand firmware a defined work buffer instead of relying on it to clear its own
+ * partitions. Four of the five partition init callbacks memset on attach, but
+ * the telemetry one only records the pointer, so its counters would otherwise
+ * start from whatever the page allocator left behind.
+ */
+static void aie4_zero_work_buffer(struct amdxdna_dev_hdl *ndev)
+{
+	void *vaddr;
+	u32 size;
+
+	if (!ndev->work_buf_hdl)
+		return;
+
+	vaddr = to_cpu_addr(ndev->work_buf_hdl, 0);
+	size = to_buf_size(ndev->work_buf_hdl);
+	memset(vaddr, 0, size);
+	drm_clflush_virt_range(vaddr, size);
+}
+
 static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
@@ -1018,6 +1039,9 @@ static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 		ndev->work_buf_hdl = NULL;
 		return ret;
 	}
+
+	/* amdxdna_alloc_msg_buff() does not zero, and firmware attaches this. */
+	aie4_zero_work_buffer(ndev);
 
 	XDNA_DBG(xdna, "Work buffer allocated: size 0x%x",
 		 to_buf_size(ndev->work_buf_hdl));
@@ -1515,6 +1539,7 @@ pci_disable:
  * -> async_events_free         |  -  |  Y  |   Y
  * -> fw_clear_alive            |  Y  |  Y  |   Y
  *    ---- FLR boundary ----
+ * <- zero_work_buffer          |  Y  |  -  |   Y
  * <- fw_load(*)                |  Y  |  -  |   Y
  * <- mailbox_init              |  Y  |  Y  |   Y
  * <- query_fw                  |  Y  |  Y  |   Y
@@ -1572,6 +1597,14 @@ static void aie4_pf_reset_done(struct amdxdna_dev *xdna)
 	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	/*
+	 * FLR only: suspend asks firmware to release the work buffer, so what it
+	 * leaves behind is retained state. An FLR gives it no such chance - PMFW
+	 * resets the NPU underneath it, possibly mid-DMA - so the contents are
+	 * indeterminate and are cleared before firmware attaches them again.
+	 */
+	aie4_zero_work_buffer(ndev);
 
 	/* PF owns firmware: must do full fw_load cycle after FLR. */
 	ret = aie4_pf_hw_restart(ndev);
@@ -1690,6 +1723,9 @@ static void aie4_classic_reset_done(struct amdxdna_dev *xdna)
 	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	/* FLR only, for the reason in aie4_pf_reset_done(). */
+	aie4_zero_work_buffer(ndev);
 
 	ret = aie4_classic_hw_restart(ndev);
 	if (ret)
