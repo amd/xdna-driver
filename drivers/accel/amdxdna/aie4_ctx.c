@@ -213,7 +213,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	if (!ndev->partition_id || !hwctx->num_tiles) {
-		XDNA_ERR(xdna, "invalid request partition_id %d, num_tiles %d",
+		XDNA_ERR(xdna, "invalid request partition_id %u, num_tiles %d",
 			 ndev->partition_id, hwctx->num_tiles);
 		return -EINVAL;
 	}
