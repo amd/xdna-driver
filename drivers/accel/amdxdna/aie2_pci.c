@@ -521,9 +521,11 @@ int aie2_hw_reset(struct amdxdna_dev *xdna)
 		return -EAGAIN;
 	}
 
-	/* Stamp before resetting: if the power-cycle itself fails (NPU stays
+	/*
+	 * Stamp before resetting: if the power-cycle itself fails (NPU stays
 	 * wedged), retries stay bounded to one per window instead of storming
-	 * the SMU on every job timeout. */
+	 * the SMU on every job timeout.
+	 */
 	ndev->last_reset_jiffies = jiffies;
 
 	XDNA_WARN(xdna, "NPU firmware unhealthy: power-cycling NPU");
@@ -535,8 +537,10 @@ int aie2_hw_reset(struct amdxdna_dev *xdna)
 		return ret;
 	}
 
-	/* Resume every client even if one fails, so a single broken context
-	 * does not leave the rest of the device suspended. */
+	/*
+	 * Resume every client even if one fails, so a single broken context
+	 * does not leave the rest of the device suspended.
+	 */
 	list_for_each_entry(client, &xdna->client_list, node) {
 		ret = aie2_hwctx_resume(client);
 		if (ret && !first_ret) {
