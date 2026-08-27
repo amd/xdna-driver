@@ -241,7 +241,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct dma_fence *fence = job->fence;
 
-	trace_xdna_job(&job->base, job->hwctx->name, "signaling fence",
+	trace_xdna_job(&job->base, job->hwctx->name, "job complete",
 		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
 
 	aie2_tdr_signal(job->hwctx->client->xdna);
