@@ -16,7 +16,11 @@ enum aie4_msg_opcode {
 	/* Classic/PF/VF common */
 	AIE4_MSG_OP_IDENTIFY                         = 0x10002,
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
-	AIE4_MSG_OP_ASYNC_EVENT_MSG                  = 0x10004,
+	/*
+	 * Async event with a payload in a driver-registered report buffer; also
+	 * registers those buffers. Firmware NPU_MSG_OP_ASYNC_EVENT_MSG.
+	 */
+	AIE4_MSG_OP_ASYNC_EVENT_REPORT               = 0x10004,
 	AIE4_MSG_OP_GET_TELEMETRY                    = 0x10006,
 	AIE4_MSG_OP_SET_RUNTIME_CONFIG               = 0x10007,
 	AIE4_MSG_OP_START_FW_TRACE                   = 0x1000A,
@@ -47,6 +51,13 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_START_FW_LOG                     = 0x40003,
 	AIE4_MSG_OP_STOP_FW_LOG                      = 0x40004,
 	AIE4_MSG_OP_CALIBRATE_CLOCK                  = 0x40006,
+
+	/*
+	 * Async event carrying only ids, in the mailbox message itself. Sent
+	 * with message ID 0, no response expected. Firmware
+	 * NPU_MSG_OP_FIRMWARE_EVENT.
+	 */
+	AIE4_MSG_OP_ASYNC_EVENT_NOTE                 = 0x10012,
 };
 
 enum aie4_msg_status {
@@ -407,7 +418,7 @@ struct aie4_msg_calibrate_clock_resp {
 /* Maximum number of uCs reported in an app health report. */
 #define AIE4_MPNPUFW_MAX_UC_COUNT	6
 
-/* AIE4_MSG_OP_ASYNC_EVENT_MSG: register one async event report buffer. */
+/* AIE4_MSG_OP_ASYNC_EVENT_REPORT: register one async event report buffer. */
 struct aie4_msg_async_event_config_req {
 	__u64 buff_addr;
 	__u32 pasid;
@@ -427,9 +438,9 @@ struct aie4_msg_async_event_msg_event {
 /* The async event types returned in each async response message. */
 enum aie4_msg_async_event_type {
 	AIE4_ASYNC_EVENT_TYPE_AIE_ERROR,
-	AIE4_ASYNC_EVENT_TYPE_EXCEPTION,
+	AIE4_ASYNC_EVENT_TYPE_RESERVED1,
 	AIE4_ASYNC_EVENT_TYPE_CTX_ERROR,
-	AIE4_ASYNC_EVENT_TYPE_PWR_ERROR,
+	AIE4_ASYNC_EVENT_TYPE_RESERVED2,
 	MAX_AIE4_ASYNC_EVENT_TYPE,
 };
 
@@ -477,6 +488,53 @@ struct aie4_async_ctx_error {
 	__u32 error_type;
 	union {
 		struct aie4_msg_app_health_report app_health_report;
+	};
+};
+
+/*
+ * Firmware picks AIE4_MSG_OP_ASYNC_EVENT_REPORT when it has a payload for a
+ * registered report buffer, and AIE4_MSG_OP_ASYNC_EVENT_NOTE when it does not
+ * or when no buffer was free. A context error can arrive either way, so both
+ * paths recover one.
+ */
+enum aie4_msg_async_note_id {
+	AIE4_ASYNC_NOTE_FW_LOG_WATERMARK,
+	AIE4_ASYNC_NOTE_FW_TRACE_WATERMARK,
+	AIE4_ASYNC_NOTE_DEBUG_MODE_ACTIVATED,
+	AIE4_ASYNC_NOTE_CONTEXT_ERROR,
+	AIE4_ASYNC_NOTE_REPORT_DROPPED,
+	AIE4_ASYNC_NOTE_POWER_ERROR,
+
+	AIE4_ASYNC_NOTE_MAX_COUNT,
+};
+
+/*
+ * AIE4_MSG_OP_ASYNC_EVENT_NOTE payload, @event_id selects the union member.
+ */
+struct aie4_msg_async_note {
+	__u32 event_id;
+	union {
+		/* Generic payload for events without specific data. */
+		__u32 reserved[4];
+
+		/* Data for AIE4_ASYNC_NOTE_DEBUG_MODE_ACTIVATED */
+		struct {
+			__u32 ctx_id;
+		} debug_mode_activated;
+
+		/* Data for AIE4_ASYNC_NOTE_CONTEXT_ERROR */
+		struct {
+			__u32 ctx_id;
+		} context_error;
+
+		/*
+		 * Data for AIE4_ASYNC_NOTE_REPORT_DROPPED: the dropped
+		 * event's enum aie4_msg_async_event_type and context id.
+		 */
+		struct {
+			__u32 async_event_type;
+			__u32 ctx_id;
+		} report_dropped;
 	};
 };
 

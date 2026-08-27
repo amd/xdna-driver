@@ -9,6 +9,9 @@
 struct mailbox;
 struct mailbox_channel;
 
+/* Handler for firmware-initiated messages, sent with ID 0, routed by @opcode. */
+typedef int (*xdna_mailbox_async_cb_t)(void *handle, u32 opcode, void __iomem *data, size_t size);
+
 /*
  * xdna_mailbox_msg - message struct
  *
@@ -97,6 +100,18 @@ xdna_mailbox_start_channel(struct mailbox_channel *mb_chann,
 			   const struct xdna_mailbox_chann_res *i2x,
 			   u32 xdna_mailbox_intr_reg,
 			   int mb_irq);
+
+/*
+ * xdna_mailbox_set_async_cb() -- register an async notification handler
+ *
+ * @mailbox_chann: the handle returned from xdna_mailbox_alloc_channel()
+ * @async_handle: opaque handle passed back to @async_cb
+ * @async_cb: callback invoked for firmware-initiated messages, which arrive
+ *            with message ID 0, routed by @opcode. Must be non-blocking; its
+ *            return value is advisory only and never tears the channel down.
+ */
+void xdna_mailbox_set_async_cb(struct mailbox_channel *mailbox_chann, void *async_handle,
+			       xdna_mailbox_async_cb_t async_cb);
 
 /*
  * xdna_mailbox_free_channel() -- free mailbox channel
