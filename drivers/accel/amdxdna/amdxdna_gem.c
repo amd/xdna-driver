@@ -1469,6 +1469,21 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	 * helpers are not available on arm64). Debug-BO sync is not supported on
 	 * this backend.
 	 */
+	if (!args->size) {
+		ret = -EINVAL;
+		goto put_obj;
+	}
+
+	{
+		u64 end;
+
+		if (check_add_overflow(args->offset, args->size, &end) ||
+		    end > gobj->size) {
+			ret = -EINVAL;
+			goto put_obj;
+		}
+	}
+
 	ret = amdxdna_gem_pin(abo);
 	if (ret) {
 		XDNA_ERR(xdna, "Pin BO %d failed, ret %d", args->handle, ret);
