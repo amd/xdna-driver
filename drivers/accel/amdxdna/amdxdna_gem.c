@@ -1419,6 +1419,9 @@ static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
 		return -EINVAL;
 
 	size = min(abo->mem.size, end) - offset;
+	if (!size)
+		return 0;
+
 	first = offset >> PAGE_SHIFT;
 	nr_pages = (PAGE_ALIGN(offset + size) >> PAGE_SHIFT) - first;
 
