@@ -66,6 +66,10 @@ struct mailbox_channel {
 	struct work_struct		rx_work;
 	u32				i2x_head;
 	bool				bad_state;
+
+	/* Optional handler for firmware-initiated messages, sent with ID 0 */
+	void				*async_handle;
+	xdna_mailbox_async_cb_t		async_cb;
 };
 
 #define MSG_BODY_SZ		GENMASK(10, 0)
@@ -246,15 +250,48 @@ check_again:
 	return 0;
 }
 
+/*
+ * Handle a firmware-initiated message, sent with message ID 0. Always reports
+ * success so one unexpected notification cannot put the channel in bad_state
+ * and disable its irq.
+ */
+static int
+mailbox_handle_async_msg(struct mailbox_channel *mb_chann,
+			 struct xdna_msg_header *header, void __iomem *data)
+{
+	int ret;
+
+	if (mb_chann->async_cb) {
+		ret = mb_chann->async_cb(mb_chann->async_handle, header->opcode,
+					 data, header->total_size);
+		if (ret)
+			MB_ERR(mb_chann, "Async handler for opcode 0x%x id 0x%x ret %d",
+			       header->opcode, header->id, ret);
+	} else {
+		MB_ERR(mb_chann, "Dropping unhandled async msg opcode 0x%x id 0x%x",
+		       header->opcode, header->id);
+	}
+
+	return 0;
+}
+
 static int
 mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *header,
 		 void __iomem *data)
 {
 	struct mailbox_msg *mb_msg;
-	int msg_id;
 	int ret = 0;
+	int msg_id;
 
 	msg_id = header->id;
+	if (!msg_id) {
+		/*
+		 * Firmware sends notifications of its own accord with message
+		 * ID 0, which lacks MAGIC_VAL. Not a protocol error.
+		 */
+		return mailbox_handle_async_msg(mb_chann, header, data);
+	}
+
 	if (!mailbox_validate_msgid(msg_id)) {
 		MB_ERR(mb_chann, "Bad message ID 0x%x", msg_id);
 		return -EINVAL;
@@ -496,6 +533,16 @@ struct mailbox_channel *xdna_mailbox_alloc_channel(struct mailbox *mb)
 free_chann:
 	kfree(mb_chann);
 	return NULL;
+}
+
+void xdna_mailbox_set_async_cb(struct mailbox_channel *mb_chann, void *async_handle,
+			       xdna_mailbox_async_cb_t async_cb)
+{
+	if (!mb_chann)
+		return;
+
+	mb_chann->async_handle = async_handle;
+	mb_chann->async_cb = async_cb;
 }
 
 void xdna_mailbox_free_channel(struct mailbox_channel *mb_chann)

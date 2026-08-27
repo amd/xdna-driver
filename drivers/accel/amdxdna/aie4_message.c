@@ -312,7 +312,7 @@ int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 		.send_data = (u8 *)&req,
 		.send_size = sizeof(req),
 		.handle = handle,
-		.opcode = AIE4_MSG_OP_ASYNC_EVENT_MSG,
+		.opcode = AIE4_MSG_OP_ASYNC_EVENT_REPORT,
 		.notify_cb = cb,
 	};
 
