@@ -126,8 +126,17 @@ static int amdxdna_dpt_fetch_payload(struct amdxdna_dpt *dpt, u8 *buf,
 
 	tail = READ_ONCE(dpt->tail);
 
+	/*
+	 * A reader whose offset is ahead of the tail is holding a cursor from
+	 * a ring that no longer exists: every publish starts a fresh handle at
+	 * tail 0, so an offset saved before a disable/enable cycle can never be
+	 * satisfied. The caller gets -EINVAL and is expected to restart from
+	 * offset 0; rate-limit the message because a consumer that retries in a
+	 * loop instead would otherwise flood the kernel log.
+	 */
 	if (tail < *offset) {
-		XDNA_DPT_ERR(dpt, "Invalid fetch offset: 0x%llx", *offset);
+		XDNA_DPT_ERR_RATELIMITED(dpt, "Invalid fetch offset: 0x%llx",
+					 *offset);
 		return -EINVAL;
 	}
 
@@ -303,7 +312,7 @@ static void amdxdna_dpt_timer_get(struct amdxdna_dpt *dpt)
 static void amdxdna_dpt_timer_put(struct amdxdna_dpt *dpt)
 {
 	mutex_lock(&dpt->timer_lock);
-	if (WARN_ON(!refcount_read(&dpt->timer_refs))) {
+	if (drm_WARN_ON_ONCE(&dpt->xdna->ddev, !refcount_read(&dpt->timer_refs))) {
 		mutex_unlock(&dpt->timer_lock);
 		return;
 	}
@@ -331,7 +340,8 @@ static void amdxdna_dpt_fetch_and_dump_to_dmesg(struct amdxdna_dpt *dpt)
 		ret = amdxdna_dpt_fetch_payload(dpt, dpt->local_buffer, &dpt->head,
 						&size, amdxdna_dpt_copy_to_kernel);
 		if (ret) {
-			XDNA_DPT_ERR(dpt, "Failed to fetch FW buffer: %d", ret);
+			XDNA_DPT_ERR_RATELIMITED(dpt, "Failed to fetch FW buffer: %d",
+						 ret);
 			return;
 		}
 		if (!size)
@@ -599,8 +609,9 @@ static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt,
 	buf_size = args->element_size;
 	buf = u64_to_user_ptr(args->buffer);
 	if (!access_ok(buf, buf_size)) {
-		XDNA_DPT_ERR(dpt, "Failed to access buffer, element num %d size 0x%x",
-			     args->num_element, args->element_size);
+		XDNA_DPT_ERR_RATELIMITED(dpt,
+					 "Failed to access buffer, element num %d size 0x%x",
+					 args->num_element, args->element_size);
 		return -EFAULT;
 	}
 
@@ -652,7 +663,7 @@ static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt,
 	ret = amdxdna_dpt_fetch_payload(dpt, buf, &footer.offset, &footer.size,
 					amdxdna_dpt_copy_to_user);
 	if (ret) {
-		XDNA_DPT_ERR(dpt, "Failed to fetch FW buffer: %d", ret);
+		XDNA_DPT_ERR_RATELIMITED(dpt, "Failed to fetch FW buffer: %d", ret);
 		footer.offset = 0;
 		footer.size = 0;
 		ret = -EINVAL;
