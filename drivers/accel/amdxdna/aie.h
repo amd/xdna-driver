@@ -203,13 +203,6 @@ struct amdxdna_msg_buf_hdl {
 struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32 size);
 void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl);
 
-int amdxdna_aie_tile_read(struct aie_device *aie,
-			  struct amdxdna_client *client,
-			  struct amdxdna_drm_get_array *args);
-int amdxdna_aie_tile_write(struct aie_device *aie,
-			   struct amdxdna_client *client,
-			   struct amdxdna_drm_set_state *args);
-
 /* aie_psp.c */
 struct psp_device *aiem_psp_create(struct drm_device *ddev, struct psp_config *conf);
 int aie_psp_start(struct psp_device *psp);

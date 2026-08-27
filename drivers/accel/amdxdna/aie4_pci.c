@@ -16,6 +16,7 @@
 
 #include "aie.h"
 #include "amdxdna_coredump.h"
+#include "amdxdna_tile_read_write.h"
 #include "aie4_pci.h"
 #include "aie4_msg_priv.h"
 #include "amdxdna_ctx.h"
