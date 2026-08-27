@@ -1092,8 +1092,8 @@ static void aie4_job_release(struct kref *ref)
 	struct amdxdna_sched_job *job =
 		container_of(ref, struct amdxdna_sched_job, refcnt);
 
-	amdxdna_sched_job_cleanup(job);
-	atomic64_inc(&job->hwctx->job_free_cnt);
+
+	amdxdna_job_cleanup(job);
 	if (job->out_fence)
 		dma_fence_put(job->out_fence);
 	kfree(job);
