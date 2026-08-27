@@ -543,6 +543,25 @@ TRACE_EVENT(xdna_cmd_wait_done,
 		      __get_str(name), __entry->hwctx_id, __entry->seq, __entry->ret)
 );
 
+TRACE_EVENT(xdna_job_queue,
+	    TP_PROTO(const char *name, u64 seq, u64 outstanding, const char *str),
+
+	    TP_ARGS(name, seq, outstanding, str),
+
+	    TP_STRUCT__entry(__string(name, name)
+			     __field(u64, seq)
+			     __field(u64, outstanding)
+			     __string(str, str)),
+
+	    TP_fast_assign(__assign_str(name);
+			   __entry->seq = seq;
+			   __entry->outstanding = outstanding;
+			   __assign_str(str);),
+
+	    TP_printk("%s seq#:%llu outstanding:%llu %s", __get_str(name),
+		      __entry->seq, __entry->outstanding, __get_str(str))
+);
+
 #endif /* !defined(_AMDXDNA_TRACE_EVENTS_H_) || defined(TRACE_HEADER_MULTI_READ) */
 
 /* This part must be outside protection */

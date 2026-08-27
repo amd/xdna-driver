@@ -241,8 +241,9 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct dma_fence *fence = job->fence;
 
-	trace_xdna_job(&job->base, job->hwctx->name, "job complete",
-		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
+	trace_xdna_job_queue(job->hwctx->name, job->seq,
+			     atomic64_read(&job->hwctx->job_submit_cnt) -
+			     atomic64_read(&job->hwctx->job_free_cnt) - 1, "job complete");
 
 	aie2_tdr_signal(job->hwctx->client->xdna);
 	job->hwctx->priv->completed++;
@@ -458,8 +459,9 @@ out:
 		aie2_tdr_signal(hwctx->client->xdna);
 		amdxdna_io_stats_job_start(job->hwctx->client);
 	}
-	trace_xdna_job(sched_job, hwctx->name, "sent to device",
-		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
+	trace_xdna_job_queue(hwctx->name, job->seq,
+			     atomic64_read(&hwctx->job_submit_cnt) -
+			     atomic64_read(&hwctx->job_free_cnt) + 1, "sent to device");
 
 	return fence;
 }

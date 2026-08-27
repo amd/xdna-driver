@@ -959,6 +959,7 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 	u16 chained;
 	int ret;
 	u32 op;
+	u64 ri;
 
 	op = amdxdna_cmd_get_op(cmd_abo);
 	if (op != ERT_START_DPU) {
@@ -1036,9 +1037,10 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 	pkt->pkt_header.common_header.reserved = 0x0;
 	pkt->pkt_header.completion_signal = amdxdna_gem_dev_addr(cmd_abo) +
 					    offsetof(struct amdxdna_cmd, header);
+	ri = get_read_index(hwctx);
 	*seq = publish_cmd(hwctx);
 	ring_doorbell(hwctx);
-	trace_amdxdna_debug_point(hwctx->name, *seq, "job submitted");
+	trace_xdna_job_queue(hwctx->name, *seq, *seq + 1 - ri, "job submitted");
 	XDNA_DBG(xdna, "Submitted one cmd, %s seq %lld", hwctx->name, *seq);
 	return 0;
 }
@@ -1213,8 +1215,9 @@ static void job_worker(struct work_struct *work)
 
 	while ((job = peek_running_job(hwctx))) {
 		wait_till_seq_completed(hwctx, job->seq);
-		trace_amdxdna_debug_point(hwctx->name, job->seq, "job complete");
-
+		trace_xdna_job_queue(hwctx->name, job->seq,
+				     READ_ONCE(hwctx->priv->write_index) -
+				     get_read_index(hwctx), "job complete");
 		if (get_read_index(hwctx) > job->seq) {
 			/*
 			 * The published commands drained.  A chain that was only
