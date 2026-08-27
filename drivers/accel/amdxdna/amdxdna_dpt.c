@@ -240,7 +240,7 @@ static irqreturn_t amdxdna_dpt_irq_handler(int irq, void *data)
 	if (dpt->io_base)
 		writel(0, dpt->io_base + dpt->msi_address);
 
-	queue_work(system_wq, &dpt->work);
+	queue_work(system_percpu_wq, &dpt->work);
 	return IRQ_HANDLED;
 }
 
@@ -447,7 +447,7 @@ static void amdxdna_dpt_timer(struct timer_list *t)
 {
 	struct amdxdna_dpt *dpt = container_of(t, struct amdxdna_dpt, timer);
 
-	queue_work(system_wq, &dpt->work);
+	queue_work(system_percpu_wq, &dpt->work);
 	mod_timer(&dpt->timer,
 		  jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
 }
