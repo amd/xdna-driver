@@ -184,12 +184,16 @@ static bool ctx_reset_since(struct amdxdna_hwctx_priv *priv, u32 gen)
 	return READ_ONCE(priv->ctx_error_gen) != gen;
 }
 
-static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id)
+static void aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id)
 {
 	DECLARE_AIE_MSG(aie4_msg_destroy_hw_context, AIE4_MSG_OP_DESTROY_HW_CONTEXT);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
 
 	req.hw_context_id = hw_context_id;
-	return aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_WARN(xdna, "destroy ctx id %d failed %d", hw_context_id, ret);
 }
 
 static u32 aie4_parse_priority_to_dev(u32 priority)
@@ -319,13 +323,12 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	return 0;
 }
 
-void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
+void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
@@ -345,9 +348,8 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
 		mutex_unlock(&priv->io_lock);
 	}
 
-	ret = aie4_msg_destroy_context(ndev, priv->hw_ctx_id);
-	if (ret)
-		XDNA_WARN(xdna, "destroy ctx id %d failed %d", priv->hw_ctx_id, ret);
+	if (flags != AIE4_HWCTX_DISCONNECT)
+		aie4_msg_destroy_context(ndev, priv->hw_ctx_id);
 
 	priv->hw_ctx_id = CTX_INVALID_ID;
 	hwctx->fw_ctx_id = -1;
@@ -639,7 +641,7 @@ void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 
 	/* Disconnects the ctx and wakes the job worker (status DISCONNECTED). */
-	aie4_hwctx_destroy(hwctx);
+	aie4_hwctx_destroy(hwctx, AIE4_HWCTX_NORMAL);
 	if (priv->kernel_submit) {
 		/* Drain/abort any in-flight jobs before tearing down the queue. */
 		aie4_hwctx_cleanup_running_jobs(hwctx, false);
@@ -1140,7 +1142,7 @@ static void job_abort(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 
-	XDNA_ERR(hwctx->client->xdna, "aborting %s job %lld", hwctx->name, job->seq);
+	XDNA_WARN(hwctx->client->xdna, "aborting %s job %lld", hwctx->name, job->seq);
 	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_ABORT);
 	update_read_index(hwctx, job->seq + 1);
 	job_done(job);
@@ -1261,7 +1263,7 @@ static void job_worker(struct work_struct *work)
  * context (aie4_hwctx_destroy), so CERT is stopped and no submitter can publish
  * (doorbell_addr is INVALID), so nothing races these writes.
  */
-static void aie4_hwctx_reset_umq_indices(struct amdxdna_hwctx *hwctx)
+static void aie4_hwctx_reset_hsa_idx(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	u64 wi;
@@ -1296,6 +1298,9 @@ void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx, bool errored)
 	struct amdxdna_sched_job *job;
 	bool timeout = errored;
 
+	if (!priv->kernel_submit)
+		return;
+
 	/* The worker parks in-flight jobs on disconnect; make sure it is not
 	 * touching the running list before we drain it.
 	 */
@@ -1303,7 +1308,10 @@ void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx, bool errored)
 	while ((job = next_running_job(hwctx))) {
 		if (timeout) {
 			job_timeout(job);
-			/* Only the faulting head job carries the report. */
+			/*
+			 * Timeout first job, abort the reset jobs. Therefore,
+			 * only the faulting head job carries the report.
+			 */
 			timeout = false;
 		} else {
 			job_abort(job);
@@ -1328,7 +1336,7 @@ void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx, bool errored)
 	 * the normal suspend path (which does not call this and must keep its
 	 * indices so aie4_hwctx_resume_jobs() can re-drive the preserved jobs).
 	 */
-	aie4_hwctx_reset_umq_indices(hwctx);
+	aie4_hwctx_reset_hsa_idx(hwctx);
 }
 
 /*
