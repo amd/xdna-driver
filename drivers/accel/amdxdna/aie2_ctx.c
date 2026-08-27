@@ -16,6 +16,7 @@
 
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
+#include "amdxdna_coredump.h"
 #include "aie2_solver.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"

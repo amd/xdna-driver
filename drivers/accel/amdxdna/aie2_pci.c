@@ -23,6 +23,7 @@
 #include <asm/hypervisor.h>
 
 #include "aie.h"
+#include "amdxdna_coredump.h"
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 #include "aie2_solver.h"
