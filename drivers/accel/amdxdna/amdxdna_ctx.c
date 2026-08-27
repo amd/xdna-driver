@@ -282,6 +282,32 @@ static int amdxdna_hwctx_id_alloc(struct amdxdna_dev *xdna)
  * This guarantee that when hwctx and resources will be released, if user
  * doesn't call amdxdna_drm_destroy_hwctx_ioctl.
  */
+/* Caller must hold srcu_read_lock(&client->hwctx_srcu). */
+bool amdxdna_client_has_pending_jobs(struct amdxdna_client *client)
+{
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id;
+
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+		if (amdxdna_hwctx_report_state(hwctx, NULL, NULL) ==
+		    AMDXDNA_HWCTX_STATE_ACTIVE)
+			return true;
+	}
+	return false;
+}
+
+/* Caller must hold srcu_read_lock(&client->hwctx_srcu). */
+void amdxdna_client_wait_idle(struct amdxdna_client *client)
+{
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id;
+
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
+		wait_event(hwctx->job_free_wq,
+			   amdxdna_hwctx_report_state(hwctx, NULL, NULL) ==
+			   AMDXDNA_HWCTX_STATE_IDLE);
+}
+
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
