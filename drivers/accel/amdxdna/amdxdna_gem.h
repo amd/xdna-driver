@@ -36,6 +36,12 @@ struct amdxdna_mem {
 	struct sg_table			*sgt;
 	struct page			**pages;
 	unsigned long			nr_pages;
+	/*
+	 * Pages are borrowed from a Xen foreign (privcmd) mapping's page
+	 * array rather than pinned via pin_user_pages(); they are owned by
+	 * that VMA and must not be unpinned on free.
+	 */
+	bool				foreign;
 	struct mm_struct		*mm;
 };
 
