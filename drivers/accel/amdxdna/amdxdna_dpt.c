@@ -210,14 +210,17 @@ static int amdxdna_dpt_fetch_payload(struct amdxdna_dpt *dpt, u8 *buf,
 	 * A reader whose offset is ahead of the tail is holding a cursor from
 	 * a ring that no longer exists: every publish starts a fresh handle at
 	 * tail 0, so an offset saved before a disable/enable cycle can never be
-	 * satisfied. The caller gets -EINVAL and is expected to restart from
-	 * offset 0; rate-limit the message because a consumer that retries in a
-	 * loop instead would otherwise flood the kernel log.
+	 * satisfied. -ESTALE tells the consumer to drop that cursor and restart
+	 * from offset 0, and unlike a silent reset it also tells it that it
+	 * lost its place, so a gap can be recorded rather than a fresh ring
+	 * being indistinguishable from missed data. Rate-limit the message: a
+	 * consumer that ignores the resync and retries in a loop would
+	 * otherwise flood the kernel log.
 	 */
 	if (tail < *offset) {
-		XDNA_DPT_ERR_RATELIMITED(dpt, "Invalid fetch offset: 0x%llx",
+		XDNA_DPT_ERR_RATELIMITED(dpt, "Stale fetch offset: 0x%llx",
 					 *offset);
-		return -EINVAL;
+		return -ESTALE;
 	}
 
 	if (tail == *offset) {
@@ -724,23 +727,37 @@ static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt,
 	footer.size = offset;
 	ret = amdxdna_dpt_fetch_payload(dpt, buf, &footer.offset, &footer.size,
 					amdxdna_dpt_copy_to_user);
-	if (ret) {
-		XDNA_DPT_ERR_RATELIMITED(dpt, "Failed to fetch FW buffer: %d", ret);
+	if (ret == -ESTALE) {
+		/*
+		 * Hand back the resync point along with the error. The error
+		 * is what tells the consumer its cursor died and that the
+		 * data published before the restart is gone; the offset
+		 * saves it from having to know that 0 is the only value that
+		 * can work. fetch_payload has already reported the condition,
+		 * so do not log it a second time.
+		 */
 		footer.offset = 0;
 		footer.size = 0;
-		ret = -EINVAL;
+	} else if (ret) {
+		XDNA_DPT_ERR_RATELIMITED(dpt, "Failed to fetch FW buffer: %d", ret);
+		footer.size = 0;
 	}
 
 exit:
-	if (ret == 0 || ret == -ESHUTDOWN) {
+	/*
+	 * -ESHUTDOWN and -ESTALE are reported with metadata, not instead of
+	 * it: the first carries a zero-size sentinel, the second the offset
+	 * to resume from. A fetch that failed any other way leaves the
+	 * caller's buffer untouched, since there is nothing useful to say.
+	 */
+	if (ret == 0 || ret == -ESHUTDOWN || ret == -ESTALE) {
 		if (copy_to_user(buf + offset, &footer, sizeof(footer))) {
 			/*
-			 * On -ESHUTDOWN preserve the original error: user
-			 * space still gets the zero-size sentinel via the
-			 * footer.size = 0 already set on the shutdown
-			 * branch above, and even if the writeback fails
-			 * the disabled-channel status code must reach the
-			 * caller intact.
+			 * Preserve the original error: the caller needs to
+			 * know the channel is gone, or that its cursor is,
+			 * more than it needs to know the writeback failed,
+			 * and it can tell either way because the metadata it
+			 * would have read is unchanged.
 			 */
 			if (ret == 0)
 				ret = -EFAULT;
