@@ -1092,10 +1092,7 @@ static void aie4_job_release(struct kref *ref)
 	struct amdxdna_sched_job *job =
 		container_of(ref, struct amdxdna_sched_job, refcnt);
 
-
 	amdxdna_job_cleanup(job);
-	if (job->out_fence)
-		dma_fence_put(job->out_fence);
 	kfree(job);
 }
 
@@ -1513,13 +1510,11 @@ static void cancel_pending_job(struct amdxdna_hwctx *hwctx,
 
 int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
 {
+	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct ww_acquire_ctx acquire_ctx;
-	struct amdxdna_gem_obj *abo;
+	struct amdxdna_dev *xdna = client->xdna;
 	u32 op;
 	int ret;
-	int i;
 
 	XDNA_DBG(xdna, "ctx %s job 0x%llx received", hwctx->name, (u64)job);
 
@@ -1553,41 +1548,18 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 		return -ESRCH;
 	}
 
-retry:
-	ret = drm_gem_lock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
-	if (ret) {
-		XDNA_WARN(xdna, "Failed to lock BOs, ret %d", ret);
-		goto put_mm;
-	}
-
-	for (i = 0; i < job->bo_cnt; i++) {
-		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
+	down_read(&xdna->notifier_lock);
+	while (!list_empty(&client->bo_invalid_list)) {
+		up_read(&xdna->notifier_lock);
+		ret = amdxdna_client_populate_ranges(client);
 		if (ret) {
-			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
-			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+			XDNA_ERR(xdna, "Populate ranges failed, ret %d", ret);
 			goto put_mm;
 		}
+		down_read(&xdna->notifier_lock);
 	}
-
-	down_read(&xdna->notifier_lock);
-	for (i = 0; i < job->bo_cnt; i++) {
-		abo = to_xdna_obj(job->bos[i]);
-		if (abo->mem.map_invalid) {
-			up_read(&xdna->notifier_lock);
-			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
-			ret = amdxdna_populate_range(abo);
-			if (ret)
-				goto put_mm;
-			goto retry;
-		}
-	}
-
-	job->out_fence = dma_fence_get(job->fence);
-	for (i = 0; i < job->bo_cnt; i++)
-		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
-
+	atomic64_inc(&hwctx->job_submit_cnt);
 	up_read(&xdna->notifier_lock);
-	drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
 
 	/*
 	 * Wait until this job is at the head of the pending list before touching
@@ -1603,10 +1575,8 @@ retry:
 	enqueue_pending_job(hwctx, job);
 	ret = wait_event_freezable(priv->job_list_wq,
 				   READ_ONCE(priv->pending_head) == job);
-	if (ret) {
-		cancel_pending_job(hwctx, job);
-		goto signal_fence;
-	}
+	if (ret)
+		goto put_mm_dec;
 
 	mutex_lock(&priv->io_lock);
 	ret = submit_job_cmds(hwctx, job);
@@ -1619,8 +1589,7 @@ retry:
 		 * published takes the success path below.
 		 */
 		mutex_unlock(&priv->io_lock);
-		cancel_pending_job(hwctx, job);
-		goto signal_fence;
+		goto put_mm_dec;
 	}
 
 	/*
@@ -1641,14 +1610,13 @@ retry:
 
 	/* Release the next pending submitter and kick the reaper. */
 	wake_up_all(&priv->job_list_wq);
-	atomic64_inc(&hwctx->job_submit_cnt);
 	queue_work(priv->job_work_q, &priv->job_work);
 	return 0;
 
-signal_fence:
-	dma_fence_signal(job->fence);
-	dma_fence_put(job->out_fence);
-	job->out_fence = NULL;
+put_mm_dec:
+	cancel_pending_job(hwctx, job);
+	atomic64_dec(&hwctx->job_submit_cnt);
+	wake_up(&hwctx->job_free_wq);
 put_mm:
 	mmput(job->mm);
 	return ret;
