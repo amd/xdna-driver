@@ -164,6 +164,15 @@ int amdxdna_dpt_fini(struct aie_device *aie);
 int amdxdna_dpt_suspend(struct amdxdna_dev *xdna);
 int amdxdna_dpt_resume(struct amdxdna_dev *xdna);
 
+/*
+ * FLR counterparts of suspend/resume, driven from the per-generation
+ * reset_prepare / reset_done handlers. Unlike PM suspend, PMFW resets
+ * the firmware with no driver message, so reset_done restarts each ring
+ * from a zeroed buffer instead of resuming it.
+ */
+int amdxdna_dpt_reset_prepare(struct amdxdna_dev *xdna);
+int amdxdna_dpt_reset_done(struct amdxdna_dev *xdna);
+
 /* dmesg-dump consumer control (debugfs). */
 int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable);
 int amdxdna_fw_log_set_state(struct amdxdna_dev *xdna, u32 level);
