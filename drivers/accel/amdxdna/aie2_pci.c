@@ -1046,6 +1046,33 @@ static int aie2_set_power_mode(struct amdxdna_client *client,
 	return aie2_pm_set_mode(xdna->dev_handle, power_mode, settle_ms);
 }
 
+/*
+ * aie2 names the hardware context in its force preemption runtime config, so
+ * the flag is armed per context when that context is configured and there is
+ * nothing to send to firmware here. Recording the state is the whole job: it
+ * selects what contexts created from now on are armed with. aie4 has one global
+ * flag instead and pushes each change down immediately.
+ */
+static int aie2_set_force_preempt(struct amdxdna_client *client,
+				  struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
+	struct amdxdna_drm_attribute_state state;
+
+	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), sizeof(state)))
+		return -EFAULT;
+
+	if (state.state > 1)
+		return -EINVAL;
+
+	if (XDNA_MBZ_DBG(client->xdna, state.pad, sizeof(state.pad)))
+		return -EINVAL;
+
+	ndev->aie.force_preempt_enabled = state.state;
+
+	return 0;
+}
+
 static int aie2_set_frame_boundary_preempt(struct amdxdna_client *client,
 					   struct amdxdna_drm_set_state *args)
 {
@@ -1092,7 +1119,7 @@ static int aie2_set_state(struct amdxdna_client *client,
 		ret = aie2_set_power_mode(client, args, settle_ms);
 		break;
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
-		ret = amdxdna_set_force_preempt_state(&ndev->aie, client, args);
+		ret = aie2_set_force_preempt(client, args);
 		break;
 	case DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:
 		ret = aie2_set_frame_boundary_preempt(client, args);
