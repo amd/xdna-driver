@@ -34,11 +34,10 @@ struct aie_msg_ops {
 
 	int (*query_telemetry)(struct aie_device *aie, char __user *buf, u32 size,
 			       struct amdxdna_drm_query_telemetry_header *header);
-	/* Optional per-arch FW health/map hooks; leave NULL when unsupported. */
+	/* Optional per-arch FW health hook; leave NULL when unsupported. */
 	int (*fill_hwctx_health)(struct aie_device *aie,
 				 struct amdxdna_hwctx *hwctx,
 				 struct amdxdna_drm_hwctx_entry *entry);
-	int (*fill_hwctx_map)(struct aie_device *aie, u32 *map);
 
 	int  (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u32 level);
 	int  (*fw_log_config)(struct amdxdna_dev *xdna, u32 level);

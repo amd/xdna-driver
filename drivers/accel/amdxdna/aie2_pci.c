@@ -809,39 +809,6 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 	return 0;
 }
 
-static int aie2_fill_hwctx_map_cb(struct amdxdna_hwctx *hwctx, void *arg)
-{
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	u32 *map = arg;
-
-	if (hwctx->fw_ctx_id >= xdna->dev_handle->priv->hwctx_limit) {
-		XDNA_ERR(xdna, "Invalid fw ctx id %d/%d ", hwctx->fw_ctx_id,
-			 xdna->dev_handle->priv->hwctx_limit);
-		return -EINVAL;
-	}
-
-	map[hwctx->fw_ctx_id] = hwctx->id;
-	return 0;
-}
-
-int aie2_fill_hwctx_map(struct aie_device *aie, u32 *map)
-{
-	struct amdxdna_dev *xdna = aie->xdna;
-	struct amdxdna_client *tmp_client;
-	int ret;
-
-	amdxdna_for_each_client(xdna, tmp_client) {
-		if (!amdxdna_client_visible(tmp_client))
-			continue;
-		ret = amdxdna_hwctx_walk(tmp_client, map, NULL,
-					 aie2_fill_hwctx_map_cb);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
-
 static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
