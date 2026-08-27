@@ -127,7 +127,7 @@ int amdxdna_get_hwctx_status(struct aie_device *aie,
 	if (ret && ret != -ENOSPC)
 		return ret;
 
-	args->buffer_size -= (u32)(array_args.buffer - args->buffer);
+	args->buffer_size = (u32)(array_args.buffer - args->buffer);
 	return 0;
 }
 
