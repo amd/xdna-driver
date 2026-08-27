@@ -344,8 +344,7 @@ get_npu_busy_time_ns()
   }
 
   ::closedir(dir);
-  // TODO: Throw when aie4 also support the same io stat
-  //throw std::runtime_error("Failed to find drm-engine entry!");
+  throw std::runtime_error("Failed to find drm-engine entry!");
   return 0;
 }
 
