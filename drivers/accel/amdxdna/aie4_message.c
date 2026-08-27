@@ -262,7 +262,7 @@ int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode)
 	return 0;
 }
 
-int aie4_force_preemption(struct amdxdna_dev_hdl *ndev)
+int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable)
 {
 	DECLARE_AIE_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
 	struct aie4_msg_runtime_config_force_preemption *force_preempt;
@@ -271,7 +271,7 @@ int aie4_force_preemption(struct amdxdna_dev_hdl *ndev)
 
 	req.type = type;
 	force_preempt = (struct aie4_msg_runtime_config_force_preemption *)req.data;
-	force_preempt->enabled = 1;
+	force_preempt->enabled = enable;
 
 	msg.send_size = sizeof(req);
 
