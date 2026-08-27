@@ -1115,7 +1115,15 @@ static void job_abort(struct amdxdna_sched_job *job)
 
 	XDNA_WARN(hwctx->client->xdna, "aborting %s job %lld", hwctx->name, job->seq);
 	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_ABORT);
-	update_read_index(hwctx, job->seq + 1);
+	/*
+	 * Only force read_index forward when CERT has not already moved it past this
+	 * job. On the reset drain read_index is still <= job->seq (CERT stopped), so
+	 * advance it here to release waiters. For a partial chain closed by a later
+	 * command's LAST_CMD, CERT has already advanced read_index past this job -
+	 * do not clobber it.
+	 */
+	if (get_read_index(hwctx) <= job->seq)
+		update_read_index(hwctx, job->seq + 1);
 	job_done(job);
 }
 
@@ -1198,7 +1206,23 @@ static void job_worker(struct work_struct *work)
 					     READ_ONCE(hwctx->priv->write_index) -
 					     get_read_index(hwctx), "job complete");
 			dequeue_running_job(hwctx, job);
-			job_complete(job);
+			/*
+			 * read_index advanced past this job. A fully published
+			 * job (SUBMITTED) ran to completion. A partial chain
+			 * (SUBMITTING: a later sub-command failed to publish, so
+			 * the chain never got CHAIN_FLG_LAST_CMD) only reaches
+			 * here once a *later* command's LAST_CMD closes the
+			 * dangling runlist and advances read_index past it - so
+			 * report it ABORT, not a false completion. If no such
+			 * command follows, read_index never advances and we stay
+			 * parked in wait_till_seq_completed() above until the
+			 * user's wait_command() times out and breaks the wait
+			 * (or ctx teardown reaps it).
+			 */
+			if (job->aie4_job_state != AIE4_JOB_STATE_SUBMITTED)
+				job_abort(job);
+			else
+				job_complete(job);
 		} else if (aie4_hwctx_has_reset(hwctx)) {
 			bool faulted;
 
