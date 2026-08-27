@@ -64,24 +64,25 @@ struct amdxdna_hwctx_priv {
 	 * Both the flag and the multi-word report body are protected by io_lock
 	 * (cached only for kernel-mode contexts); the flag alone is insufficient
 	 * because the worker can overwrite the body while a reader consumes it.
-	 * aie4_unlink_cert_comp() also reads the flag to gate the ctx_error_gen
-	 * bump; that read is serialized against the io_lock writers by dev_lock
-	 * (cache, reset and destroy all run under dev_lock).
+	 * aie4_hwctx_cleanup_running_jobs() consumes it on the errored reset path to
+	 * attach the report to the faulting job; that access is serialized against
+	 * the io_lock writers by dev_lock (cache, reset and destroy run under
+	 * dev_lock).
 	 */
 	bool                            cached_ctx_error_valid;
 	struct aie4_async_ctx_error     cached_ctx_error;
 	/*
-	 * Monotonic count of critical ctx errors recorded for this ctx (bumped in
-	 * aie4_unlink_cert_comp() when cached_ctx_error_valid is set, i.e. on a TDR
-	 * disconnect). A submitter parked in the HSA-full wait snapshots it before
-	 * sleeping; if it advances while the wait is broken by a context recreate,
-	 * the recreate was a TDR reset and the submit unwinds. If it is unchanged,
-	 * the recreate was a benign suspend/resume, so the wait re-acquires the
-	 * fresh cert_comp and continues. Written under cert_comp_lock, read
-	 * locklessly with READ_ONCE (safe: the wait's schedule() commits the
-	 * snapshot before any teardown wake, and the count is monotonic).
+	 * Generation marker for the last ctx reset, a non-zero timestamp
+	 * (ktime_get_ns): seeded at ctx init and re-stamped on every reset in
+	 * aie4_hwctx_cleanup_running_jobs(). A submitter lazily captures it before
+	 * publishing and bails if it advances mid-chain (ctx_reset_since()), so a
+	 * chain is never split across a reset; seeding it non-zero keeps the
+	 * capture sentinel (0 == not captured) from colliding with a real value.
+	 * Read under io_lock by submitters; the reset stamp is a lockless WRITE_ONCE
+	 * done after the ctx is disconnected (so it cannot race a reader), published
+	 * to later submitters by the recreate's doorbell re-validation.
 	 */
-	u32                             ctx_error_gen;
+	u64                             ctx_error_gen;
 
 	/* Kernel-mode submission: driver fills the user HSA queue and rings
 	 * the doorbell.  umq_pkts/umq_indirect_pkts alias the user umq_bo;
