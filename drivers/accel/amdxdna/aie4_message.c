@@ -628,8 +628,16 @@ void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 
 	ndev->aie.msg_ops.query_status = aie4_query_status;
 	ndev->aie.msg_ops.query_telemetry = aie4_query_telemetry;
-	/* aie4 has no fw_ctx_id <-> hwctx_id map and no per-ctx FW health. */
-	ndev->aie.hwctx_limit = 0;
+	/*
+	 * A non-zero limit makes amdxdna_get_telemetry() emit a
+	 * firmware-context-id to driver-context-id map at the head of the
+	 * telemetry buffer (like aie2), so the shim can label per-context
+	 * telemetry with the driver context id. The firmware assigns each
+	 * context an id in the range [0, MAX_HWCTX_ID) and indexes its
+	 * per-context telemetry (preemption counters) by that id, so the
+	 * telemetry map needs one entry per possible id.
+	 */
+	ndev->aie.hwctx_limit = MAX_HWCTX_ID;
 
 	/*
 	 * FW logging is owned by the PF; a VF must not start its own log
