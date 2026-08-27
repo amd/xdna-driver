@@ -401,6 +401,27 @@ static void aie4_restore_power_mode(struct amdxdna_dev_hdl *ndev)
 		XDNA_DBG(ndev->aie.xdna, "Restored power mode %d", ndev->pw_mode);
 }
 
+/*
+ * A full firmware reload on suspend puts the scheduler back to its default of
+ * no forced preemption, so a cached enable has to be re-sent on resume. Only an
+ * enable is worth sending, disabled being that default. Force preemption is a
+ * debug and test knob, so a failure warns rather than failing hw start.
+ */
+static void aie4_restore_force_preemption(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	if (!ndev->aie.force_preempt_enabled)
+		return;
+
+	ret = aie4_force_preemption(ndev, true);
+	if (ret)
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to restore force preemption (%d), using fw default", ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "Restored force preemption");
+}
+
 static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -449,6 +470,7 @@ static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 		goto mbox_fini;
 
 	aie4_restore_power_mode(ndev);
+	aie4_restore_force_preemption(ndev);
 
 	return 0;
 
@@ -498,6 +520,7 @@ static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
 	}
 
 	aie4_restore_power_mode(ndev);
+	aie4_restore_force_preemption(ndev);
 
 	return 0;
 
@@ -587,6 +610,7 @@ static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
 	}
 
 	aie4_restore_power_mode(ndev);
+	aie4_restore_force_preemption(ndev);
 
 	return 0;
 
@@ -1260,6 +1284,7 @@ error:
  * <- partition_init            |  -  |   -    |  Y  |   Y    |   Y
  * <- alloc_async_event         |  -  |   -    |  Y  |   Y    |   Y
  * <- restore_power_mode        |  Y  |   Y    |  Y  |   Y    |   Y
+ * <- restore_force_preempt     |  Y  |   Y    |  Y  |   Y    |   Y
  * <- hwctx_resume_all          |  -  |   -    |  Y  |   Y    |   Y
  * <- restore VFs               |  Y  |   Y    |  -  |   -    |   -
  *
@@ -1702,6 +1727,39 @@ int aie4_fw_trace_fini(struct amdxdna_dev *xdna)
 	return ret;
 }
 
+/*
+ * Force preemption is one global flag in the firmware scheduler, not a
+ * per-context or per-client one, and it stays set until firmware is told
+ * otherwise. Send both edges down as they are asked for: firmware samples the
+ * flag when it loads a context, so a stale enable preempts every later context,
+ * whoever created it. aie2 names the context in its own runtime config and so
+ * arms per context instead, which is why this cannot be shared with it.
+ */
+static int aie4_set_force_preempt_state(struct amdxdna_client *client,
+					struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
+	struct amdxdna_drm_attribute_state state;
+	int ret;
+
+	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), sizeof(state)))
+		return -EFAULT;
+
+	if (state.state > 1)
+		return -EINVAL;
+
+	if (XDNA_MBZ_DBG(client->xdna, state.pad, sizeof(state.pad)))
+		return -EINVAL;
+
+	ret = aie4_force_preemption(ndev, state.state);
+	if (ret)
+		return ret;
+
+	ndev->aie.force_preempt_enabled = state.state;
+
+	return 0;
+}
+
 static int aie4_set_state(struct amdxdna_client *client,
 			  struct amdxdna_drm_set_state *args, u32 *settle_ms)
 {
@@ -1721,7 +1779,7 @@ static int aie4_set_state(struct amdxdna_client *client,
 		ret = aie4_set_power_mode(client, args);
 		break;
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
-		ret = amdxdna_set_force_preempt_state(&ndev->aie, client, args);
+		ret = aie4_set_force_preempt_state(client, args);
 		break;
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
 		ret = amdxdna_aie_tile_write(&ndev->aie, client, args);
