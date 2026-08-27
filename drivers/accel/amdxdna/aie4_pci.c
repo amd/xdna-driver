@@ -1786,7 +1786,7 @@ int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level)
 		return -EINVAL;
 	}
 
-	dpt = rcu_dereference_protected(xdna->fw_log,
+	dpt = rcu_dereference_protected(xdna->fw_log.data,
 					lockdep_is_held(&xdna->dev_lock));
 	if (!dpt) {
 		XDNA_ERR(xdna, "FW log handle not allocated");
@@ -1866,7 +1866,7 @@ int aie4_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
 	struct amdxdna_dpt *dpt;
 	int ret;
 
-	dpt = rcu_dereference_protected(xdna->fw_trace,
+	dpt = rcu_dereference_protected(xdna->fw_trace.data,
 					lockdep_is_held(&xdna->dev_lock));
 	if (!dpt) {
 		XDNA_ERR(xdna, "FW trace handle not allocated");
