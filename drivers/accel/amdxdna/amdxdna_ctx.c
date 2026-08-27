@@ -27,7 +27,7 @@
  * once that many IDs have been consumed cyclically, spuriously failing hwctx
  * creation.
  */
-#define MAX_HWCTX_ID		U32_MAX
+#define MAX_DRIVER_HWCTX_ID	U32_MAX
 #define MAX_ARG_COUNT		4095
 
 struct amdxdna_fence {
@@ -266,12 +266,12 @@ static int amdxdna_hwctx_id_alloc(struct amdxdna_dev *xdna)
 		xdna->next_hwctxid = AMDXDNA_MIN_HWCTX_ID;
 
 	id = ida_alloc_range(&xdna->hwctx_ida, xdna->next_hwctxid,
-			     MAX_HWCTX_ID, GFP_KERNEL);
+			     MAX_DRIVER_HWCTX_ID, GFP_KERNEL);
 	if (id == -ENOSPC)
 		id = ida_alloc_range(&xdna->hwctx_ida, AMDXDNA_MIN_HWCTX_ID,
-				     MAX_HWCTX_ID, GFP_KERNEL);
+				     MAX_DRIVER_HWCTX_ID, GFP_KERNEL);
 	if (id >= 0)
-		xdna->next_hwctxid = (id >= MAX_HWCTX_ID) ?
+		xdna->next_hwctxid = (id >= MAX_DRIVER_HWCTX_ID) ?
 			AMDXDNA_MIN_HWCTX_ID : id + 1;
 
 	return id;
