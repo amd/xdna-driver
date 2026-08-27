@@ -200,6 +200,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 	abo->open_ref = 0;
 	abo->internal = false;
 	INIT_LIST_HEAD(&abo->mem.umap_list);
+	INIT_LIST_HEAD(&abo->node);
 
 	return abo;
 }
@@ -472,6 +473,10 @@ static void amdxdna_gem_dev_obj_free(struct drm_gem_object *gobj)
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
+	down_write(&xdna->notifier_lock);
+	list_del_init(&abo->node);
+	up_write(&xdna->notifier_lock);
+
 	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, amdxdna_gem_dev_addr(abo));
 	if (abo->pinned)
 		amdxdna_gem_unpin(abo);
@@ -692,6 +697,10 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
+
+	down_write(&xdna->notifier_lock);
+	list_del_init(&abo->node);
+	up_write(&xdna->notifier_lock);
 
 	amdxdna_hmm_unregister(abo, NULL, 0, 0);
 	flush_workqueue(xdna->notifier_wq);
