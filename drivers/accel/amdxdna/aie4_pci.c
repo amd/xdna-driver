@@ -923,9 +923,9 @@ static int aie4_query_clock_metadata(struct amdxdna_client *client,
 
 	aie_update_counters(ndev);
 	snprintf(clock->mp_npu_clock.name, sizeof(clock->mp_npu_clock.name),
-		 "MP-NPU Clock");
+		 "NPU H Clock");
 	clock->mp_npu_clock.freq_mhz = ndev->aie.npuclk_freq;
-	snprintf(clock->h_clock.name, sizeof(clock->h_clock.name), "H Clock");
+	snprintf(clock->h_clock.name, sizeof(clock->h_clock.name), "AIE Clock");
 	clock->h_clock.freq_mhz = ndev->aie.hclk_freq;
 
 	buf_sz = min(args->buffer_size, sizeof(*clock));
