@@ -21,10 +21,22 @@
  *
  * A single struct amdxdna_dpt and one set of amdxdna_dpt_* helpers serve
  * firmware logging (xdna->fw_log) and firmware tracing (xdna->fw_trace).
- * Each handle's lifetime is guarded by xdna->dpt_srcu so that disabling
- * a kind while N watchers are sleeping inside amdxdna_dpt_get_data
- * delivers -ESHUTDOWN to every one of them and tears down the handle
- * without UAF.
+ * Each is a struct amdxdna_dpt_chan holding everything that channel needs,
+ * so the helpers take a channel pointer and never switch on which channel
+ * they were handed.
+ *
+ * A channel's handle lifetime is guarded by the channel's own SRCU domain,
+ * so that disabling one while N watchers are sleeping inside
+ * amdxdna_dpt_get_data delivers -ESHUTDOWN to every one of them and tears
+ * down the handle without UAF, while leaving watchers parked on the other
+ * channel untouched.
+ *
+ * The domains must be per-channel, not device-wide: a watcher parks in
+ * wait_event_interruptible() while still inside its read-side critical
+ * section, and only its own channel's teardown wakes it. A shared domain
+ * would make disabling one channel wait for a watcher parked on the other,
+ * which nothing wakes, so the teardown would block forever holding
+ * dev_lock.
  */
 
 #define AMDXDNA_DPT_FOOTER_SIZE		SZ_4K
@@ -55,18 +67,12 @@ enum amdxdna_dpt_status {
 	AMDXDNA_DPT_SHUTTING_DOWN,	/* fini in progress; between status write and kfree */
 };
 
-enum amdxdna_dpt_kind {
-	AMDXDNA_DPT_FW_LOG,
-	AMDXDNA_DPT_FW_TRACE,
-	AMDXDNA_DPT_KIND_MAX,
-};
-
-const char *amdxdna_dpt_kind_str(enum amdxdna_dpt_kind kind);
+const char *amdxdna_dpt_name(const struct amdxdna_dpt *dpt);
 
 #define XDNA_DPT_PRINTK(level, dpt, fmt, args...) do {				\
 	const struct amdxdna_dpt *__d = (dpt);					\
 	XDNA_##level(__d->xdna, "%s: " fmt,					\
-		     amdxdna_dpt_kind_str(__d->kind), ##args);			\
+		     amdxdna_dpt_name(__d), ##args);				\
 } while (0)
 
 #define XDNA_DPT_ERR(dpt,  fmt, args...) XDNA_DPT_PRINTK(ERR,  dpt, fmt, ##args)
@@ -95,11 +101,12 @@ struct amdxdna_dpt_footer {
 struct amdxdna_dpt {
 	struct amdxdna_dev		*xdna;
 	struct aie_device		*aie;
-	enum amdxdna_dpt_kind		 kind;
+	/* Channel this handle is published in; also names it for logging. */
+	struct amdxdna_dpt_chan		*chan;
 	enum amdxdna_dpt_status		 status;
 	/*
-	 * Kind-specific configuration: log level for FW_LOG,
-	 * category bitmask for FW_TRACE.
+	 * Per-channel configuration: log level for the log channel,
+	 * category bitmask for the trace channel.
 	 */
 	u32				 config;
 
@@ -136,13 +143,21 @@ struct amdxdna_dpt {
 };
 
 /*
+ * Channel setup, called from probe before any handle can be published and
+ * torn down from the drm release action.
+ */
+int amdxdna_dpt_chan_init(struct amdxdna_dev *xdna);
+void amdxdna_dpt_chan_fini(struct amdxdna_dev *xdna);
+
+/*
  * Top-level DPT lifecycle. amdxdna_dpt_init/fini are called from
  * per-generation init/fini after aie->msg_ops has been populated;
  * amdxdna_dpt_suspend/resume are driven from the common PM layer
  * (amdxdna_pm.c) and take struct amdxdna_dev *.
- * amdxdna_dpt_init auto-starts FW_LOG only; FW_TRACE remains inactive
- * at probe and is opt-in via the DRM_AMDXDNA_SET_FW_TRACE_STATE ioctl
- * to avoid generating large trace payloads unconditionally.
+ * amdxdna_dpt_init auto-starts the log channel only; the trace channel
+ * remains inactive at probe and is opt-in via the
+ * DRM_AMDXDNA_SET_FW_TRACE_STATE ioctl to avoid generating large trace
+ * payloads unconditionally.
  */
 int amdxdna_dpt_init(struct aie_device *aie);
 int amdxdna_dpt_fini(struct aie_device *aie);
@@ -152,9 +167,8 @@ int amdxdna_dpt_resume(struct amdxdna_dev *xdna);
 /* dmesg-dump consumer control (debugfs). */
 int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable);
 int amdxdna_fw_log_set_state(struct amdxdna_dev *xdna, u32 level);
-struct amdxdna_dpt *amdxdna_dpt_enter_kind(struct amdxdna_dev *xdna,
-					   enum amdxdna_dpt_kind kind, int *idx);
-void amdxdna_dpt_exit_kind(struct amdxdna_dev *xdna, int idx);
+struct amdxdna_dpt *amdxdna_dpt_enter(struct amdxdna_dpt_chan *chan, int *idx);
+void amdxdna_dpt_exit(struct amdxdna_dpt_chan *chan, int idx);
 
 int amdxdna_get_fw_log(struct aie_device *aie,
 		       struct amdxdna_drm_get_array *args);

@@ -140,7 +140,22 @@ struct amdxdna_dev_info {
 
 struct amdxdna_carveout;
 struct amdxdna_dpt;
+struct amdxdna_dpt_desc;
 struct aie_device;
+
+/*
+ * One firmware Debug/Profile/Trace channel, holding everything needed to
+ * work with it: @srcu guards the lifetime of @data, and @desc carries the
+ * channel's constants and firmware hooks. Callers pass a channel pointer
+ * around rather than a handle plus a discriminator, so the two channels
+ * share one set of helpers without any of them switching on which is which.
+ * struct amdxdna_dpt_desc is private to amdxdna_dpt.c.
+ */
+struct amdxdna_dpt_chan {
+	struct srcu_struct		srcu;
+	struct amdxdna_dpt __rcu	*data;
+	const struct amdxdna_dpt_desc	*desc;
+};
 
 struct amdxdna_dev {
 	struct drm_device		ddev;
@@ -171,14 +186,13 @@ struct amdxdna_dev {
 
 	struct amdxdna_carveout		*carveout;
 
-	/* Firmware Debug/Profile/Trace (DPT) framework. dpt_srcu guards the
-	 * lifetime of every dpt handle hung off this device; on disable we
-	 * synchronize_srcu so kfree of the handle is provably ordered after
-	 * any watcher's srcu_read_unlock.
+	/* Firmware Debug/Profile/Trace (DPT) framework. Each channel owns the
+	 * SRCU domain guarding its own handle; on disable we synchronize_srcu
+	 * so kfree of the handle is provably ordered after any watcher's
+	 * srcu_read_unlock.
 	 */
-	struct srcu_struct		dpt_srcu;
-	struct amdxdna_dpt __rcu	*fw_log;
-	struct amdxdna_dpt __rcu	*fw_trace;
+	struct amdxdna_dpt_chan		fw_log;
+	struct amdxdna_dpt_chan		fw_trace;
 
 	/* Allow auto core dump for hardware contexts, if true. */
 	bool				auto_coredump;
