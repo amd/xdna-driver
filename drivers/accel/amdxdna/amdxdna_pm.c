@@ -24,7 +24,7 @@ int amdxdna_pm_suspend(struct device *dev)
 	/*
 	 * Drain and pause firmware DPT (log/trace) after the device has
 	 * quiesced. Common to every generation/config; a safe no-op when no
-	 * DPT kind is active. A drain/pause failure must not change the
+	 * DPT channel is active. A drain/pause failure must not change the
 	 * device suspend result (logging/tracing is auxiliary), but surface
 	 * it so it is visible rather than silently swallowed.
 	 */

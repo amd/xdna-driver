@@ -22,6 +22,7 @@
 #include "amdxdna_cbuf.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_debugfs.h"
+#include "amdxdna_dpt.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_pm.h"
@@ -119,7 +120,7 @@ static void amdxdna_xdna_drm_release(struct drm_device *drm, void *res)
 	struct amdxdna_dev *xdna = res;
 
 	amdxdna_carveout_fini(xdna);
-	cleanup_srcu_struct(&xdna->dpt_srcu);
+	amdxdna_dpt_chan_fini(xdna);
 	ida_destroy(&xdna->hwctx_ida);
 }
 
@@ -160,13 +161,13 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ida_init(&xdna->hwctx_ida);
 	pci_set_drvdata(pdev, xdna);
 
-	ret = init_srcu_struct(&xdna->dpt_srcu);
+	ret = amdxdna_dpt_chan_init(xdna);
 	if (ret)
 		return ret;
 
 	ret = drmm_add_action(ddev, amdxdna_xdna_drm_release, xdna);
 	if (ret) {
-		cleanup_srcu_struct(&xdna->dpt_srcu);
+		amdxdna_dpt_chan_fini(xdna);
 		return ret;
 	}
 

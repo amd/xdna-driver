@@ -158,10 +158,10 @@ static int fw_log_level_show(struct seq_file *m, void *unused)
 	u32 level = 0;
 	int idx;
 
-	dpt = amdxdna_dpt_enter_kind(xdna, AMDXDNA_DPT_FW_LOG, &idx);
+	dpt = amdxdna_dpt_enter(&xdna->fw_log, &idx);
 	if (dpt) {
 		level = READ_ONCE(dpt->config);
-		amdxdna_dpt_exit_kind(xdna, idx);
+		amdxdna_dpt_exit(&xdna->fw_log, idx);
 	}
 
 	seq_printf(m, "%u\n", level);
@@ -198,7 +198,7 @@ static ssize_t fw_log_dump_to_dmesg_write(struct file *file, const char __user *
 	if (ret)
 		return ret;
 
-	dpt = rcu_dereference_protected(xdna->fw_log,
+	dpt = rcu_dereference_protected(xdna->fw_log.data,
 					lockdep_is_held(&xdna->dev_lock));
 	if (!dpt || READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE) {
 		amdxdna_pm_suspend_put(xdna);
@@ -224,10 +224,10 @@ static int fw_log_dump_to_dmesg_show(struct seq_file *m, void *unused)
 	bool dump = false;
 	int idx;
 
-	dpt = amdxdna_dpt_enter_kind(xdna, AMDXDNA_DPT_FW_LOG, &idx);
+	dpt = amdxdna_dpt_enter(&xdna->fw_log, &idx);
 	if (dpt) {
 		dump = READ_ONCE(dpt->dump_to_dmesg);
-		amdxdna_dpt_exit_kind(xdna, idx);
+		amdxdna_dpt_exit(&xdna->fw_log, idx);
 	}
 
 	seq_printf(m, "%d\n", dump ? 1 : 0);
