@@ -13,6 +13,9 @@
 #include <linux/dma-buf.h>
 #include <linux/dma-direct.h>
 #include <linux/iosys-map.h>
+#ifndef AMDXDNA_AUX
+#include <linux/hmm.h>
+#endif
 #include <linux/pagemap.h>
 #include <linux/vmalloc.h>
 
@@ -1628,3 +1631,124 @@ int amdxdna_drm_get_bo_usage(struct drm_device *dev, struct amdxdna_drm_get_arra
 
 	return 0;
 }
+
+#ifndef AMDXDNA_AUX
+static int amdxdna_populate_range(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct amdxdna_umap *mapp;
+	struct mm_struct *mm;
+	bool found;
+	int ret;
+
+again:
+	found = false;
+	down_write(&xdna->notifier_lock);
+	list_for_each_entry(mapp, &abo->mem.umap_list, node) {
+		if (mapp->invalid && !mapp->unmapped && kref_get_unless_zero(&mapp->refcnt)) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		abo->mem.map_invalid = false;
+		up_write(&xdna->notifier_lock);
+		return 0;
+	}
+
+	up_write(&xdna->notifier_lock);
+
+	mm = mapp->notifier.mm;
+	if (!mmget_not_zero(mm)) {
+		amdxdna_umap_put(mapp);
+		return -EFAULT;
+	}
+
+	mapp->range.notifier_seq = mmu_interval_read_begin(&mapp->notifier);
+	mmap_read_lock(mm);
+	ret = hmm_range_fault(&mapp->range);
+	mmap_read_unlock(mm);
+	if (ret) {
+		if (ret == -EBUSY) {
+			amdxdna_umap_put(mapp);
+			mmput(mm);
+			goto again;
+		}
+
+		goto put_mm;
+	}
+
+	/*
+	 * mmu_interval_read_retry() returns true if the notifier sequence
+	 * advanced since mmu_interval_read_begin() — i.e. another invalidation
+	 * fired while we were faulting pages in. In that case we retry.
+	 *
+	 * Critically, while amdxdna_hmm_invalidate() is still active (between
+	 * mmu_interval_set_seq() and its return), the notifier sequence is
+	 * always "open", so mmu_interval_read_retry() always returns true here.
+	 * This means any concurrent submit that reaches amdxdna_populate_range()
+	 * during an active invalidation cannot complete range population — it
+	 * keeps retrying until the notifier returns. New jobs therefore cannot
+	 * be pushed to the device while the mapping is being torn down, and
+	 * amdxdna_client_wait_idle() drains only the jobs already in flight at
+	 * the time of invalidation.
+	 */
+	down_write(&xdna->notifier_lock);
+	if (mmu_interval_read_retry(&mapp->notifier, mapp->range.notifier_seq)) {
+		up_write(&xdna->notifier_lock);
+		amdxdna_umap_put(mapp);
+		mmput(mm);
+		goto again;
+	}
+	mapp->invalid = false;
+	up_write(&xdna->notifier_lock);
+	amdxdna_umap_put(mapp);
+	mmput(mm);
+	goto again;
+
+put_mm:
+	amdxdna_umap_put(mapp);
+	mmput(mm);
+	return ret;
+}
+
+int amdxdna_client_populate_ranges(struct amdxdna_client *client)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_gem_obj *abo;
+	int ret = 0;
+
+	while (true) {
+		down_write(&xdna->notifier_lock);
+		abo = list_first_entry_or_null(&client->bo_invalid_list,
+					       struct amdxdna_gem_obj, node);
+		if (abo && !kref_get_unless_zero(&to_gobj(abo)->refcount)) {
+			/* BO is being freed — remove it and retry. */
+			list_del_init(&abo->node);
+			up_write(&xdna->notifier_lock);
+			continue;
+		}
+		up_write(&xdna->notifier_lock);
+
+		if (!abo)
+			break;
+
+		ret = amdxdna_populate_range(abo);
+		if (!ret) {
+			down_write(&xdna->notifier_lock);
+			/* Re-check: notifier may have re-fired and re-added the
+			 * BO to the list while the lock was dropped.
+			 */
+			if (!abo->mem.map_invalid && !list_empty(&abo->node))
+				list_del_init(&abo->node);
+			up_write(&xdna->notifier_lock);
+		}
+		drm_gem_object_put(to_gobj(abo));
+		if (ret)
+			break;
+	}
+
+	return ret;
+}
+#endif

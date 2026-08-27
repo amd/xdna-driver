@@ -142,6 +142,9 @@ int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
 			    struct mm_struct *mm,
 			    unsigned long addr, unsigned long len);
+#ifndef AMDXDNA_AUX
+int amdxdna_client_populate_ranges(struct amdxdna_client *client);
+#endif
 
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

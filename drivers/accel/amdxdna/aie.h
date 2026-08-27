@@ -187,7 +187,6 @@ int amdxdna_query_ctx_status_array(struct aie_device *aie, struct amdxdna_client
 int amdxdna_query_ctx_status_by_id(struct aie_device *aie, struct amdxdna_client *client,
 				   struct amdxdna_drm_get_array *args);
 int amdxdna_get_force_preempt_state(struct aie_device *aie, struct amdxdna_drm_get_info *args);
-int amdxdna_populate_range(struct amdxdna_gem_obj *abo);
 int amdxdna_get_frame_boundary_preempt_state(struct aie_device *aie,
 					     struct amdxdna_drm_get_info *args);
 struct amdxdna_msg_buf_hdl {
