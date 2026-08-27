@@ -10,6 +10,7 @@
 #include <linux/bitfield.h>
 
 #include "amdxdna_gem.h"
+#include "drm/amdxdna_accel.h"
 
 struct amdxdna_hwctx_priv;
 
@@ -200,6 +201,23 @@ struct amdxdna_hwctx {
 	/* Saved core dump, captured automatically on timeout if device auto_coredump is set. */
 	char				*coredump;
 };
+
+static inline void
+amdxdna_hwctx_snapshot_counts(struct amdxdna_hwctx *hwctx,
+			      u64 *submitted, u64 *completed)
+{
+	/* Read completions first: avoid stale-submit false idle on concurrent submit. */
+	*completed = atomic64_read(&hwctx->job_free_cnt);
+	*submitted = atomic64_read(&hwctx->job_submit_cnt);
+}
+
+static inline u32
+amdxdna_hwctx_report_state(struct amdxdna_hwctx *hwctx,
+			   u64 submitted, u64 completed)
+{
+	return (hwctx->fw_ctx_id == (u32)-1 || submitted == completed) ?
+		AMDXDNA_HWCTX_STATE_IDLE : AMDXDNA_HWCTX_STATE_ACTIVE;
+}
 
 #define drm_job_to_xdna_job(j) \
 	container_of(j, struct amdxdna_sched_job, base)
