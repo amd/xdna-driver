@@ -64,25 +64,13 @@ struct amdxdna_hwctx_priv {
 	 * Both the flag and the multi-word report body are protected by io_lock
 	 * (cached only for kernel-mode contexts); the flag alone is insufficient
 	 * because the worker can overwrite the body while a reader consumes it.
-	 * aie4_hwctx_cleanup_running_jobs() consumes it on the errored reset path to
-	 * attach the report to the faulting job; that access is serialized against
-	 * the io_lock writers by dev_lock (cache, reset and destroy run under
-	 * dev_lock).
+	 * The job worker consumes it on the reset path (has_reset) to attach the
+	 * report to the faulting job; that access is serialized against the io_lock
+	 * writers by dev_lock (cache, reset and destroy run under dev_lock).
 	 */
 	bool                            cached_ctx_error_valid;
 	struct aie4_async_ctx_error     cached_ctx_error;
-	/*
-	 * Generation marker for the last ctx reset, a non-zero timestamp
-	 * (ktime_get_ns): seeded at ctx init and re-stamped on every reset in
-	 * aie4_hwctx_cleanup_running_jobs(). A submitter lazily captures it before
-	 * publishing and bails if it advances mid-chain (ctx_reset_since()), so a
-	 * chain is never split across a reset; seeding it non-zero keeps the
-	 * capture sentinel (0 == not captured) from colliding with a real value.
-	 * Read under io_lock by submitters; the reset stamp is a lockless WRITE_ONCE
-	 * done after the ctx is disconnected (so it cannot race a reader), published
-	 * to later submitters by the recreate's doorbell re-validation.
-	 */
-	u64                             ctx_error_gen;
+	bool				has_reset; /* if hwctx disconnection due to reset */
 
 	/* Kernel-mode submission: driver fills the user HSA queue and rings
 	 * the doorbell.  umq_pkts/umq_indirect_pkts alias the user umq_bo;
@@ -162,7 +150,8 @@ struct aie4_msg_context_config_cert_logging;
 enum aie4_hwctx_flags {
 	AIE4_HWCTX_NORMAL = 0,
 	AIE4_HWCTX_GRACEFUL,
-	AIE4_HWCTX_DISCONNECT
+	AIE4_HWCTX_DISCONNECT, /* sets has_reset, do not destroy context */
+	AIE4_HWCTX_ERROR, /* sets has_reset, destroy context */
 };
 
 int aie4_hwctx_init(struct amdxdna_hwctx *hwctx);
@@ -174,7 +163,7 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 int aie4_hwctx_create(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags);
 void aie4_hwctx_resume_jobs(struct amdxdna_hwctx *hwctx);
-void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx, bool errored);
+void aie4_hwctx_wait_for_running(struct amdxdna_hwctx *hwctx);
 void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx *hwctx);
 
 /* aie4_sriov.c */

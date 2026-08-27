@@ -89,16 +89,13 @@ static void aie4_ctx_reset(struct aie_device *aie, u32 hw_ctx_id)
 	hwctx = hw_ctx_id2hwctx(aie, hw_ctx_id, &idx);
 	if (hwctx) {
 		/*
-		 * Reset the context by destroy then recreate it. Destroy marks the
-		 * context DISCONNECTED; complete any parked in-flight jobs (as timed
-		 * out) before recreating so their fences are signaled and the read
-		 * index advances, releasing waiters in aie4_cmd_wait() with an
-		 * error. Otherwise the recreate flips the context back to CONNECTED
-		 * and the waiter can never observe completion, hanging the
-		 * submitter.
+		 * TDR reset: ERROR destroys the fw context and marks it reset
+		 * (has_reset), so the job worker times out the faulting job and
+		 * aborts the rest; wait_for_running then blocks until that drain
+		 * completes before the context is recreated.
 		 */
-		aie4_hwctx_destroy(hwctx, AIE4_HWCTX_NORMAL);
-		aie4_hwctx_cleanup_running_jobs(hwctx, true);
+		aie4_hwctx_destroy(hwctx, AIE4_HWCTX_ERROR);
+		aie4_hwctx_wait_for_running(hwctx);
 
 		ret = aie4_hwctx_create(hwctx);
 		if (ret)
@@ -231,12 +228,9 @@ static void aie4_async_ctx_error_cache(struct aie_device *aie,
 			mutex_lock(&priv->io_lock);
 			memcpy(&priv->cached_ctx_error, ctx_err, sizeof(*ctx_err));
 			/*
-			 * Mark a ctx error cached: this flags the ensuing teardown as a
-			 * TDR reset (not a suspend), so aie4_hwctx_cleanup_running_jobs()
-			 * reports the faulting job as TIMEOUT with this health report
-			 * attached. The reset also stamps ctx_error_gen there, which
-			 * submit_one_cmd() checks to abort a chain whose prefix was published
-			 * before the reset (-ECONNRESET) rather than split it across the reset.
+			 * Mark a ctx error cached: the ensuing ERROR teardown sets
+			 * has_reset, so the job worker reports the faulting job as
+			 * TIMEOUT with this health report attached (and aborts the rest).
 			 */
 			priv->cached_ctx_error_valid = true;
 			mutex_unlock(&priv->io_lock);
