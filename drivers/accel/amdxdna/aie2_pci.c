@@ -488,6 +488,62 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 	return ret;
 }
 
+/*
+ * aie2_hw_reset - recover a wedged NPU via full hardware power-cycle.
+ *
+ * Suspends every context, tears the device down, powers the NPU off and on
+ * through the SMU (reloading the firmware), then re-creates every context.
+ * The mailbox path cannot recover a dead firmware — only a hardware reset
+ * can. Called from aie2_sched_job_timedout() when per-context recovery
+ * fails or the firmware reports a fatal error. dev_lock must be held
+ * (aie2_hwctx_suspend requires it).
+ *
+ * Rate-limited: if the firmware re-wedges immediately after a reset, a
+ * reset storm must not hammer the SMU power-cycle. One reset per window
+ * is enough; repeated timeouts after that indicate a deeper firmware
+ * problem and are reported to the log instead of resetting in a loop.
+ */
+int aie2_hw_reset(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_client *client;
+	int ret, first_ret = 0;
+
+	if (ndev->dev_status <= AIE2_DEV_INIT) {
+		XDNA_DBG(xdna, "device not started, nothing to reset");
+		return 0;
+	}
+
+	if (time_before(jiffies, ndev->last_reset_jiffies +
+				msecs_to_jiffies(AIE2_HW_RESET_MIN_INTERVAL_MS))) {
+		XDNA_WARN(xdna, "NPU reset skipped: last reset %d ms ago",
+			  jiffies_to_msecs(jiffies - ndev->last_reset_jiffies));
+		return -EAGAIN;
+	}
+	ndev->last_reset_jiffies = jiffies;
+
+	XDNA_WARN(xdna, "NPU firmware unhealthy: power-cycling NPU");
+	aie2_hw_suspend(xdna);
+
+	ret = aie2_hw_start(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "NPU power-cycle start failed: %d", ret);
+		return ret;
+	}
+
+	/* Resume every client even if one fails, so a single broken context
+	 * does not leave the rest of the device suspended. */
+	list_for_each_entry(client, &xdna->client_list, node) {
+		ret = aie2_hwctx_resume(client);
+		if (ret && !first_ret) {
+			XDNA_ERR(xdna, "resume failed after NPU reset: %d", ret);
+			first_ret = ret;
+		}
+	}
+
+	return first_ret;
+}
+
 static int aie2_init(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
