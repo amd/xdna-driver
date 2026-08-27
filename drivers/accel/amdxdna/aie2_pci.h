@@ -163,6 +163,9 @@ struct amdxdna_dev_hdl {
 
 	enum aie2_tdr_status		tdr_status;
 	struct aie2_tdr			tdr; /* TDR for device recovery */
+
+	/* jiffies of the last full NPU power-cycle (see aie2_hw_reset) */
+	unsigned long			last_reset_jiffies;
 };
 
 enum aie2_fw_feature {
@@ -317,6 +320,8 @@ int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *bu
 int aie2_hwctx_sync_debug_bo(struct amdxdna_hwctx *hwctx, u32 debug_bo_hdl);
 void aie2_hwctx_suspend(struct amdxdna_client *client);
 int aie2_hwctx_resume(struct amdxdna_client *client);
+#define AIE2_HW_RESET_MIN_INTERVAL_MS	60000
+int aie2_hw_reset(struct amdxdna_dev *xdna);
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx, struct amdxdna_gem_obj *heap);
 

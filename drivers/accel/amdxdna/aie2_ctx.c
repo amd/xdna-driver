@@ -490,6 +490,7 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
 	struct aie_device *aie;
+	bool fw_dead = false;
 	int ret;
 
 	xdna = hwctx->client->xdna;
@@ -506,10 +507,21 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	report = kzalloc_obj(*report);
 	if (report) {
 		ret = aie2_query_app_health(ndev, hwctx->fw_ctx_id, report);
-		if (ret)
+		if (ret) {
+			/* Firmware did not answer the health query: it is wedged. */
+			if (ret != -EOPNOTSUPP)
+				fw_dead = true;
 			kfree(report);
-		else
+		} else {
+			/* fatal_type is set by the firmware when it reports an
+			 * unrecoverable error. Note: dpu_pc == UINT_MAX is the
+			 * documented idle value (see struct app_health_report,
+			 * aie2_msg_priv.h) and is deliberately NOT used as a
+			 * wedge signal to avoid false positives. */
+			if (report->fatal_info.fatal_type)
+				fw_dead = true;
 			job->aie2_job_health = report;
+		}
 	}
 
 	if (xdna->auto_coredump) {
@@ -525,7 +537,19 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	job->job_timeout = true;
 	aie2_hwctx_stop(xdna, hwctx, sched_job);
 
-	aie2_hwctx_restart(xdna, hwctx);
+	ret = aie2_hwctx_restart(xdna, hwctx);
+	if (ret || fw_dead) {
+		/*
+		 * Per-context recovery goes through the mailbox; it cannot fix a
+		 * dead firmware (unresponsive health query, firmware-reported
+		 * fatal error, or a restart the firmware rejects). Power-cycle
+		 * the NPU via SMU to reload the firmware. aie2_hw_reset()
+		 * rate-limits itself to one reset per AIE2_HW_RESET_MIN_INTERVAL_MS.
+		 */
+		XDNA_WARN(xdna, "NPU firmware unhealthy (ctx restart ret %d, health %s) - power-cycling NPU",
+			  ret, fw_dead ? "fatal/absent" : "ok");
+		aie2_hw_reset(xdna);
+	}
 
 #ifdef HAVE_drm_gpu_sched_stat_reset
 	return DRM_GPU_SCHED_STAT_RESET;
