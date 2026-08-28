@@ -82,6 +82,9 @@ void TEST_noop_io_with_dup_bo(device::id_type, std::shared_ptr<device>&, arg_typ
 void TEST_io_with_ubuf_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_write_to_readonly_uptr_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_suspend_resume(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_ctx_restore_across_suspend(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_multi_ctx_restore_across_suspend(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_ctx_destroy_while_suspended(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_vadd(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_ddr_memtile(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -1676,6 +1679,17 @@ std::vector<test_case> test_list {
   },
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
     TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_io_suspend_resume, {}
+  },
+  // The virtio-gpu guest shim has no auto-suspend of its own and reports the
+  // host's power state, so this needs the native driver.
+  test_case{ "hw context survives auto-suspend (graceful destroy and restore)", {},
+    TEST_POSITIVE, {npu3}, {amdxdna}, TEST_ctx_restore_across_suspend, {}
+  },
+  test_case{ "multiple hw contexts survive auto-suspend (restore pool)", {},
+    TEST_POSITIVE, {npu3}, {amdxdna}, TEST_multi_ctx_restore_across_suspend, {}
+  },
+  test_case{ "destroy a hw context while the device is auto-suspended", {},
+    TEST_POSITIVE, {npu3}, {amdxdna}, TEST_ctx_destroy_while_suspended, {}
   },
   test_case{ "io test timeout run for context health report", {},
     TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_io_timeout, {}
