@@ -117,16 +117,44 @@ static struct cert_comp *aie4_get_cert_comp(struct amdxdna_hwctx *hwctx)
 	return cert_comp;
 }
 
-static void aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id)
+/*
+ * Returns the restore id firmware handed back - non-zero once the state has
+ * been parked for a later replay, 0 when the context is gone but nothing was
+ * preserved - or a negative errno if it was not destroyed at all.
+ *
+ * A graceful destroy that could not produce a restore id, whether the context
+ * never reached a safe point or parking it failed afterwards, answers
+ * NO_RESTORE. It is still torn down and its resources released, so that is an
+ * id of 0 rather than a failed message. Firmware from before protocol 6.6 has
+ * no NO_RESTORE and reports the same thing as success with an id of 0, which
+ * lands on the same return. Any other error status means firmware did not
+ * destroy the context. A context that failed to preempt is reported
+ * separately, as an async error event.
+ */
+static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id,
+				    bool graceful)
 {
 	DECLARE_AIE_MSG(aie4_msg_destroy_hw_context, AIE4_MSG_OP_DESTROY_HW_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	int ret;
 
 	req.hw_context_id = hw_context_id;
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
-	if (ret)
-		XDNA_WARN(xdna, "destroy ctx id %d failed %d", hw_context_id, ret);
+	req.graceful_flag = FIELD_PREP(AIE4_MSG_GRACEFUL_FLAG, graceful);
+	ret = aie_send_mgmt_msg_wait_quiet(&ndev->aie, &msg,
+					   graceful ? AIE4_MSG_STATUS_NO_RESTORE : 0);
+	if (ret) {
+		if (graceful && resp.status == AIE4_MSG_STATUS_NO_RESTORE) {
+			XDNA_DBG(xdna, "ctx id %d destroyed, nothing to restore",
+				 hw_context_id);
+			return 0;
+		}
+
+		XDNA_WARN(xdna, "destroy ctx id %d failed %d, status 0x%x",
+			  hw_context_id, ret, resp.status);
+		return ret;
+	}
+
+	return graceful ? resp.restore_id : 0;
 }
 
 static u32 aie4_parse_priority_to_dev(u32 priority)
@@ -167,6 +195,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	req.request_num_tiles = hwctx->num_tiles;
 	req.pasid = aie4_msg_pasid(client);
 	req.priority_band = aie4_parse_priority_to_dev(hwctx->qos.priority);
+	req.restore_id = priv->restore_id;
 	req.hsa_addr_high = upper_32_bits(amdxdna_gem_dev_addr(priv->umq_bo));
 	req.hsa_addr_low = lower_32_bits(amdxdna_gem_dev_addr(priv->umq_bo));
 
@@ -174,6 +203,13 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		 req.pasid, req.request_num_tiles, req.hsa_addr_high, req.hsa_addr_low);
 
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	/*
+	 * Drop the id even on failure: nothing in the reply says whether
+	 * firmware consumed it, and re-offering a consumed one is an error.
+	 * The state goes with it - the caller has already acted on it.
+	 */
+	priv->restore_id = 0;
+	priv->restore_state = AIE4_CTX_RESTORE_NONE;
 	if (ret) {
 		XDNA_ERR(xdna, "create ctx failed: %d", ret);
 		return ret;
@@ -186,7 +222,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	/* setup interrupt completion per msix index */
 	cert_comp = aie4_lookup_cert_comp(ndev, resp.job_complete_msix_idx);
 	if (IS_ERR(cert_comp)) {
-		aie4_msg_destroy_context(ndev, resp.hw_context_id);
+		aie4_msg_destroy_context(ndev, resp.hw_context_id, false);
 		return PTR_ERR(cert_comp);
 	}
 
@@ -224,7 +260,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		if (ret) {
 			mutex_unlock(&priv->io_lock);
 			aie4_put_cert_comp(cert_comp);
-			aie4_msg_destroy_context(ndev, resp.hw_context_id);
+			aie4_msg_destroy_context(ndev, resp.hw_context_id, false);
 			/* Match a clean teardown so a later fini does not re-destroy. */
 			priv->hw_ctx_id = CTX_INVALID_ID;
 			hwctx->fw_ctx_id = -1;
@@ -273,14 +309,69 @@ static bool aie4_hwctx_has_reset(struct amdxdna_hwctx *hwctx)
 	return READ_ONCE(hwctx->priv->has_reset);
 }
 
+/*
+ * Tear down the firmware side of a hw context. Every teardown comes through
+ * here; @flags says why, and that decides how much context state is worth
+ * saving and whether the jobs still queued on it are recoverable or lost.
+ *
+ * NORMAL - a plain teardown. Firmware drops the context there and then and
+ *   keeps nothing. Queued jobs are left alone and are replayed once the ctx
+ *   is recreated. No caller today, since suspend switched to GRACEFUL.
+ *
+ * GRACEFUL - a runtime suspend. Firmware is asked to stop the context at a
+ *   preemption point rather than mid-job and to park its state; it answers
+ *   with a restore_id, which the next create hands back so the context picks
+ *   up where it left off instead of starting over.
+ *
+ * ERROR - something has already gone wrong: the client closed a faulted ctx,
+ *   firmware raised an async error, or we are resetting. The context is
+ *   destroyed and marked has_reset, so its queued jobs are failed back to
+ *   user space instead of replayed.
+ *
+ * DISCONNECT - firmware is already gone, so there is nobody to send a destroy
+ *   to. The context is only dropped on our side, also with has_reset.
+ *
+ * has_reset is what tells the job worker to drain the job list, so the two
+ * reset flags leave the worker running to do that, while the other two stop
+ * it with cancel_work_sync() and leave the lists stable for the caller.
+ *
+ * A half-created ctx is not rolled back through here; aie4_hwctx_create()
+ * calls aie4_msg_destroy_context() directly.
+ *
+ * What a GRACEFUL destroy can come back with, and what happens to the ctx:
+ *
+ * firmware reply            | ret     | state | suspend    | resume
+ * --------------------------|---------|-------|------------|----------------
+ * SUCCESS, restore_id != 0  | id      | NONE  | -          | create(id)
+ * NO_RESTORE (status 0x4)   | 0       | LOST  | abort jobs | create fresh
+ * ERROR (status 0x1)        | -EINVAL | NONE  | -          | create fresh
+ * no reply (timeout)        | -ETIME  | NONE  | -          | create fresh
+ *
+ * "state" is priv->restore_state. Only the LOST row loses its parked jobs;
+ * every other row keeps them, and the resume re-drives them against whatever
+ * ctx it creates. Firmware only mints an id once preemption completes, so a
+ * graceful destroy answers either SUCCESS with a non-zero id or NO_RESTORE,
+ * never SUCCESS with an id of 0; pre-6.6 firmware spelt NO_RESTORE that way
+ * and lands on the same row. The ctx is gone either way and only its parked
+ * jobs are lost. A non-zero id is still void if the restore pool did not
+ * survive the power transition.
+ *
+ * ERROR is the odd one out: firmware did not act on the request at all (a
+ * stale ctx id, or under SR-IOV a VF reaching for another VF's context), so
+ * unlike the rows above the firmware context can outlive this call.
+ */
 void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	bool graceful = (flags == AIE4_HWCTX_GRACEFUL);
 	struct cert_comp *cert_comp;
+	bool no_restore = false;
 	bool has_reset = false;
+	u16 restore_id = 0;
+	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
@@ -322,8 +413,30 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags
 	if (priv->kernel_submit && has_reset)
 		wake_up_all(&priv->job_list_wq);
 
-	if (flags != AIE4_HWCTX_DISCONNECT)
-		aie4_msg_destroy_context(ndev, priv->hw_ctx_id);
+	if (flags != AIE4_HWCTX_DISCONNECT && priv->hw_ctx_id != CTX_INVALID_ID) {
+		ret = aie4_msg_destroy_context(ndev, priv->hw_ctx_id, graceful);
+		if (ret > 0)
+			restore_id = ret;
+		else if (graceful && !ret)
+			no_restore = true;
+	}
+
+	/*
+	 * Report the outcome to the caller; see the table above. A suspend acts
+	 * on AIE4_CTX_RESTORE_LOST straight away, by aborting the parked jobs
+	 * before it moves on to the next ctx. A context that failed to preempt
+	 * arrives separately as an error event and is reset from there.
+	 */
+	priv->restore_id = restore_id;
+	priv->restore_state = no_restore ? AIE4_CTX_RESTORE_LOST :
+					   AIE4_CTX_RESTORE_NONE;
+	if (graceful) {
+		if (no_restore)
+			XDNA_WARN(xdna, "ctx %s state not preserved by graceful destroy",
+				  hwctx->name);
+		XDNA_DBG(xdna, "ctx %s graceful destroy, restore id %u", hwctx->name,
+			 priv->restore_id);
+	}
 
 	priv->hw_ctx_id = CTX_INVALID_ID;
 	hwctx->fw_ctx_id = -1;
@@ -1269,6 +1382,38 @@ void aie4_hwctx_wait_for_running(struct amdxdna_hwctx *hwctx)
 	 */
 	queue_work(priv->job_work_q, &priv->job_work);
 	flush_work(&priv->job_work);
+}
+
+/*
+ * Abort the jobs a suspend parked, for a ctx whose graceful destroy preserved
+ * nothing (AIE4_CTX_RESTORE_LOST).  Firmware never reached a safe point, so the
+ * packets still queued cannot be re-driven against the ctx the resume will
+ * create.
+ *
+ * Runs from the suspend, right after the destroy, while the ctx is still
+ * disconnected: the next create clears has_reset and republishes the connected
+ * sentinel, after which the worker would treat the drain as a live ctx and
+ * re-park the jobs instead of aborting them.  Marking the ctx reset is what
+ * puts the worker on the drain path; aie4_hwctx_create() clears it again.
+ * User-mode submission keeps no driver-side job list, so there is nothing to
+ * abort there.
+ */
+void aie4_hwctx_abort_jobs(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	if (!priv->kernel_submit)
+		return;
+
+	XDNA_WARN(hwctx->client->xdna, "ctx %s not restored, aborting parked jobs",
+		  hwctx->name);
+
+	mutex_lock(&priv->io_lock);
+	WRITE_ONCE(priv->has_reset, true);
+	mutex_unlock(&priv->io_lock);
+	wake_up_all(&priv->job_list_wq);
+
+	aie4_hwctx_wait_for_running(hwctx);
 }
 
 /*

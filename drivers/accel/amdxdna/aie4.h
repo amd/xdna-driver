@@ -48,6 +48,14 @@ enum {
 	AIE4_JOB_STATE_DONE,
 };
 
+/* What the last destroy left behind, for the caller that asked for it. */
+enum aie4_ctx_restore_state {
+	/* Parked jobs stay queued and are re-driven on resume */
+	AIE4_CTX_RESTORE_NONE = 0,
+	/* Graceful destroy preserved nothing; the parked jobs are aborted. */
+	AIE4_CTX_RESTORE_LOST,
+};
+
 struct amdxdna_hwctx_priv {
 	struct amdxdna_hwctx            *hwctx;
 	struct amdxdna_gem_obj          *umq_bo;
@@ -58,6 +66,10 @@ struct amdxdna_hwctx_priv {
 
 	struct cert_comp                *cert_comp;
 	u32                             hw_ctx_id;
+	/* restore_id from a graceful destroy; consumed on the next create (0 = none) */
+	u16                             restore_id;
+	/* Outcome of that destroy, read by the suspend once it returns. */
+	enum aie4_ctx_restore_state     restore_state;
 	/* Snapshot of kernel_mode_submission for this ctx's lifetime. */
 	bool                            kernel_submit;
 
@@ -124,6 +136,8 @@ struct amdxdna_dev_hdl {
 	struct mutex                    cert_comp_lock; /* protects cert_comp operations*/
 
 	struct amdxdna_msg_buf_hdl	*work_buf_hdl;
+	/* Ctx restore pool held from graceful suspend to resume, NULL if none. */
+	struct amdxdna_msg_buf_hdl	*restore_pool_hdl;
 
 	u8				pw_mode;
 
@@ -159,6 +173,7 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 int aie4_hwctx_create(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags);
 void aie4_hwctx_resume_jobs(struct amdxdna_hwctx *hwctx);
+void aie4_hwctx_abort_jobs(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_wait_for_running(struct amdxdna_hwctx *hwctx);
 void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx *hwctx);
 
@@ -196,6 +211,9 @@ int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 				     struct amdxdna_drm_query_firmware_version *cert_version);
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+int aie4_msg_get_ctx_restore_pool_size(struct amdxdna_dev_hdl *ndev, u32 *buff_size);
+int aie4_msg_get_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+int aie4_msg_set_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
