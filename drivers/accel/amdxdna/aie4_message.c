@@ -257,12 +257,15 @@ int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode)
 
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
-		return ret;
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set power mode %u, ret %d", (u32)power_mode, ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "Power mode set to %u", (u32)power_mode);
 
-	return 0;
+	return ret;
 }
 
-int aie4_force_preemption(struct amdxdna_dev_hdl *ndev)
+int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable)
 {
 	DECLARE_AIE_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
 	struct aie4_msg_runtime_config_force_preemption *force_preempt;
@@ -271,17 +274,18 @@ int aie4_force_preemption(struct amdxdna_dev_hdl *ndev)
 
 	req.type = type;
 	force_preempt = (struct aie4_msg_runtime_config_force_preemption *)req.data;
-	force_preempt->enabled = 1;
+	force_preempt->enabled = enable;
 
 	msg.send_size = sizeof(req);
 
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
-	if (ret) {
-		XDNA_ERR(ndev->aie.xdna, "Failed to set runtime config, ret %d", ret);
-		return ret;
-	}
+	if (ret)
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set force preemption, ret %d", ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "Force preemption=%d", enable);
 
-	return 0;
+	return ret;
 }
 
 int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
@@ -312,7 +316,7 @@ int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 		.send_data = (u8 *)&req,
 		.send_size = sizeof(req),
 		.handle = handle,
-		.opcode = AIE4_MSG_OP_ASYNC_EVENT_MSG,
+		.opcode = AIE4_MSG_OP_ASYNC_EVENT_REPORT,
 		.notify_cb = cb,
 	};
 
@@ -501,11 +505,13 @@ int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us)
 	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS,
 				   &cfg, sizeof(cfg));
 	if (ret)
-		return ret;
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set ctx switch hysteresis to %u us (%d), using fw default",
+			  timeout_us, ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "Context switch hysteresis set to %u us", timeout_us);
 
-	XDNA_DBG(ndev->aie.xdna, "Context switch hysteresis set to %u us", timeout_us);
-
-	return 0;
+	return ret;
 }
 
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
@@ -588,6 +594,34 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
+static int aie4_query_status(struct aie_device *aie,
+			     struct amdxdna_msg_buf_hdl *buf_hdl,
+			     u32 *cols_filled, u32 *resp_size)
+{
+	DECLARE_AIE_MSG(aie4_msg_aie_column_info, AIE4_MSG_OP_AIE_COLUMN_INFO);
+	struct amdxdna_dev *xdna = aie->xdna;
+	u32 aie_bitmap;
+	int ret;
+
+	aie_bitmap = GENMASK(aie->metadata.cols - 1, 0);
+
+	req.dump_buff_addr = to_dma_addr(buf_hdl, 0);
+	req.dump_buff_size = to_buf_size(buf_hdl);
+	req.pasid = 0;
+	req.aie4_col_bitmap = aie_bitmap;
+
+	ret = aie_send_mgmt_msg_wait(aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Error during NPU query, status %d", ret);
+		return ret;
+	}
+
+	*cols_filled = aie_bitmap;
+	*resp_size = resp.size;
+
+	return 0;
+}
+
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 {
 	if (AIE_FEATURE_ON(&ndev->aie, AIE4_GET_COREDUMP))
@@ -598,9 +632,18 @@ void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 		ndev->aie.msg_ops.rw_mem = aie4_rw_aie_mem;
 	}
 
+	ndev->aie.msg_ops.query_status = aie4_query_status;
 	ndev->aie.msg_ops.query_telemetry = aie4_query_telemetry;
-	/* aie4 has no fw_ctx_id <-> hwctx_id map and no per-ctx FW health. */
-	ndev->aie.hwctx_limit = 0;
+	/*
+	 * A non-zero limit makes amdxdna_get_telemetry() emit a
+	 * firmware-context-id to driver-context-id map at the head of the
+	 * telemetry buffer (like aie2), so the shim can label per-context
+	 * telemetry with the driver context id. The firmware assigns each
+	 * context an id in the range [0, MAX_HWCTX_ID) and indexes its
+	 * per-context telemetry (preemption counters) by that id, so the
+	 * telemetry map needs one entry per possible id.
+	 */
+	ndev->aie.hwctx_limit = MAX_HWCTX_ID;
 
 	/*
 	 * FW logging is owned by the PF; a VF must not start its own log

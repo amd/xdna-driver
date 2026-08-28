@@ -28,6 +28,8 @@
 #define XDNA_ERR(xdna, fmt, args...)	drm_err(&(xdna)->ddev, "%s: "fmt, __func__, ##args)
 #define XDNA_DBG(xdna, fmt, args...)	drm_dbg(&(xdna)->ddev, fmt, ##args)
 #define XDNA_INFO_ONCE(xdna, fmt, args...) drm_info_once(&(xdna)->ddev, fmt, ##args)
+#define XDNA_ERR_RATELIMITED(xdna, fmt, args...) \
+	drm_err_ratelimited(&(xdna)->ddev, "%s: "fmt, __func__, ##args)
 
 #define XDNA_MBZ_DBG(xdna, ptr, sz)					\
 	({								\
@@ -71,6 +73,8 @@ struct amdxdna_dev_ops {
 	int (*suspend)(struct amdxdna_dev *xdna);
 	int (*runtime_resume)(struct amdxdna_dev *xdna);
 	int (*runtime_suspend)(struct amdxdna_dev *xdna);
+	void (*reset_prepare)(struct amdxdna_dev *xdna);
+	void (*reset_done)(struct amdxdna_dev *xdna);
 	int (*sriov_configure)(struct amdxdna_dev *xdna, int num_vfs);
 	int (*mmap)(struct amdxdna_client *client, struct vm_area_struct *vma);
 	int (*hwctx_init)(struct amdxdna_hwctx *hwctx);
@@ -136,7 +140,22 @@ struct amdxdna_dev_info {
 
 struct amdxdna_carveout;
 struct amdxdna_dpt;
+struct amdxdna_dpt_desc;
 struct aie_device;
+
+/*
+ * One firmware Debug/Profile/Trace channel, holding everything needed to
+ * work with it: @srcu guards the lifetime of @data, and @desc carries the
+ * channel's constants and firmware hooks. Callers pass a channel pointer
+ * around rather than a handle plus a discriminator, so the two channels
+ * share one set of helpers without any of them switching on which is which.
+ * struct amdxdna_dpt_desc is private to amdxdna_dpt.c.
+ */
+struct amdxdna_dpt_chan {
+	struct srcu_struct		srcu;
+	struct amdxdna_dpt __rcu	*data;
+	const struct amdxdna_dpt_desc	*desc;
+};
 
 struct amdxdna_dev {
 	struct drm_device		ddev;
@@ -167,14 +186,13 @@ struct amdxdna_dev {
 
 	struct amdxdna_carveout		*carveout;
 
-	/* Firmware Debug/Profile/Trace (DPT) framework. dpt_srcu guards the
-	 * lifetime of every dpt handle hung off this device; on disable we
-	 * synchronize_srcu so kfree of the handle is provably ordered after
-	 * any watcher's srcu_read_unlock.
+	/* Firmware Debug/Profile/Trace (DPT) framework. Each channel owns the
+	 * SRCU domain guarding its own handle; on disable we synchronize_srcu
+	 * so kfree of the handle is provably ordered after any watcher's
+	 * srcu_read_unlock.
 	 */
-	struct srcu_struct		dpt_srcu;
-	struct amdxdna_dpt __rcu	*fw_log;
-	struct amdxdna_dpt __rcu	*fw_trace;
+	struct amdxdna_dpt_chan		fw_log;
+	struct amdxdna_dpt_chan		fw_trace;
 
 	/* Allow auto core dump for hardware contexts, if true. */
 	bool				auto_coredump;
@@ -226,6 +244,7 @@ struct amdxdna_client {
 	struct drm_file			*filp;
 
 	struct mutex			mm_lock; /* protect memory related */
+	struct list_head		bo_invalid_list; /* protected by xdna->notifier_lock */
 	struct xarray			dev_heap_xa;
 	struct drm_mm			dev_heap_mm;
 	u32				dev_heap_nid;

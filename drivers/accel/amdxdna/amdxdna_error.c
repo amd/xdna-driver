@@ -399,8 +399,12 @@ int amdxdna_async_events_alloc(struct aie_device *aie,
 	 * then calls amdxdna_async_events_free(), which drains the workqueue and
 	 * frees the (NULL-safe) slots once firmware can no longer DMA into or
 	 * fire the callback on them.
+	 *
+	 * The mailbox async callback is armed before this runs and reads the
+	 * pool without dev_lock, so release the fully built pool to it. Pairs
+	 * with the acquire in amdxdna_async_events_queue_work().
 	 */
-	aie->async_events = events;
+	smp_store_release(&aie->async_events, events);
 
 	for (i = 0; i < events->event_cnt; i++) {
 		struct amdxdna_async_event *e = &events->event[i];
@@ -421,6 +425,15 @@ int amdxdna_async_events_alloc(struct aie_device *aie,
 		e->events = events;
 		e->aie = aie;
 
+		/*
+		 * amdxdna_alloc_msg_buff() does not zero. The decode path trusts
+		 * err_cnt and the payload it bounds, so a firmware write shorter
+		 * than the report would otherwise leave page contents to be
+		 * decoded into the cached error userspace reads back. The send
+		 * below flushes this range before arming firmware.
+		 */
+		memset(e->buf, 0, e->size);
+
 		ret = amdxdna_async_event_send(e);
 		if (ret) {
 			amdxdna_free_msg_buff(e->hdl);
@@ -434,6 +447,18 @@ int amdxdna_async_events_alloc(struct aie_device *aie,
 	return 0;
 }
 
+bool amdxdna_async_events_queue_work(struct aie_device *aie, struct work_struct *work)
+{
+	/* Pairs with the release in amdxdna_async_events_alloc(). */
+	struct amdxdna_async_events *events = smp_load_acquire(&aie->async_events);
+
+	if (!events || !events->wq)
+		return false;
+
+	queue_work(events->wq, work);
+	return true;
+}
+
 void amdxdna_async_events_free(struct aie_device *aie)
 {
 	struct amdxdna_dev *xdna = aie->xdna;
@@ -445,7 +470,14 @@ void amdxdna_async_events_free(struct aie_device *aie)
 	if (!events)
 		return;
 
-	aie->async_events = NULL;
+	/*
+	 * Retire the pool with a single store the lockless reader in
+	 * amdxdna_async_events_queue_work() cannot tear. Callers stop the
+	 * mailbox before getting here, so no async callback can race the
+	 * destroy_workqueue() below; the release only keeps the pointer
+	 * accesses symmetric with the publish in amdxdna_async_events_alloc().
+	 */
+	smp_store_release(&aie->async_events, NULL);
 
 	/* Drop dev_lock so in-flight workers can complete before teardown. */
 	mutex_unlock(&xdna->dev_lock);

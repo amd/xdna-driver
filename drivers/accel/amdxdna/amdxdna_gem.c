@@ -13,6 +13,9 @@
 #include <linux/dma-buf.h>
 #include <linux/dma-direct.h>
 #include <linux/iosys-map.h>
+#ifndef AMDXDNA_AUX
+#include <linux/hmm.h>
+#endif
 #include <linux/pagemap.h>
 #include <linux/vmalloc.h>
 
@@ -200,6 +203,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 	abo->open_ref = 0;
 	abo->internal = false;
 	INIT_LIST_HEAD(&abo->mem.umap_list);
+	INIT_LIST_HEAD(&abo->node);
 
 	return abo;
 }
@@ -284,49 +288,48 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 {
 	struct amdxdna_umap *mapp = container_of(mni, struct amdxdna_umap, notifier);
 	struct amdxdna_gem_obj *abo = mapp->abo;
+	struct amdxdna_client *client;
 	struct amdxdna_dev *xdna;
-#ifndef AMDXDNA_AUX
-	long ret;
-#endif
+	int srcu_idx;
 
 	xdna = to_xdna_dev(to_gobj(abo)->dev);
-	XDNA_DBG(xdna, "Invalidating range 0x%lx, 0x%lx, type %d, evt %d, pending fences %d",
-		 mapp->range.start, mapp->range.end, abo->type, range->event,
-		 !dma_resv_test_signaled(to_gobj(abo)->resv, DMA_RESV_USAGE_BOOKKEEP));
 
 	if (!mmu_notifier_range_blockable(range))
 		return false;
 
+	/*
+	 * abo->client is written under abo->lock (in amdxdna_gem_obj_open/close).
+	 * Hold abo->lock while reading client and taking srcu_read_lock so that
+	 * abo->client cannot be cleared between the read and the srcu lock.
+	 * Once srcu_read_lock is held, client cannot be destroyed
+	 * (amdxdna_hwctx_destroy_rcu calls synchronize_srcu which blocks until
+	 * all readers exit), so we can drop abo->lock.
+	 */
+	mutex_lock(&abo->lock);
+	client = abo->client;
+	if (client)
+		srcu_idx = srcu_read_lock(&client->hwctx_srcu);
+	mutex_unlock(&abo->lock);
+
+	XDNA_DBG(xdna, "Invalidating range 0x%lx, 0x%lx, type %d, evt %d, pending jobs %d",
+		 mapp->range.start, mapp->range.end, abo->type, range->event,
+		 client && amdxdna_client_has_pending_jobs(client));
+
 	down_write(&xdna->notifier_lock);
+	if (client && list_empty(&abo->node))
+		list_add_tail(&abo->node, &client->bo_invalid_list);
 	abo->mem.map_invalid = true;
 	mapp->invalid = true;
 	mmu_interval_set_seq(&mapp->notifier, cur_seq);
+	if (range->event == MMU_NOTIFY_UNMAP && !mapp->unmapped) {
+		queue_work(xdna->notifier_wq, &mapp->hmm_unreg_work);
+		mapp->unmapped = true;
+	}
 	up_write(&xdna->notifier_lock);
 
-#ifndef AMDXDNA_AUX
-	/*
-	 * VE2/AUX has no cmd_submit-side BO lockdown that attaches job fences
-	 * to the reservation object (unlike aie2/aie4, see aie4_cmd_submit()),
-	 * so there is nothing queued on abo->resv for this to wait on here.
-	 * Skip it to keep this a fast, non-blocking notifier on AUX, matching
-	 * behavior prior to commit cdd9d5cee72d ("remove hmm_invalidate ops
-	 * callback"), where ve2_ops never installed a .hmm_invalidate hook.
-	 */
-	ret = dma_resv_wait_timeout(to_gobj(abo)->resv, DMA_RESV_USAGE_BOOKKEEP,
-				    true, MAX_SCHEDULE_TIMEOUT);
-	if (!ret)
-		XDNA_ERR(xdna, "Failed to wait for bo, ret %ld", ret);
-	else if (ret == -ERESTARTSYS)
-		XDNA_DBG(xdna, "Wait for bo interrupted by signal");
-#endif /* !AMDXDNA_AUX */
-
-	if (range->event == MMU_NOTIFY_UNMAP) {
-		down_write(&xdna->notifier_lock);
-		if (!mapp->unmapped) {
-			queue_work(xdna->notifier_wq, &mapp->hmm_unreg_work);
-			mapp->unmapped = true;
-		}
-		up_write(&xdna->notifier_lock);
+	if (client) {
+		amdxdna_client_wait_idle(client);
+		srcu_read_unlock(&client->hwctx_srcu, srcu_idx);
 	}
 
 	return true;
@@ -472,6 +475,10 @@ static void amdxdna_gem_dev_obj_free(struct drm_gem_object *gobj)
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
+	down_write(&xdna->notifier_lock);
+	list_del_init(&abo->node);
+	up_write(&xdna->notifier_lock);
+
 	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, amdxdna_gem_dev_addr(abo));
 	if (abo->pinned)
 		amdxdna_gem_unpin(abo);
@@ -486,9 +493,19 @@ static void amdxdna_mark_mapp_invalid(struct amdxdna_gem_obj *abo,
 				      struct vm_area_struct *vma)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct amdxdna_client *client;
 	struct amdxdna_umap *mapp;
+	int srcu_idx;
+
+	mutex_lock(&abo->lock);
+	client = abo->client;
+	if (client)
+		srcu_idx = srcu_read_lock(&client->hwctx_srcu);
+	mutex_unlock(&abo->lock);
 
 	down_write(&xdna->notifier_lock);
+	if (client && list_empty(&abo->node))
+		list_add_tail(&abo->node, &client->bo_invalid_list);
 	abo->mem.map_invalid = true;
 	list_for_each_entry(mapp, &abo->mem.umap_list, node) {
 		if (compare_range(mapp, vma->vm_mm, vma->vm_start, vma->vm_end)) {
@@ -497,6 +514,9 @@ static void amdxdna_mark_mapp_invalid(struct amdxdna_gem_obj *abo,
 		}
 	}
 	up_write(&xdna->notifier_lock);
+
+	if (client)
+		srcu_read_unlock(&client->hwctx_srcu, srcu_idx);
 }
 
 static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
@@ -692,6 +712,10 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
+
+	down_write(&xdna->notifier_lock);
+	list_del_init(&abo->node);
+	up_write(&xdna->notifier_lock);
 
 	amdxdna_hmm_unregister(abo, NULL, 0, 0);
 	flush_workqueue(xdna->notifier_wq);
@@ -1419,6 +1443,9 @@ static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
 		return -EINVAL;
 
 	size = min(abo->mem.size, end) - offset;
+	if (!size)
+		return 0;
+
 	first = offset >> PAGE_SHIFT;
 	nr_pages = (PAGE_ALIGN(offset + size) >> PAGE_SHIFT) - first;
 
@@ -1469,6 +1496,21 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	 * helpers are not available on arm64). Debug-BO sync is not supported on
 	 * this backend.
 	 */
+	if (!args->size) {
+		ret = -EINVAL;
+		goto put_obj;
+	}
+
+	{
+		u64 end;
+
+		if (check_add_overflow(args->offset, args->size, &end) ||
+		    end > gobj->size) {
+			ret = -EINVAL;
+			goto put_obj;
+		}
+	}
+
 	ret = amdxdna_gem_pin(abo);
 	if (ret) {
 		XDNA_ERR(xdna, "Pin BO %d failed, ret %d", args->handle, ret);
@@ -1589,3 +1631,124 @@ int amdxdna_drm_get_bo_usage(struct drm_device *dev, struct amdxdna_drm_get_arra
 
 	return 0;
 }
+
+#ifndef AMDXDNA_AUX
+static int amdxdna_populate_range(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct amdxdna_umap *mapp;
+	struct mm_struct *mm;
+	bool found;
+	int ret;
+
+again:
+	found = false;
+	down_write(&xdna->notifier_lock);
+	list_for_each_entry(mapp, &abo->mem.umap_list, node) {
+		if (mapp->invalid && !mapp->unmapped && kref_get_unless_zero(&mapp->refcnt)) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		abo->mem.map_invalid = false;
+		up_write(&xdna->notifier_lock);
+		return 0;
+	}
+
+	up_write(&xdna->notifier_lock);
+
+	mm = mapp->notifier.mm;
+	if (!mmget_not_zero(mm)) {
+		amdxdna_umap_put(mapp);
+		return -EFAULT;
+	}
+
+	mapp->range.notifier_seq = mmu_interval_read_begin(&mapp->notifier);
+	mmap_read_lock(mm);
+	ret = hmm_range_fault(&mapp->range);
+	mmap_read_unlock(mm);
+	if (ret) {
+		if (ret == -EBUSY) {
+			amdxdna_umap_put(mapp);
+			mmput(mm);
+			goto again;
+		}
+
+		goto put_mm;
+	}
+
+	/*
+	 * mmu_interval_read_retry() returns true if the notifier sequence
+	 * advanced since mmu_interval_read_begin() — i.e. another invalidation
+	 * fired while we were faulting pages in. In that case we retry.
+	 *
+	 * Critically, while amdxdna_hmm_invalidate() is still active (between
+	 * mmu_interval_set_seq() and its return), the notifier sequence is
+	 * always "open", so mmu_interval_read_retry() always returns true here.
+	 * This means any concurrent submit that reaches amdxdna_populate_range()
+	 * during an active invalidation cannot complete range population — it
+	 * keeps retrying until the notifier returns. New jobs therefore cannot
+	 * be pushed to the device while the mapping is being torn down, and
+	 * amdxdna_client_wait_idle() drains only the jobs already in flight at
+	 * the time of invalidation.
+	 */
+	down_write(&xdna->notifier_lock);
+	if (mmu_interval_read_retry(&mapp->notifier, mapp->range.notifier_seq)) {
+		up_write(&xdna->notifier_lock);
+		amdxdna_umap_put(mapp);
+		mmput(mm);
+		goto again;
+	}
+	mapp->invalid = false;
+	up_write(&xdna->notifier_lock);
+	amdxdna_umap_put(mapp);
+	mmput(mm);
+	goto again;
+
+put_mm:
+	amdxdna_umap_put(mapp);
+	mmput(mm);
+	return ret;
+}
+
+int amdxdna_client_populate_ranges(struct amdxdna_client *client)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_gem_obj *abo;
+	int ret = 0;
+
+	while (true) {
+		down_write(&xdna->notifier_lock);
+		abo = list_first_entry_or_null(&client->bo_invalid_list,
+					       struct amdxdna_gem_obj, node);
+		if (abo && !kref_get_unless_zero(&to_gobj(abo)->refcount)) {
+			/* BO is being freed — remove it and retry. */
+			list_del_init(&abo->node);
+			up_write(&xdna->notifier_lock);
+			continue;
+		}
+		up_write(&xdna->notifier_lock);
+
+		if (!abo)
+			break;
+
+		ret = amdxdna_populate_range(abo);
+		if (!ret) {
+			down_write(&xdna->notifier_lock);
+			/* Re-check: notifier may have re-fired and re-added the
+			 * BO to the list while the lock was dropped.
+			 */
+			if (!abo->mem.map_invalid && !list_empty(&abo->node))
+				list_del_init(&abo->node);
+			up_write(&xdna->notifier_lock);
+		}
+		drm_gem_object_put(to_gobj(abo));
+		if (ret)
+			break;
+	}
+
+	return ret;
+}
+#endif

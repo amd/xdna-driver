@@ -98,7 +98,7 @@ static void ve2_job_release(struct kref *ref)
 	struct amdxdna_sched_job *job =
 		container_of(ref, struct amdxdna_sched_job, refcnt);
 
-	amdxdna_sched_job_cleanup(job);
+	amdxdna_job_cleanup(job);
 	kfree(job);
 }
 

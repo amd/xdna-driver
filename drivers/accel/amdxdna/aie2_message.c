@@ -471,60 +471,36 @@ static int amdxdna_hwctx_col_map(struct amdxdna_hwctx *hwctx, void *arg)
 	return 0;
 }
 
-int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
-		      u32 size, u32 *cols_filled)
+int aie2_query_status(struct aie_device *aie, struct amdxdna_msg_buf_hdl *buf_hdl,
+		      u32 *cols_filled, u32 *resp_size)
 {
 	DECLARE_AIE_MSG(aie_column_info, MSG_OP_QUERY_COL_STATUS);
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	struct amdxdna_msg_buf_hdl *buf_hdl;
+	struct amdxdna_dev *xdna = aie->xdna;
 	struct amdxdna_client *client;
 	u32 aie_bitmap = 0;
 	int ret;
-
-	buf_hdl = amdxdna_alloc_msg_buff(xdna, ndev->aie.metadata.cols *
-					 ndev->aie.metadata.col_size);
-	if (IS_ERR(buf_hdl))
-		return PTR_ERR(buf_hdl);
 
 	/* Go through each hardware context and mark the AIE columns that are active */
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_walk(client, &aie_bitmap, NULL,
 				   amdxdna_hwctx_col_map);
 
-	*cols_filled = 0;
 	req.dump_buff_addr = to_dma_addr(buf_hdl, 0);
 	req.dump_buff_size = to_buf_size(buf_hdl);
 	req.num_cols = hweight32(aie_bitmap);
 	req.aie_bitmap = aie_bitmap;
 
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie_send_mgmt_msg_wait(aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Error during NPU query, status %d", ret);
-		goto fail;
+		return ret;
 	}
 
 	XDNA_DBG(xdna, "Query NPU status completed");
-
-	if (to_buf_size(buf_hdl) < resp.size) {
-		ret = -EINVAL;
-		XDNA_ERR(xdna, "Bad buffer size. Available: %u. Needs: %u",
-			 to_buf_size(buf_hdl), resp.size);
-		goto fail;
-	}
-
-	size = min(size, resp.size);
-	if (copy_to_user(buf, to_cpu_addr(buf_hdl, 0), size)) {
-		ret = -EFAULT;
-		XDNA_ERR(xdna, "Failed to copy NPU status to user space");
-		goto fail;
-	}
-
 	*cols_filled = aie_bitmap;
+	*resp_size = resp.size;
 
-fail:
-	amdxdna_free_msg_buff(buf_hdl);
-	return ret;
+	return 0;
 }
 
 int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
@@ -1024,8 +1000,8 @@ void aie2_msg_init(struct amdxdna_dev_hdl *ndev)
 		ndev->exec_msg_ops = &legacy_exec_message_ops;
 
 	ndev->aie.hwctx_limit = ndev->priv->hwctx_limit;
+	ndev->aie.msg_ops.query_status = aie2_query_status;
 	ndev->aie.msg_ops.query_telemetry = aie2_query_telemetry_cb;
-	ndev->aie.msg_ops.fill_hwctx_map = aie2_fill_hwctx_map;
 	ndev->aie.msg_ops.fill_hwctx_health = aie2_fill_hwctx_health;
 
 	if (AIE_FEATURE_ON(&ndev->aie, AIE2_GET_COREDUMP))
@@ -1126,7 +1102,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 	}
 
 	ccnt = payload->command_count;
-	if (payload_len < struct_size(payload, data, ccnt)) {
+	if (!ccnt || payload_len < struct_size(payload, data, ccnt)) {
 		XDNA_DBG(xdna, "Invalid command count %d", ccnt);
 		return -EINVAL;
 	}

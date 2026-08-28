@@ -64,24 +64,13 @@ struct amdxdna_hwctx_priv {
 	 * Both the flag and the multi-word report body are protected by io_lock
 	 * (cached only for kernel-mode contexts); the flag alone is insufficient
 	 * because the worker can overwrite the body while a reader consumes it.
-	 * aie4_unlink_cert_comp() also reads the flag to gate the ctx_error_gen
-	 * bump; that read is serialized against the io_lock writers by dev_lock
-	 * (cache, reset and destroy all run under dev_lock).
+	 * The job worker consumes it on the reset path (has_reset) to attach the
+	 * report to the faulting job; that access is serialized against the io_lock
+	 * writers by dev_lock (cache, reset and destroy run under dev_lock).
 	 */
 	bool                            cached_ctx_error_valid;
 	struct aie4_async_ctx_error     cached_ctx_error;
-	/*
-	 * Monotonic count of critical ctx errors recorded for this ctx (bumped in
-	 * aie4_unlink_cert_comp() when cached_ctx_error_valid is set, i.e. on a TDR
-	 * disconnect). A submitter parked in the HSA-full wait snapshots it before
-	 * sleeping; if it advances while the wait is broken by a context recreate,
-	 * the recreate was a TDR reset and the submit unwinds. If it is unchanged,
-	 * the recreate was a benign suspend/resume, so the wait re-acquires the
-	 * fresh cert_comp and continues. Written under cert_comp_lock, read
-	 * locklessly with READ_ONCE (safe: the wait's schedule() commits the
-	 * snapshot before any teardown wake, and the count is monotonic).
-	 */
-	u32                             ctx_error_gen;
+	bool				has_reset; /* if hwctx disconnection due to reset */
 
 	/* Kernel-mode submission: driver fills the user HSA queue and rings
 	 * the doorbell.  umq_pkts/umq_indirect_pkts alias the user umq_bo;
@@ -158,6 +147,13 @@ struct amdxdna_dev_hdl {
 struct aie4_msg_context_config_cert_logging;
 
 /* aie4_ctx.c */
+enum aie4_hwctx_flags {
+	AIE4_HWCTX_NORMAL = 0,
+	AIE4_HWCTX_GRACEFUL,
+	AIE4_HWCTX_DISCONNECT, /* sets has_reset, do not destroy context */
+	AIE4_HWCTX_ERROR, /* sets has_reset, destroy context */
+};
+
 int aie4_hwctx_init(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx);
 int aie4_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value,
@@ -165,9 +161,9 @@ int aie4_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value,
 int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
 int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int aie4_hwctx_create(struct amdxdna_hwctx *hwctx);
-void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx);
+void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags);
 void aie4_hwctx_resume_jobs(struct amdxdna_hwctx *hwctx);
-void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx, bool errored);
+void aie4_hwctx_wait_for_running(struct amdxdna_hwctx *hwctx);
 void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx *hwctx);
 
 /* aie4_sriov.c */
@@ -198,7 +194,7 @@ int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
-int aie4_force_preemption(struct amdxdna_dev_hdl *ndev);
+int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
 int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 				       u32 hw_context_id, u32 property,
@@ -214,6 +210,7 @@ extern const struct aie_error_lut_set aie4_error_luts;
 int aie4_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,
 			      void *handle, int (*cb)(void *, void __iomem *, size_t));
 bool aie4_handle_dev_event(struct aie_device *aie, u32 type, void *vaddr);
+int aie4_mgmt_async_event_handler(void *handle, u32 opcode, void __iomem *data, size_t size);
 int aie4_get_array_async_error(struct amdxdna_dev_hdl *ndev,
 			       struct amdxdna_drm_get_array *args);
 

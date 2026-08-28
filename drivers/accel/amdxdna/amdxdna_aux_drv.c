@@ -30,7 +30,6 @@ static void amdxdna_aux_release(struct drm_device *drm, void *res)
 	struct amdxdna_dev *xdna = res;
 
 	amdxdna_carveout_fini(xdna);
-	cleanup_srcu_struct(&xdna->dpt_srcu);
 	ida_destroy(&xdna->hwctx_ida);
 }
 
@@ -38,10 +37,11 @@ static void amdxdna_aux_release(struct drm_device *drm, void *res)
  * amdxdna_dev_init - bus-agnostic amdxdna device init and registration
  * @xdna: Pointer to amdxdna device
  *
- * Initializes common device structures (locks, client list, dpt srcu,
- * notifier workqueue), hardware via ops->init, sysfs, and registers the DRM
- * device. Note: unlike the PCI path, the auxiliary/SoC path does not set up an
- * IOMMU domain here; the common open path falls back to SVA or carveout.
+ * Initializes common device structures (locks, client list, notifier
+ * workqueue), hardware via ops->init, sysfs, and registers the DRM device.
+ * Note: unlike the PCI path, the auxiliary/SoC path does not set up DPT
+ * channels or an IOMMU domain here; the common open path falls back to SVA or
+ * carveout.
  *
  * Return: 0 on success, negative error code on failure
  */
@@ -69,15 +69,9 @@ int amdxdna_dev_init(struct amdxdna_dev *xdna)
 	 */
 	ida_init(&xdna->hwctx_ida);
 
-	ret = init_srcu_struct(&xdna->dpt_srcu);
+	ret = drmm_add_action(ddev, amdxdna_aux_release, xdna);
 	if (ret)
 		return ret;
-
-	ret = drmm_add_action(ddev, amdxdna_aux_release, xdna);
-	if (ret) {
-		cleanup_srcu_struct(&xdna->dpt_srcu);
-		return ret;
-	}
 
 	if (IS_ENABLED(CONFIG_LOCKDEP)) {
 		fs_reclaim_acquire(GFP_KERNEL);

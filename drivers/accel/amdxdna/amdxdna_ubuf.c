@@ -11,6 +11,7 @@
 #include <linux/overflow.h>
 #include <linux/pagemap.h>
 #include <linux/vmalloc.h>
+#include <xen/xen.h>
 
 #include "amdxdna_gem.h"
 #include "amdxdna_pci_drv.h"
@@ -38,7 +39,8 @@ static void amdxdna_gem_ubuf_obj_free(struct drm_gem_object *gobj)
 
 	amdxdna_dma_unmap_bo(xdna, abo);
 	amdxdna_ubuf_unmap_dma(abo);
-	if (abo->mem.nr_pages)
+	/* Foreign pages are borrowed from the Xen mapping; never unpin them. */
+	if (abo->mem.nr_pages && !abo->mem.foreign)
 		unpin_user_pages(abo->mem.pages, abo->mem.nr_pages);
 	atomic64_sub(abo->mem.size >> PAGE_SHIFT, &abo->mem.mm->pinned_vm);
 	kvfree(abo->mem.pages);
@@ -137,6 +139,110 @@ static int amdxdna_ubuf_hmm_register(struct amdxdna_gem_obj *abo,
 	return ret;
 }
 
+/*
+ * Xen foreign guest memory (privcmd MMAPBATCH) is mapped VM_IO|VM_PFNMAP, so
+ * pin_user_pages() returns -EFAULT. On an auto-translated (PVH) dom0 privcmd
+ * stores the local page array backing the foreign frames in
+ * vma->vm_private_data (ZONE_DEVICE pages from xen_alloc_unpopulated_pages).
+ *
+ * Detect this heuristically from public VMA state: we cannot compare
+ * vma->vm_ops against privcmd's (it is static in drivers/xen). A value of
+ * (void *)1 is privcmd's PRIV_VMA_LOCKED marker (PV dom0, no local pages).
+ * On success returns the page array and its length in @count.
+ */
+static struct page **amdxdna_xen_foreign_pages(struct vm_area_struct *vma,
+					       unsigned long *count)
+{
+	struct page **pages;
+
+	if (!xen_domain())
+		return NULL;
+	if ((vma->vm_flags & (VM_IO | VM_PFNMAP)) != (VM_IO | VM_PFNMAP))
+		return NULL;
+
+	pages = vma->vm_private_data;
+	if (!pages || pages == (struct page **)1)
+		return NULL;
+
+	*count = vma_pages(vma);
+	return pages;
+}
+
+/*
+ * Populate abo->mem.pages for one VA entry, under mmap_read_lock. When the BO
+ * is a Xen foreign (privcmd) mapping its pages can't be pinned, so borrow them
+ * from the privcmd VMA's local page array; otherwise pin_user_pages() them.
+ * The mode is fixed for the whole BO (see abo->mem.foreign) because free is
+ * all-or-nothing, so a foreign BO validates that every entry is foreign too.
+ * Returns the number of pages added, or a negative errno.
+ */
+static long amdxdna_ubuf_get_pages(struct amdxdna_gem_obj *abo,
+				   struct amdxdna_drm_va_entry *va_ent)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	unsigned long npages = va_ent->len >> PAGE_SHIFT;
+	struct vm_area_struct *vma;
+	long ret;
+
+	if (abo->mem.foreign) {
+		unsigned long fcount, off, j;
+		struct page **fpages;
+
+		vma = amdxdna_ubuf_find_vma(va_ent);
+		fpages = vma ? amdxdna_xen_foreign_pages(vma, &fcount) : NULL;
+		if (!fpages) {
+			XDNA_ERR(xdna, "Entry vaddr %llx is not a foreign mapping",
+				 va_ent->vaddr);
+			return -EINVAL;
+		}
+
+		off = (va_ent->vaddr - vma->vm_start) >> PAGE_SHIFT;
+		if (off + npages > fcount) {
+			XDNA_ERR(xdna, "Foreign entry out of range %lu+%lu > %lu",
+				 off, npages, fcount);
+			return -EINVAL;
+		}
+
+		for (j = 0; j < npages; j++)
+			abo->mem.pages[abo->mem.nr_pages++] = fpages[off + j];
+
+		return npages;
+	}
+
+	/*
+	 * Non-foreign entries take the normal pin path. In particular, when a
+	 * Xen guest grants pages to this (dom0) domain and they are mapped via
+	 * gntdev, the mapping is VM_MIXEDMAP backed by local struct pages -- i.e.
+	 * normal, pinnable pages -- unlike privcmd foreign (VM_IO|VM_PFNMAP)
+	 * mappings, which have no pinnable struct page and are borrowed above.
+	 *
+	 * Caveat for grant pages: the FOLL_LONGTERM pin only holds a reference on
+	 * the local (dom0) struct page, not on the grant itself. The grant is
+	 * owned by the guest; if the guest revokes it (or gntdev unmaps) while
+	 * this BO is alive, the local page's p2m/backing machine frame changes,
+	 * but the device's IOMMU mapping (amdxdna_dma_map_bo() programs it from
+	 * the page's physical address) still points at the old frame. The device
+	 * then DMAs to a stale/reused machine frame -- silent corruption. There
+	 * is no notifier here to catch revocation, so the BO must be destroyed
+	 * before the grant is revoked; callers must order teardown accordingly.
+	 */
+	ret = pin_user_pages(va_ent->vaddr, npages,
+			     (abo->readonly ? 0 : FOLL_WRITE) | FOLL_LONGTERM,
+			     &abo->mem.pages[abo->mem.nr_pages]);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "Failed to pin pages ret %ld", ret);
+		return ret;
+	}
+
+	abo->mem.nr_pages += ret;
+	if (ret != npages) {
+		XDNA_ERR(xdna, "Partially pinned pages %ld/%ld", ret, npages);
+		return -ENOMEM;
+	}
+
+	return ret;
+}
+
 struct amdxdna_gem_obj *amdxdna_alloc_ubuf_bo(struct amdxdna_client *client,
 					      u32 num_entries, void __user *va_entries)
 {
@@ -144,6 +250,8 @@ struct amdxdna_gem_obj *amdxdna_alloc_ubuf_bo(struct amdxdna_client *client,
 	unsigned long lock_limit, new_pinned;
 	struct amdxdna_drm_va_entry *va_ent;
 	struct amdxdna_gem_obj *abo;
+	struct vm_area_struct *vma;
+	unsigned long fcount = 0;
 	unsigned long npages;
 	bool need_contig;
 	size_t bufsize;
@@ -229,23 +337,20 @@ struct amdxdna_gem_obj *amdxdna_alloc_ubuf_bo(struct amdxdna_client *client,
 	mmap_read_lock(current->mm);
 	amdxdna_ubuf_check_readonly(abo, va_ent, num_entries);
 
-	for (i = 0; i < num_entries; i++) {
-		npages = va_ent[i].len >> PAGE_SHIFT;
+	/*
+	 * Xen foreign (privcmd) mappings are VM_IO|VM_PFNMAP and can't be
+	 * pinned. Decide the mode once from the first entry so the whole BO is
+	 * uniformly borrowed or pinned (free is all-or-nothing). Grant (gntdev)
+	 * mappings are VM_MIXEDMAP and take the normal pin path.
+	 */
+	vma = amdxdna_ubuf_find_vma(&va_ent[0]);
+	if (vma && amdxdna_xen_foreign_pages(vma, &fcount))
+		abo->mem.foreign = true;
 
-		ret = pin_user_pages(va_ent[i].vaddr, npages,
-				     (abo->readonly ? 0 : FOLL_WRITE) | FOLL_LONGTERM,
-				     &abo->mem.pages[abo->mem.nr_pages]);
-		if (ret >= 0) {
-			abo->mem.nr_pages += ret;
-			if (ret != npages) {
-				XDNA_ERR(xdna, "Partially pinned pages %ld/%ld", ret, npages);
-				ret = -ENOMEM;
-				break;
-			}
-		} else {
-			XDNA_ERR(xdna, "Failed to pin pages ret %ld", ret);
+	for (i = 0; i < num_entries; i++) {
+		ret = amdxdna_ubuf_get_pages(abo, &va_ent[i]);
+		if (ret < 0)
 			break;
-		}
 	}
 	mmap_read_unlock(current->mm);
 

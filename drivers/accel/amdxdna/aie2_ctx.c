@@ -16,6 +16,7 @@
 
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
+#include "amdxdna_coredump.h"
 #include "aie2_solver.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
@@ -73,6 +74,44 @@ static bool aie2_tdr_detect(struct amdxdna_dev *xdna)
 }
 #endif
 
+struct aie2_fence {
+	struct dma_fence	base;
+	spinlock_t		lock; /* for base */
+	struct device		*dev;
+};
+
+static const char *aie2_fence_get_driver_name(struct dma_fence *fence)
+{
+	return KBUILD_MODNAME;
+}
+
+static const char *aie2_fence_get_timeline_name(struct dma_fence *fence)
+{
+	struct aie2_fence *xdna_fence = container_of(fence, struct aie2_fence, base);
+
+	return dev_name(xdna_fence->dev);
+}
+
+static const struct dma_fence_ops aie2_fence_ops = {
+	.get_driver_name = aie2_fence_get_driver_name,
+	.get_timeline_name = aie2_fence_get_timeline_name,
+};
+
+static struct dma_fence *aie2_fence_create(struct amdxdna_hwctx *hwctx)
+{
+	struct aie2_fence *fence;
+
+	fence = kzalloc_obj(*fence);
+	if (!fence)
+		return NULL;
+
+	fence->dev = hwctx->client->xdna->ddev.dev;
+	spin_lock_init(&fence->lock);
+	dma_fence_init(&fence->base, &aie2_fence_ops, &fence->lock,
+		       dma_fence_context_alloc(1), 0);
+	return &fence->base;
+}
+
 static void aie2_cmd_release(struct kref *ref)
 {
 	struct amdxdna_drv_cmd *drv_cmd = container_of(ref, struct amdxdna_drv_cmd, refcnt);
@@ -90,11 +129,10 @@ static void aie2_job_release(struct kref *ref)
 	struct amdxdna_sched_job *job;
 
 	job = container_of(ref, struct amdxdna_sched_job, refcnt);
-	amdxdna_sched_job_cleanup(job);
-	atomic64_inc(&job->hwctx->job_free_cnt);
-	wake_up(&job->hwctx->priv->job_free_wq);
-	if (job->out_fence)
-		dma_fence_put(job->out_fence);
+	amdxdna_job_cleanup(job);
+	dma_fence_put(job->aie2_job_fence);
+	if (job->aie2_job_out_fence)
+		dma_fence_put(job->aie2_job_out_fence);
 	if (job->drv_cmd)
 		aie2_cmd_put(job->drv_cmd);
 	kfree(job->aie2_job_health);
@@ -239,10 +277,11 @@ int aie2_hwctx_resume(struct amdxdna_client *client)
 static void
 aie2_sched_notify(struct amdxdna_sched_job *job)
 {
-	struct dma_fence *fence = job->fence;
+	struct dma_fence *fence = job->aie2_job_fence;
 
-	trace_xdna_job(&job->base, job->hwctx->name, "signaling fence",
-		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
+	trace_xdna_job_queue(job->hwctx->name, job->seq,
+			     atomic64_read(&job->hwctx->job_submit_cnt) -
+			     atomic64_read(&job->hwctx->job_free_cnt) - 1, "job complete");
 
 	aie2_tdr_signal(job->hwctx->client->xdna);
 	job->hwctx->priv->completed++;
@@ -421,7 +460,7 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 		return ERR_PTR(-ESRCH);
 
 	kref_get(&job->refcnt);
-	fence = dma_fence_get(job->fence);
+	fence = dma_fence_get(job->aie2_job_fence);
 
 	if (job->drv_cmd) {
 		switch (job->drv_cmd->opcode) {
@@ -450,7 +489,7 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 
 out:
 	if (ret) {
-		dma_fence_put(job->fence);
+		dma_fence_put(job->aie2_job_fence);
 		aie2_job_put(job);
 		mmput(job->mm);
 		fence = ERR_PTR(ret);
@@ -458,8 +497,9 @@ out:
 		aie2_tdr_signal(hwctx->client->xdna);
 		amdxdna_io_stats_job_start(job->hwctx->client);
 	}
-	trace_xdna_job(sched_job, hwctx->name, "sent to device",
-		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
+	trace_xdna_job_queue(hwctx->name, job->seq,
+			     atomic64_read(&hwctx->job_submit_cnt) -
+			     atomic64_read(&hwctx->job_free_cnt) + 1, "sent to device");
 
 	return fence;
 }
@@ -488,6 +528,8 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
 	struct aie_device *aie;
+	bool fw_dead = false;
+	bool fw_fatal = false;
 	int ret;
 
 	xdna = hwctx->client->xdna;
@@ -504,10 +546,21 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	report = kzalloc_obj(*report);
 	if (report) {
 		ret = aie2_query_app_health(ndev, hwctx->fw_ctx_id, report);
-		if (ret)
+		if (ret) {
+			/* Firmware did not answer the health query: it is wedged. */
+			if (ret != -EOPNOTSUPP)
+				fw_dead = true;
 			kfree(report);
-		else
+		} else {
+			/*
+			 * fatal_type means the ERT hit a fatal exception. The firmware
+			 * still answers queries, so it is NOT a wedge signal by itself:
+			 * it only escalates when the per-context restart also fails.
+			 */
+			if (report->fatal_info.fatal_type)
+				fw_fatal = true;
 			job->aie2_job_health = report;
+		}
 	}
 
 	if (xdna->auto_coredump) {
@@ -523,7 +576,31 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	job->job_timeout = true;
 	aie2_hwctx_stop(xdna, hwctx, sched_job);
 
-	aie2_hwctx_restart(xdna, hwctx);
+	ret = aie2_hwctx_restart(xdna, hwctx);
+	if (fw_dead || (fw_fatal && ret)) {
+		/*
+		 * Per-context recovery goes through the mailbox; it cannot fix a
+		 * dead firmware (an unresponsive health query, or a restart the
+		 * firmware rejects after reporting a fatal error). Power-cycle the
+		 * NPU via SMU to reload the firmware. aie2_hw_reset() rate-limits
+		 * itself to one reset per AIE2_HW_RESET_MIN_INTERVAL_MS.
+		 */
+		XDNA_WARN(xdna,
+			  "NPU firmware unhealthy (ctx restart ret %d, health %s) "
+			  "- power-cycling NPU",
+			  ret, fw_dead ? "unresponsive" : "fatal+rejected");
+		aie2_hw_reset(xdna);
+	} else if (ret) {
+		/*
+		 * Restart rejected but no fatal report: the firmware is responsive,
+		 * so do not escalate to a device-wide power-cycle; log and let the
+		 * next timeout retry.
+		 */
+		XDNA_WARN(xdna,
+			  "NPU context restart rejected (ret %d) without fatal report "
+			  "- not power-cycling",
+			  ret);
+	}
 
 #ifdef HAVE_drm_gpu_sched_stat_reset
 	return DRM_GPU_SCHED_STAT_RESET;
@@ -824,8 +901,6 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	}
 	amdxdna_pm_suspend_put(xdna);
 
-	init_waitqueue_head(&priv->job_free_wq);
-
 	XDNA_DBG(xdna, "hwctx %s init completed", hwctx->name);
 
 	return 0;
@@ -897,7 +972,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	drm_sched_entity_destroy(&hwctx->priv->entity);
 
 	/* Wait for all submitted jobs to be completed or canceled */
-	wait_event(hwctx->priv->job_free_wq,
+	wait_event(hwctx->job_free_wq,
 		   atomic64_read(&hwctx->job_submit_cnt) ==
 		   atomic64_read(&hwctx->job_free_cnt));
 	mutex_lock(&xdna->dev_lock);
@@ -1173,11 +1248,10 @@ put_cmd:
 
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
 {
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct ww_acquire_ctx acquire_ctx;
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
 	struct dma_fence_chain *chain;
-	struct amdxdna_gem_obj *abo;
-	int ret, i;
+	int ret;
 
 	ret = down_interruptible(&hwctx->priv->job_sem);
 	if (ret) {
@@ -1203,59 +1277,46 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 		goto free_chain;
 	}
 
-retry:
-	ret = drm_gem_lock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
-	if (ret) {
-		XDNA_WARN(xdna, "Failed to lock BOs, ret %d", ret);
+	job->aie2_job_fence = aie2_fence_create(hwctx);
+	if (!job->aie2_job_fence) {
+		XDNA_ERR(xdna, "Failed to create fence");
+		ret = -ENOMEM;
 		goto cleanup_job;
 	}
 
-	for (i = 0; i < job->bo_cnt; i++) {
-		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
+	down_read(&xdna->notifier_lock);
+	while (!list_empty(&client->bo_invalid_list)) {
+		up_read(&xdna->notifier_lock);
+		ret = amdxdna_client_populate_ranges(client);
 		if (ret) {
-			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
-			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+			XDNA_ERR(xdna, "Populate ranges failed, ret %d", ret);
 			goto cleanup_job;
 		}
-	}
-
-	down_read(&xdna->notifier_lock);
-	for (i = 0; i < job->bo_cnt; i++) {
-		abo = to_xdna_obj(job->bos[i]);
-		if (abo->mem.map_invalid) {
-			up_read(&xdna->notifier_lock);
-			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
-			ret = amdxdna_populate_range(abo);
-			if (ret)
-				goto cleanup_job;
-			goto retry;
-		}
+		down_read(&xdna->notifier_lock);
 	}
 
 	mutex_lock(&hwctx->priv->io_lock);
 	drm_sched_job_arm(&job->base);
-	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
-	for (i = 0; i < job->bo_cnt; i++)
-		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
+	job->aie2_job_out_fence = dma_fence_get(&job->base.s_fence->finished);
 	job->seq = hwctx->priv->seq++;
 	kref_get(&job->refcnt);
 	if (job->drv_cmd)
 		kref_get(&job->drv_cmd->refcnt);
+	atomic64_inc(&hwctx->job_submit_cnt);
 	drm_sched_entity_push_job(&job->base);
 
 	*seq = job->seq;
-	drm_syncobj_add_point(hwctx->priv->syncobj, chain, job->out_fence, *seq);
+	drm_syncobj_add_point(hwctx->priv->syncobj, chain, job->aie2_job_out_fence, *seq);
 	mutex_unlock(&hwctx->priv->io_lock);
 
 	up_read(&xdna->notifier_lock);
-	drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
 
 	aie2_job_put(job);
-	atomic64_inc(&hwctx->job_submit_cnt);
 
 	return 0;
 
 cleanup_job:
+	dma_fence_put(job->aie2_job_fence);
 	drm_sched_job_cleanup(&job->base);
 free_chain:
 	dma_fence_chain_free(chain);

@@ -10,8 +10,12 @@
 #include <linux/bitfield.h>
 
 #include "amdxdna_gem.h"
+#include "drm/amdxdna_accel.h"
 
 struct amdxdna_hwctx_priv;
+
+/* Driver-wide maximum hardware context id / count. */
+#define MAX_HWCTX_ID		1024
 
 enum ert_cmd_opcode {
 	ERT_START_CU = 0,
@@ -68,7 +72,7 @@ struct amdxdna_cmd_chain {
 	u32 submit_index;
 	u32 error_index;
 	u32 reserved[3];
-	u64 data[] __counted_by(command_count);
+	u64 data[];
 };
 
 /*
@@ -193,10 +197,28 @@ struct amdxdna_hwctx {
 
 	atomic64_t			job_submit_cnt;
 	atomic64_t			job_free_cnt ____cacheline_aligned_in_smp;
+	wait_queue_head_t		job_free_wq;
 
 	/* Saved core dump, captured automatically on timeout if device auto_coredump is set. */
 	char				*coredump;
 };
+
+static inline u32
+amdxdna_hwctx_report_state(struct amdxdna_hwctx *hwctx,
+			   u64 *submitted, u64 *completed)
+{
+	u64 s, c;
+
+	/* Read completions first: avoid stale-submit false idle on concurrent submit. */
+	c = atomic64_read(&hwctx->job_free_cnt);
+	s = atomic64_read(&hwctx->job_submit_cnt);
+	if (submitted)
+		*submitted = s;
+	if (completed)
+		*completed = c;
+	return (hwctx->fw_ctx_id == (u32)-1 || s == c) ?
+		AMDXDNA_HWCTX_STATE_IDLE : AMDXDNA_HWCTX_STATE_ACTIVE;
+}
 
 #define drm_job_to_xdna_job(j) \
 	container_of(j, struct amdxdna_sched_job, base)
@@ -217,7 +239,14 @@ struct amdxdna_drv_cmd {
 struct app_health_report;
 
 union amdxdna_job_priv {
-	struct app_health_report *aie2_health;
+	/* aie2 kernel submission */
+	struct {
+		struct app_health_report *health;
+		/* The fence to signal DRM scheduler that job is done */
+		struct dma_fence	*fence;
+		/* user can wait on this fence */
+		struct dma_fence	*out_fence;
+	} aie2;
 	/* aie4 kernel submission: queue linkage + job state */
 	struct {
 		struct list_head	list;
@@ -230,10 +259,6 @@ struct amdxdna_sched_job {
 	struct kref		refcnt;
 	struct amdxdna_hwctx	*hwctx;
 	struct mm_struct	*mm;
-	/* The fence to notice DRM scheduler that job is done by hardware */
-	struct dma_fence	*fence;
-	/* user can wait on this fence */
-	struct dma_fence	*out_fence;
 	bool			job_done;
 	bool			job_timeout;
 	u64			seq;
@@ -244,9 +269,11 @@ struct amdxdna_sched_job {
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
 };
 
-#define aie2_job_health priv.aie2_health
-#define aie4_job_list	priv.aie4.list
-#define aie4_job_state	priv.aie4.state
+#define aie2_job_health    priv.aie2.health
+#define aie2_job_fence     priv.aie2.fence
+#define aie2_job_out_fence priv.aie2.out_fence
+#define aie4_job_list      priv.aie4.list
+#define aie4_job_state     priv.aie4.state
 
 static inline u32
 amdxdna_cmd_get_op(struct amdxdna_gem_obj *abo)
@@ -310,7 +337,9 @@ int amdxdna_cmd_set_error(struct amdxdna_gem_obj *abo,
 			  enum ert_cmd_state error_state,
 			  void *err_data, size_t size);
 
-void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job);
+void amdxdna_job_cleanup(struct amdxdna_sched_job *job);
+bool amdxdna_client_has_pending_jobs(struct amdxdna_client *client);
+void amdxdna_client_wait_idle(struct amdxdna_client *client);
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 int amdxdna_hwctx_walk(struct amdxdna_client *client, void *arg,
 		       bool (*filter)(struct amdxdna_hwctx *hwctx, void *arg),

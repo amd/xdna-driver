@@ -23,6 +23,7 @@
 #include <asm/hypervisor.h>
 
 #include "aie.h"
+#include "amdxdna_coredump.h"
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 #include "aie2_solver.h"
@@ -488,6 +489,70 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 	return ret;
 }
 
+/*
+ * aie2_hw_reset - recover a wedged NPU via full hardware power-cycle.
+ *
+ * Suspends every context, tears the device down, powers the NPU off and on
+ * through the SMU (reloading the firmware), then re-creates every context.
+ * The mailbox path cannot recover a dead firmware — only a hardware reset
+ * can. Called from aie2_sched_job_timedout() when per-context recovery
+ * fails or the firmware reports a fatal error. dev_lock must be held
+ * (aie2_hwctx_suspend requires it).
+ *
+ * Rate-limited: if the firmware re-wedges immediately after a reset, a
+ * reset storm must not hammer the SMU power-cycle. One reset per window
+ * is enough; repeated timeouts after that indicate a deeper firmware
+ * problem and are reported to the log instead of resetting in a loop.
+ */
+int aie2_hw_reset(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_client *client;
+	int ret, first_ret = 0;
+
+	if (ndev->dev_status <= AIE2_DEV_INIT) {
+		XDNA_DBG(xdna, "device not started, nothing to reset");
+		return 0;
+	}
+
+	if (time_before(jiffies, ndev->last_reset_jiffies +
+				msecs_to_jiffies(AIE2_HW_RESET_MIN_INTERVAL_MS))) {
+		XDNA_WARN(xdna, "NPU reset skipped: last reset %d ms ago",
+			  jiffies_to_msecs(jiffies - ndev->last_reset_jiffies));
+		return -EAGAIN;
+	}
+
+	/*
+	 * Stamp before resetting: if the power-cycle itself fails (NPU stays
+	 * wedged), retries stay bounded to one per window instead of storming
+	 * the SMU on every job timeout.
+	 */
+	ndev->last_reset_jiffies = jiffies;
+
+	XDNA_WARN(xdna, "NPU firmware unhealthy: power-cycling NPU");
+	aie2_hw_suspend(xdna);
+
+	ret = aie2_hw_start(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "NPU power-cycle start failed: %d", ret);
+		return ret;
+	}
+
+	/*
+	 * Resume every client even if one fails, so a single broken context
+	 * does not leave the rest of the device suspended.
+	 */
+	list_for_each_entry(client, &xdna->client_list, node) {
+		ret = aie2_hwctx_resume(client);
+		if (ret && !first_ret) {
+			XDNA_ERR(xdna, "resume failed after NPU reset: %d", ret);
+			first_ret = ret;
+		}
+	}
+
+	return first_ret;
+}
+
 static int aie2_init(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
@@ -650,37 +715,6 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	aie2_hw_stop(xdna);
 }
 
-static int aie2_get_aie_status(struct amdxdna_client *client,
-			       struct amdxdna_drm_get_info *args)
-{
-	struct amdxdna_drm_query_aie_status status = {};
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_dev_hdl *ndev;
-	u32 buf_sz;
-	int ret;
-
-	ndev = xdna->dev_handle;
-	buf_sz = min(args->buffer_size, sizeof(status));
-	if (copy_from_user(&status, u64_to_user_ptr(args->buffer), buf_sz)) {
-		XDNA_ERR(xdna, "Failed to copy AIE request into kernel");
-		return -EFAULT;
-	}
-
-	ret = aie2_query_status(ndev, u64_to_user_ptr(status.buffer),
-				status.buffer_size, &status.cols_filled);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to get AIE status info. Ret: %d", ret);
-		return ret;
-	}
-
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &status, buf_sz)) {
-		XDNA_ERR(xdna, "Failed to copy AIE request info to user space");
-		return -EFAULT;
-	}
-
-	return 0;
-}
-
 static int aie2_get_power_mode(struct amdxdna_client *client,
 			       struct amdxdna_drm_get_info *args)
 {
@@ -776,39 +810,6 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 	return 0;
 }
 
-static int aie2_fill_hwctx_map_cb(struct amdxdna_hwctx *hwctx, void *arg)
-{
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	u32 *map = arg;
-
-	if (hwctx->fw_ctx_id >= xdna->dev_handle->priv->hwctx_limit) {
-		XDNA_ERR(xdna, "Invalid fw ctx id %d/%d ", hwctx->fw_ctx_id,
-			 xdna->dev_handle->priv->hwctx_limit);
-		return -EINVAL;
-	}
-
-	map[hwctx->fw_ctx_id] = hwctx->id;
-	return 0;
-}
-
-int aie2_fill_hwctx_map(struct aie_device *aie, u32 *map)
-{
-	struct amdxdna_dev *xdna = aie->xdna;
-	struct amdxdna_client *tmp_client;
-	int ret;
-
-	amdxdna_for_each_client(xdna, tmp_client) {
-		if (!amdxdna_client_visible(tmp_client))
-			continue;
-		ret = amdxdna_hwctx_walk(tmp_client, map, NULL,
-					 aie2_fill_hwctx_map_cb);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
-
 static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -824,7 +825,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
-		ret = aie2_get_aie_status(client, args);
+		ret = amdxdna_get_aie_status(&ndev->aie, client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
 		ret = amdxdna_get_metadata(&ndev->aie, client, args);
@@ -982,6 +983,33 @@ static int aie2_set_power_mode(struct amdxdna_client *client,
 	return aie2_pm_set_mode(xdna->dev_handle, power_mode, settle_ms);
 }
 
+/*
+ * aie2 names the hardware context in its force preemption runtime config, so
+ * the flag is armed per context when that context is configured and there is
+ * nothing to send to firmware here. Recording the state is the whole job: it
+ * selects what contexts created from now on are armed with. aie4 has one global
+ * flag instead and pushes each change down immediately.
+ */
+static int aie2_set_force_preempt(struct amdxdna_client *client,
+				  struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
+	struct amdxdna_drm_attribute_state state;
+
+	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), sizeof(state)))
+		return -EFAULT;
+
+	if (state.state > 1)
+		return -EINVAL;
+
+	if (XDNA_MBZ_DBG(client->xdna, state.pad, sizeof(state.pad)))
+		return -EINVAL;
+
+	ndev->aie.force_preempt_enabled = state.state;
+
+	return 0;
+}
+
 static int aie2_set_frame_boundary_preempt(struct amdxdna_client *client,
 					   struct amdxdna_drm_set_state *args)
 {
@@ -1028,7 +1056,7 @@ static int aie2_set_state(struct amdxdna_client *client,
 		ret = aie2_set_power_mode(client, args, settle_ms);
 		break;
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
-		ret = amdxdna_set_force_preempt_state(&ndev->aie, client, args);
+		ret = aie2_set_force_preempt(client, args);
 		break;
 	case DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:
 		ret = aie2_set_frame_boundary_preempt(client, args);
@@ -1260,7 +1288,7 @@ int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level)
 		return -EINVAL;
 	}
 
-	dpt = rcu_dereference_protected(xdna->fw_log,
+	dpt = rcu_dereference_protected(xdna->fw_log.data,
 					lockdep_is_held(&xdna->dev_lock));
 	if (!dpt) {
 		XDNA_ERR(xdna, "FW log handle not allocated");
@@ -1319,7 +1347,7 @@ int aie2_fw_log_fini(struct amdxdna_dev *xdna)
 	struct amdxdna_dpt *dpt;
 	int ret;
 
-	dpt = rcu_dereference_protected(xdna->fw_log,
+	dpt = rcu_dereference_protected(xdna->fw_log.data,
 					lockdep_is_held(&xdna->dev_lock));
 	if (!dpt)
 		return 0;
@@ -1346,7 +1374,7 @@ int aie2_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
 	struct amdxdna_dpt *dpt;
 	int ret;
 
-	dpt = rcu_dereference_protected(xdna->fw_trace,
+	dpt = rcu_dereference_protected(xdna->fw_trace.data,
 					lockdep_is_held(&xdna->dev_lock));
 	if (!dpt) {
 		XDNA_ERR(xdna, "FW trace handle not allocated");

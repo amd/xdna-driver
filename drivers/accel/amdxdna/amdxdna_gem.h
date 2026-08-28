@@ -36,6 +36,12 @@ struct amdxdna_mem {
 	struct sg_table			*sgt;
 	struct page			**pages;
 	unsigned long			nr_pages;
+	/*
+	 * Pages are borrowed from a Xen foreign (privcmd) mapping's page
+	 * array rather than pinned via pin_user_pages(); they are owned by
+	 * that VMA and must not be unpinned on free.
+	 */
+	bool				foreign;
 	struct mm_struct		*mm;
 };
 
@@ -62,6 +68,8 @@ struct amdxdna_gem_obj {
 	/* True, if BO is not shmem bo */
 	bool				private_buffer;
 	bool				readonly;
+
+	struct list_head		node;
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)
@@ -134,6 +142,9 @@ int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
 			    struct mm_struct *mm,
 			    unsigned long addr, unsigned long len);
+#ifndef AMDXDNA_AUX
+int amdxdna_client_populate_ranges(struct amdxdna_client *client);
+#endif
 
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

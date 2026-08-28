@@ -83,8 +83,6 @@ struct amdxdna_hwctx_priv {
 	struct drm_sched_entity		entity;
 
 	struct mutex			io_lock; /* protect seq and cmd order */
-	struct wait_queue_head		job_free_wq;
-	u32				num_pending;
 	u64				seq;
 	struct semaphore		job_sem;
 	bool				job_done;
@@ -163,6 +161,9 @@ struct amdxdna_dev_hdl {
 
 	enum aie2_tdr_status		tdr_status;
 	struct aie2_tdr			tdr; /* TDR for device recovery */
+
+	/* jiffies of the last full NPU power-cycle (see aie2_hw_reset) */
+	unsigned long			last_reset_jiffies;
 };
 
 enum aie2_fw_feature {
@@ -285,13 +286,13 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
 int aie2_add_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
-int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf, u32 size, u32 *cols_filled);
+int aie2_query_status(struct aie_device *aie, struct amdxdna_msg_buf_hdl *buf_hdl,
+		      u32 *cols_filled, u32 *resp_size);
 int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 			 char __user *buf, u32 size,
 			 struct amdxdna_drm_query_telemetry_header *header);
 int aie2_fill_hwctx_health(struct aie_device *aie, struct amdxdna_hwctx *hwctx,
 			   struct amdxdna_drm_hwctx_entry *entry);
-int aie2_fill_hwctx_map(struct aie_device *aie, u32 *map);
 int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
 				 void *handle, int (*cb)(void*, void __iomem *, size_t));
 int aie2_config_cu(struct amdxdna_hwctx *hwctx,
@@ -317,6 +318,8 @@ int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *bu
 int aie2_hwctx_sync_debug_bo(struct amdxdna_hwctx *hwctx, u32 debug_bo_hdl);
 void aie2_hwctx_suspend(struct amdxdna_client *client);
 int aie2_hwctx_resume(struct amdxdna_client *client);
+#define AIE2_HW_RESET_MIN_INTERVAL_MS	60000
+int aie2_hw_reset(struct amdxdna_dev *xdna);
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx, struct amdxdna_gem_obj *heap);
 
