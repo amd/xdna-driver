@@ -360,13 +360,29 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	struct amdxdna_drm_destroy_hwctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_hwctx *hwctx;
-	int ret = 0, idx;
+	int ret = 0, idx, pm_ret;
 
 	if (XDNA_MBZ_DBG(xdna, &args->pad, sizeof(args->pad)))
 		return -EINVAL;
 
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
+
+	/*
+	 * A ctx gracefully destroyed by suspend still owns firmware restore
+	 * data. Resume before the erase below, while the ctx is still visible
+	 * to the resume walk, so it is recreated and the destroy reaches
+	 * firmware, which then releases that data. Skipping this orphans one
+	 * restore pool entry per suspended-then-destroyed ctx until the next
+	 * suspend or firmware reset reclaims it, as there is no message to
+	 * release one on its own.
+	 * Best effort only - a ctx must always be destroyable, so a failed
+	 * resume still proceeds with the destroy and leaves the entry behind.
+	 */
+	pm_ret = amdxdna_pm_resume_get(xdna);
+	if (pm_ret)
+		XDNA_WARN(xdna, "Resume failed (%d), ctx %d restore data not reclaimed",
+			  pm_ret, args->handle);
 
 	mutex_lock(&xdna->client_lock);
 	mutex_lock(&xdna->dev_lock);
@@ -389,6 +405,8 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 out:
 	mutex_unlock(&xdna->dev_lock);
 	mutex_unlock(&xdna->client_lock);
+	if (!pm_ret)
+		amdxdna_pm_suspend_put(xdna);
 	drm_dev_exit(idx);
 	return ret;
 }

@@ -36,6 +36,8 @@
 #define CERTFW_MAX_SIZE         (SZ_32K + SZ_256)
 #define PSP_NOTIFY_INTR		0xD007BE11
 #define AIE4_TOTAL_COLUMN	3
+/* Largest buffer amdxdna_alloc_msg_buff() can hand back. */
+#define AIE4_MAX_CTX_RESTORE_POOL_SIZE	(PAGE_SIZE << MAX_PAGE_ORDER)
 
 /* Not upstreamed: echo a bypass magic to FW right after work-buffer attach for npu3a. */
 #ifdef AMDXDNA_NPU3A
@@ -393,6 +395,105 @@ static int aie4_fw_load(struct amdxdna_dev_hdl *ndev)
 	}
 
 	return ret;
+}
+
+static void aie4_free_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+{
+	if (!ndev->restore_pool_hdl)
+		return;
+
+	amdxdna_free_msg_buff(ndev->restore_pool_hdl);
+	ndev->restore_pool_hdl = NULL;
+}
+
+/*
+ * Drop the ids handed out by the graceful destroys. Without a pool backing
+ * them firmware cannot honour them, so let the next create build a context
+ * from scratch instead of quoting an id firmware has no data for. The parked
+ * jobs stay put: resume re-drives them against the fresh context, which is
+ * what a plain destroy has always done.
+ */
+static void aie4_clear_ctx_restore_ids(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct amdxdna_client *client;
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id;
+	int idx;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	amdxdna_for_each_client(xdna, client) {
+		idx = srcu_read_lock(&client->hwctx_srcu);
+		amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
+			hwctx->priv->restore_id = 0;
+		srcu_read_unlock(&client->hwctx_srcu, idx);
+	}
+}
+
+/*
+ * Firmware drops its context restore pool on suspend. Copy it out while
+ * firmware is still up and every context is already gracefully destroyed,
+ * otherwise the pool is incomplete. Returns 0 only if a pool was saved.
+ */
+static int aie4_save_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct amdxdna_msg_buf_hdl *buf_hdl;
+	u32 size;
+	int ret;
+
+	aie4_free_ctx_restore_pool(ndev);
+
+	ret = aie4_msg_get_ctx_restore_pool_size(ndev, &size);
+	if (ret)
+		return ret;
+
+	if (!size)
+		return -ENODATA;
+
+	if (size > AIE4_MAX_CTX_RESTORE_POOL_SIZE) {
+		XDNA_ERR(xdna, "Ctx restore pool size 0x%x exceeds 0x%lx", size,
+			 AIE4_MAX_CTX_RESTORE_POOL_SIZE);
+		return -EFBIG;
+	}
+
+	buf_hdl = amdxdna_alloc_msg_buff(xdna, size);
+	if (IS_ERR(buf_hdl)) {
+		ret = PTR_ERR(buf_hdl);
+		XDNA_ERR(xdna, "Failed to alloc ctx restore pool, size 0x%x, ret %d",
+			 size, ret);
+		return ret;
+	}
+
+	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
+	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+
+	ret = aie4_msg_get_ctx_restore_pool(ndev, to_dma_addr(buf_hdl, 0),
+					    to_buf_size(buf_hdl));
+	if (ret) {
+		amdxdna_free_msg_buff(buf_hdl);
+		return ret;
+	}
+
+	ndev->restore_pool_hdl = buf_hdl;
+	XDNA_DBG(xdna, "Saved ctx restore pool, size 0x%x", to_buf_size(buf_hdl));
+
+	return 0;
+}
+
+static void aie4_restore_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_msg_buf_hdl *buf_hdl = ndev->restore_pool_hdl;
+
+	if (!buf_hdl)
+		return;
+
+	if (aie4_msg_set_ctx_restore_pool(ndev, to_dma_addr(buf_hdl, 0),
+					  to_buf_size(buf_hdl)))
+		aie4_clear_ctx_restore_ids(ndev);
+
+	aie4_free_ctx_restore_pool(ndev);
 }
 
 static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
@@ -1292,11 +1393,20 @@ static void aie4_hwctx_suspend_all(struct amdxdna_dev_hdl *ndev, int clean_jobs)
 				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_ERROR);
 				aie4_hwctx_wait_for_running(hwctx);
 			} else {
-				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_NORMAL);
+				/*
+				 * Ask firmware to park the ctx. It hands back a
+				 * restore id the resume create replays, or 0 if
+				 * it declined, which leaves this behaving exactly
+				 * as the plain destroy it replaces.
+				 */
+				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_GRACEFUL);
 			}
 		}
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}
+
+	if (!clean_jobs && aie4_save_ctx_restore_pool(ndev))
+		aie4_clear_ctx_restore_ids(ndev);
 
 	XDNA_DBG(xdna, "Finished hwctx suspend");
 }
@@ -1319,6 +1429,8 @@ static void aie4_hwctx_disconnect_all(struct amdxdna_dev_hdl *ndev)
 		}
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}
+
+	aie4_free_ctx_restore_pool(ndev);
 }
 
 static int aie4_hwctx_resume_all(struct amdxdna_dev_hdl *ndev)
@@ -1561,6 +1673,8 @@ static int aie4_vf_resume(struct amdxdna_dev *xdna)
 		goto pci_disable;
 	}
 
+	aie4_restore_ctx_restore_pool(ndev);
+
 	ret = aie4_hwctx_resume_all(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "hwctx_resume failed %d", ret);
@@ -1598,6 +1712,8 @@ static int aie4_classic_resume(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "hw_start failed %d", ret);
 		goto pci_disable;
 	}
+
+	aie4_restore_ctx_restore_pool(ndev);
 
 	ret = aie4_hwctx_resume_all(ndev);
 	if (ret) {
@@ -1940,12 +2056,14 @@ static void aie4_vf_fini(struct amdxdna_dev *xdna)
 {
 	aie4_xdna_fini(xdna);
 	aie4_vf_hw_stop(xdna->dev_handle);
+	aie4_free_ctx_restore_pool(xdna->dev_handle);
 }
 
 static void aie4_classic_fini(struct amdxdna_dev *xdna)
 {
 	aie4_xdna_fini(xdna);
 	aie4_classic_hw_stop(xdna->dev_handle);
+	aie4_free_ctx_restore_pool(xdna->dev_handle);
 	aie4_free_work_buffer(xdna->dev_handle);
 }
 

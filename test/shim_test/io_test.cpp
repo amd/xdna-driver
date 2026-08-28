@@ -38,6 +38,7 @@ using namespace xrt_core;
 
 extern int open_accel_fd(device* dev);
 extern void trigger_pci_flr(device* dev);
+extern std::string get_device_sysfs(device* dev);
 
 namespace {
 
@@ -635,6 +636,38 @@ struct app_health_ctx_unit {
   std::unique_ptr<elf_preempt_io_test_bo_set> boset;
 };
 
+/* Runtime PM state of the NPU, empty when the attribute is absent. */
+std::string
+runtime_pm_status(device* dev)
+{
+  std::ifstream ifs(get_device_sysfs(dev) + "/power/runtime_status");
+  std::string status;
+
+  std::getline(ifs, status);
+  return status;
+}
+
+/*
+ * Wait for the NPU to auto-suspend and return the runtime PM status that ended
+ * the wait. The suspend delay is a few seconds, so the timeout only has to be
+ * generous enough to absorb a loaded machine.
+ */
+std::string
+wait_for_runtime_suspend(device* dev)
+{
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+
+  for (;;) {
+    const std::string status = runtime_pm_status(dev);
+
+    if (status == "suspended" || status.empty())
+      return status;
+    if (std::chrono::steady_clock::now() >= deadline)
+      return status;
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  }
+}
+
 }
 
 void
@@ -799,6 +832,54 @@ TEST_io_suspend_resume(device::id_type id, std::shared_ptr<device>& sdev, arg_ty
 
   std::cout << "Submit command to resume" << std::endl;
   boset->run();
+}
+
+/*
+ * Suspend destroys every live context gracefully and saves the firmware context
+ * restore pool; resume writes the pool back and re-creates each context from the
+ * restore id firmware handed out. Hold one context idle across two auto-suspend
+ * windows and submit through it after each one.
+ *
+ * A driver that destroys contexts non-gracefully passes this too, since it
+ * rebuilds them from scratch. Nothing exposes the restore id to user space, so
+ * this guards the restore path against regressing rather than proving it ran.
+ */
+void
+TEST_ctx_restore_across_suspend(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  constexpr int cycles = 2;
+
+  // A no-op kernel keeps each cycle to a bare context round trip.
+  hw_ctx hwctx{dev, "nop"};
+  auto hwq = hwctx.get()->get_hw_queue();
+
+  for (int i = 0; i < cycles; i++) {
+    std::cout << "Wait for auto-suspend, cycle " << i << std::endl;
+    const std::string status = wait_for_runtime_suspend(dev);
+    if (status.empty())
+      throw std::runtime_error("runtime PM status unavailable, cannot exercise the restore path");
+    if (status != "suspended") {
+      throw std::runtime_error("device did not auto-suspend while holding a context, runtime_status=\""
+        + status + "\"");
+    }
+
+    // A fresh BO set per cycle, so no command header has to be reset.
+    auto boset = create_bo_set_for_device(dev, false, "nop");
+    boset->init_cmd(hwctx, false);
+    boset->sync_before_run();
+
+    std::cout << "Submit command on the restored context" << std::endl;
+    auto cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo.get();
+    hwq->submit_command(cbo->get());
+    hwq->wait_command(cbo->get(), WAIT_CMD_NO_TIMEOUT);
+
+    auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+    if (cpkt->state != ERT_CMD_STATE_COMPLETED) {
+      throw std::runtime_error("command failed on the restored context in cycle "
+        + std::to_string(i) + ", state=" + std::to_string(cpkt->state));
+    }
+  }
 }
 
 void
