@@ -27,6 +27,7 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_drv.h"
+#include "amdxdna_pm.h"
 
 /*
  * 0.0: Initial version
@@ -180,14 +181,35 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
+	bool pm_held = false;
+	int ret;
 
 	XDNA_DBG(xdna, "closing pid %d", client->pid);
+
+	/*
+	 * A ctx gracefully destroyed by suspend still owns firmware restore data.
+	 * Like amdxdna_drm_destroy_hwctx_ioctl(), resuming recreates the ctx
+	 * so the cleanup below destroys it in firmware and releases that data.
+	 * A failed resume is not fatal: this callback cannot report an error,
+	 * so the cleanup runs anyway and the restore data is left behind.
+	 */
+	if (!xa_empty(&client->hwctx_xa)) {
+		ret = amdxdna_pm_resume_get(xdna);
+		if (ret)
+			XDNA_WARN(xdna, "Resume failed (%d), pid %d restore data not reclaimed",
+				  ret, client->pid);
+		else
+			pm_held = true;
+	}
 
 	mutex_lock(&xdna->client_lock);
 	mutex_lock(&xdna->dev_lock);
 	amdxdna_client_cleanup(client);
 	mutex_unlock(&xdna->dev_lock);
 	mutex_unlock(&xdna->client_lock);
+
+	if (pm_held)
+		amdxdna_pm_suspend_put(xdna);
 }
 
 static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
