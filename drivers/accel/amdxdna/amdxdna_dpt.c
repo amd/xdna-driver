@@ -117,6 +117,8 @@ int amdxdna_dpt_chan_init(struct amdxdna_dev *xdna)
 
 	xdna->fw_log.desc = &amdxdna_dpt_fw_log_desc;
 	xdna->fw_trace.desc = &amdxdna_dpt_fw_trace_desc;
+	xdna->fw_log.buf_size = xdna->fw_log.desc->buf_size;
+	xdna->fw_trace.buf_size = xdna->fw_trace.desc->buf_size;
 
 	ret = init_srcu_struct(&xdna->fw_log.srcu);
 	if (ret)
@@ -611,10 +613,11 @@ amdxdna_dpt_publish(struct aie_device *aie, struct amdxdna_dpt_chan *chan,
 	dpt->status = AMDXDNA_DPT_INACTIVE;
 	dpt->config = config;
 
-	hdl = amdxdna_alloc_msg_buff(xdna, chan->desc->buf_size);
+	hdl = amdxdna_alloc_msg_buff(xdna, chan->buf_size);
 	if (IS_ERR(hdl)) {
 		ret = PTR_ERR(hdl);
-		XDNA_DPT_ERR(dpt, "Failed to allocate buffer: %d", ret);
+		XDNA_DPT_ERR(dpt, "Failed to allocate %u byte buffer: %d",
+			     chan->buf_size, ret);
 		kfree(dpt);
 		return ERR_PTR(ret);
 	}
@@ -1153,7 +1156,9 @@ int amdxdna_dpt_init(struct aie_device *aie)
 
 	ret = amdxdna_fw_log_init(aie, AMDXDNA_DPT_FW_LOG_LEVEL_DEFAULT);
 	if (ret)
-		XDNA_WARN(aie->xdna, "Failed to enable FW logging: %d", ret);
+		XDNA_WARN(aie->xdna,
+			  "Failed to enable FW logging: %d. Retry through debugfs, lowering fw_log_size first if the ring could not be allocated",
+			  ret);
 
 	return 0;
 }
