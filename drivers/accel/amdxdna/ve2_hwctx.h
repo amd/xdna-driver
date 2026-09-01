@@ -77,6 +77,12 @@ struct amdxdna_ctx_priv {
 	u32				mem_bitmap;
 	u32				partition_id;
 	bool				misc_intrpt_flag;
+	/*
+	 * Firmware misc_status as read when misc_intrpt_flag was first set for
+	 * this context. Reported by ve2_cmd_submit() on a poisoned context.
+	 * Cleared with misc_intrpt_flag; valid only while that flag is set.
+	 */
+	u32				misc_status_latched;
 	bool				handshake_initialized;	/* CERT handshake done */
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
 

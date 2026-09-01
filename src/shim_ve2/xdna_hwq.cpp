@@ -78,7 +78,11 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
   } catch (const xrt_core::system_error& ex) {
     int err_code = ex.get_code();
 
-    if (err_code == EINVAL) {
+    if (err_code == ENOTRECOVERABLE) {
+      shim_err(err_code, "Command submission failed: hwctx %u is unusable after a firmware "
+               "MISC interrupt. Destroy and recreate the hwctx. cmd_bo=%u",
+               hwctx_id, cmd_bo_hdl);
+    } else if (err_code == EINVAL) {
       shim_err(err_code, "Command submission failed: Invalid command or arguments. "
                "hwctx=%u, cmd_bo=%u. Check command buffer format and arguments.",
                hwctx_id, cmd_bo_hdl);
