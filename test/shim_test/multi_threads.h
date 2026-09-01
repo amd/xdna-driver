@@ -35,7 +35,9 @@ public:
     for (int i = 0; i < m_total_threads; i++) {
       m_threads.push_back(
         std::thread([&](int i) {
+#ifndef NDEBUG
           std::cout << "Thread " << i << " started" << std::endl;
+#endif
           try {
             m_test(id, dev ,arg);
           } catch (const std::exception& ex) {
