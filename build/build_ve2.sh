@@ -3,7 +3,7 @@
 PROGRAM=$(basename "$0")
 ABS_PATH=$(pwd)
 XDNA_REPO_DIR=`readlink -f ${ABS_PATH}/..`
-yocto_path=`readlink -f ${ABS_PATH}/../../yocto/edf`
+yocto_path=`readlink -m ${ABS_PATH}/../../yocto/edf`
 MACHINE="amd-cortexa78-mali-common"
 RPM_ARCH_DIR="amd_cortexa78_mali_common"
 
