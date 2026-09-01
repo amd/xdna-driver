@@ -149,6 +149,8 @@ public:
   uint32_t m_handle = AMDXDNA_INVALID_BO_HANDLE;
   off_t m_map_offset = AMDXDNA_INVALID_ADDR;
   uint64_t m_xdna_addr = AMDXDNA_INVALID_ADDR;
+  // Index of the CMA memory region backing this BO, as reported by the driver.
+  uint32_t m_mem_region = 0;
   uint64_t m_vaddr = AMDXDNA_INVALID_ADDR;
   void *m_uptr = nullptr;
 
