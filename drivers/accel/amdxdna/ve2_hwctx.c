@@ -1185,7 +1185,7 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	if (enable_debug_queue && vp && vp->dbg_queue.dbg_queue_p) {
 		timer_delete_sync(&vp->dbg_q_timer);
 		ve2_free_dbg_queue(hwctx);
-	}	
+	}
 
 	if (vp) {
 		u32 submitted = vp->submitted;
@@ -1291,6 +1291,21 @@ int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u
 	if (op != ERT_START_DPU && op != ERT_CMD_CHAIN) {
 		XDNA_WARN(xdna, "Unsupported ERT opcode %u", op);
 		return -EINVAL;
+	}
+
+	/*
+	 * The context latched a firmware MISC/exception condition. It stays
+	 * unusable until the partition is re-initialized for it (see
+	 * ve2_mgmt_handshake_init()), which in practice means the application
+	 * must destroy and recreate the hwctx. Report -ENOTRECOVERABLE rather
+	 * than -EINVAL so userspace does not misdiagnose this as a malformed
+	 * command buffer.
+	 */
+	if (vp && vp->misc_intrpt_flag) {
+		XDNA_ERR(xdna,
+			 "Cannot submit: hwctx %u (pid %d) is unusable after a firmware MISC interrupt (misc_status 0x%x); recreate the context",
+			 hwctx->id, hwctx->client->pid, vp->misc_status_latched);
+		return -ENOTRECOVERABLE;
 	}
 
 	trace_xdna_cmd_submit_start(hwctx->name, hwctx->id, hwctx->start_col);
