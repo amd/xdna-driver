@@ -552,8 +552,6 @@ struct amdxdna_drm_query_firmware_version {
 	__u32 build; /* out */
 };
 
-#define AMDXDNA_AIE_LOAD_UNAVAILABLE		0xFFFFFFFFU
-
 /**
  * struct amdxdna_drm_query_aie_load - AIE hardware utilization snapshot
  */
