@@ -29,8 +29,10 @@ public:
 
   void run_test(xrt_core::device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
   {
+    m_threads.clear();
+    m_failed.assign(m_total_threads, 0);
+    m_threads.reserve(m_total_threads);
     for (int i = 0; i < m_total_threads; i++) {
-      m_failed.push_back(false);
       m_threads.push_back(
         std::thread([&](int i) {
           std::cout << "Thread " << i << " started" << std::endl;
@@ -56,7 +58,7 @@ public:
 private:
   int m_total_threads;
   std::vector<std::thread> m_threads;
-  std::vector<bool> m_failed;
+  std::vector<uint8_t> m_failed;
   func m_test;
 };
 
