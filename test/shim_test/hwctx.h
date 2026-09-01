@@ -65,7 +65,9 @@ private:
       m_handle = dev->create_hw_context(xclbin_uuid, qos, mode);
     }
 
+#ifndef NDEBUG
     std::cout << "loaded " << path << std::endl;
+#endif
   }
 };
 
