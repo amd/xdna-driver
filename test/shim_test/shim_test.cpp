@@ -98,6 +98,7 @@ void TEST_query_telemetry_short_buf(device::id_type, std::shared_ptr<device>&, a
 void TEST_io_coredump(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_aie_mem(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_aie_reg(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_query_npu_load(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_dpm_noop_no_qos(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_dpm_power_modes(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_dpm_refcount_scaling(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -1694,6 +1695,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "query telemetry header-only buffer fails", {},
     TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_query_telemetry_short_buf, {}
+  },
+  test_case{ "query npu load (idle and in-flight)", {},
+    TEST_POSITIVE, {npu3}, {amdxdna}, TEST_query_npu_load, {}
   },
   test_case{ "query frame boundary preempt state (get_info)", {},
     TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_query_frame_boundary_preempt, {}
