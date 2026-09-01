@@ -228,12 +228,12 @@ static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
 	int i;
 
 	for (i = 0; i < MAX_MEM_REGIONS; i++) {
-		struct device *dev = xdna->cma_region_devs[i];
+		struct device *dev = xdna->cma_regions[i].dev;
 
 		if (dev) {
 			of_reserved_mem_device_release(dev);
 			put_device(dev);
-			xdna->cma_region_devs[i] = NULL;
+			memset(&xdna->cma_regions[i], 0, sizeof(xdna->cma_regions[i]));
 		}
 	}
 }
@@ -241,6 +241,8 @@ static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
 static int ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct device_node *aie_np)
 {
 	struct device *parent_dev = xdna->ddev.dev;
+	struct reserved_mem *rmem;
+	struct device_node *np;
 	struct device *child_dev;
 	int num_regions;
 	int ret;
@@ -279,8 +281,26 @@ static int ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct device_node 
 			goto put_dev;
 		}
 
-		xdna->cma_region_devs[i] = child_dev;
-		XDNA_INFO(xdna, "CMA region %d initialized", i);
+		/*
+		 * Record the region extent so a device address can be mapped
+		 * back to this index later. of_reserved_mem_device_init_by_idx()
+		 * resolves the same phandle but does not hand the descriptor
+		 * back. The descriptor lives in the OF core's own table and does
+		 * not borrow the node's refcount, so drop the node right away.
+		 */
+		np = of_parse_phandle(aie_np, "memory-region", i);
+		rmem = np ? of_reserved_mem_lookup(np) : NULL;
+		of_node_put(np);
+
+		xdna->cma_regions[i].dev = child_dev;
+		if (rmem) {
+			xdna->cma_regions[i].base = rmem->base;
+			xdna->cma_regions[i].size = rmem->size;
+		}
+
+		XDNA_INFO(xdna, "CMA region %d (%s) initialized: base 0x%llx size 0x%llx",
+			  i, rmem ? rmem->name : "unresolved",
+			  xdna->cma_regions[i].base, xdna->cma_regions[i].size);
 	}
 
 	return 0;

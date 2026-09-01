@@ -157,6 +157,18 @@ struct amdxdna_dpt_chan {
 	const struct amdxdna_dpt_desc	*desc;
 };
 
+/*
+ * One CMA bank: the child device buffers are allocated from, plus the extent of
+ * the DT reserved-memory region behind it so a device address can be mapped
+ * back to the bank index. @base and @size are 0 when the region could not be
+ * resolved, which only disables the reverse lookup.
+ */
+struct amdxdna_cma_region {
+	struct device	*dev;
+	u64		base;
+	u64		size;
+};
+
 struct amdxdna_dev {
 	struct drm_device		ddev;
 	struct amdxdna_dev_hdl		*dev_handle;
@@ -203,8 +215,10 @@ struct amdxdna_dev {
 	 */
 	struct aie_device		*dpt_aie;
 
-	/* Per-bank CMA region devices, initialized from DT memory-region nodes. */
-	struct device			*cma_region_devs[MAX_MEM_REGIONS];
+	/* Per-bank CMA regions, initialized from DT memory-region nodes.
+	 * dev == NULL means the bank was not declared.
+	 */
+	struct amdxdna_cma_region	cma_regions[MAX_MEM_REGIONS];
 };
 
 /*

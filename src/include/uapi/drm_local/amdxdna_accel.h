@@ -278,7 +278,9 @@ struct amdxdna_drm_create_bo {
  * @ext: MBZ.
  * @ext_flags: MBZ.
  * @handle: DRM buffer object handle.
- * @pad: Structure padding.
+ * @mem_region: MBZ on input. Returned device local index of the memory region
+ *		backing the buffer, numbered as the DRM_AMDXDNA_HWCTX_MEM_BITMAP
+ *		bit positions. 0 when unmatched or untracked.
  * @map_offset: Returned DRM fake offset for mmap().
  * @vaddr: Returned user VA of buffer. 0 in case user needs mmap().
  * @xdna_addr: Returned XDNA device virtual address.
@@ -287,7 +289,7 @@ struct amdxdna_drm_get_bo_info {
 	__u64 ext;
 	__u64 ext_flags;
 	__u32 handle;
-	__u32 pad;
+	__u32 mem_region;
 	__u64 map_offset;
 	__u64 vaddr;
 	__u64 xdna_addr;

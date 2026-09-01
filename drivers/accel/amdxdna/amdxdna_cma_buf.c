@@ -169,8 +169,8 @@ struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev, size_t size)
  * amdxdna_get_cma_buf_with_fallback - Allocate CMA buffer from a specific bank
  * with fallback to default CMA.
  *
- * @region_devs: Array of per-bank child devices (NULL entries = not initialized)
- * @max_regions: Size of region_devs array
+ * @regions: Array of per-bank regions (dev == NULL = not initialized)
+ * @max_regions: Size of regions array
  * @fallback_dev: DRM device to fall back to if no bank device matched
  * @size: Allocation size in bytes
  * @flags: Low 8 bits are the mem_bitmap (one bit per bank)
@@ -178,7 +178,7 @@ struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev, size_t size)
  * Tries each set bit in the bitmap in order; on first success returns the buf.
  * Falls back to the default DRM device CMA if no bank device is available.
  */
-struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_devs,
+struct dma_buf *amdxdna_get_cma_buf_with_fallback(const struct amdxdna_cma_region *regions,
 						  int max_regions,
 						  struct drm_device *fallback_dev,
 						  size_t size, u64 flags)
@@ -188,12 +188,40 @@ struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_d
 	int i;
 
 	for (i = 0; i < max_regions; i++) {
-		if ((mem_bitmap & (1U << i)) && region_devs[i]) {
-			dbuf = amdxdna_alloc_cma_buf_from_dev(region_devs[i], size);
+		if ((mem_bitmap & (1U << i)) && regions[i].dev) {
+			dbuf = amdxdna_alloc_cma_buf_from_dev(regions[i].dev, size);
 			if (!IS_ERR(dbuf))
 				return dbuf;
 		}
 	}
 
 	return amdxdna_alloc_cma_buf_from_dev(fallback_dev->dev, size);
+}
+
+/**
+ * amdxdna_mem_region_from_addr - Find the bank backing a device address.
+ *
+ * @regions: Array of per-bank regions (dev == NULL = not initialized)
+ * @max_regions: Size of regions array
+ * @addr: Device address to look up
+ *
+ * Returns the bank index owning @addr, or 0 when no bank matches. Index 0 is
+ * deliberately both a valid answer and the fallback: buffers allocated from
+ * the default CMA pool belong to no declared region, and platforms that
+ * declare none must keep reporting 0.
+ */
+u32 amdxdna_mem_region_from_addr(const struct amdxdna_cma_region *regions,
+				 int max_regions, u64 addr)
+{
+	int i;
+
+	for (i = 0; i < max_regions; i++) {
+		const struct amdxdna_cma_region *region = &regions[i];
+
+		if (region->dev && addr >= region->base &&
+		    addr < region->base + region->size)
+			return i;
+	}
+
+	return 0;
 }
