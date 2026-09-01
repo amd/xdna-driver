@@ -181,22 +181,7 @@ xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_cont
 
   m_hwq->bind_hwctx(this);
 
-  u32 op_timeout = xrt_core::config::get_cert_timeout();
-  amdxdna_drm_config_hwctx adbo;
-  adbo.handle = arg.handle;
-  adbo.param_val = (__u64)(uintptr_t)&op_timeout;
-  adbo.param_val_size = sizeof(u64);
-  adbo.param_type = DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT;
-
-  shim_debug("Configuring hwctx opcode timeout: handle=%u, timeout=%u", arg.handle, op_timeout);
-
-  try {
-    m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
-  } catch (const xrt_core::system_error& ex) {
-    shim_debug("DRM_IOCTL_AMDXDNA_CONFIG_HWCTX failed (non-fatal): %s (err=%d: %s)",
-               ex.what(), ex.get_code(), errno_to_str(ex.get_code()));
-    // This is non-fatal, continue with context creation
-  }
+  config_opcode_timeout();
 
   shim_debug("HW context initialization completed: handle=%u", m_handle);
 }
@@ -269,7 +254,32 @@ xdna_hwctx(const device_xdna* dev, uint32_t partition_size, const xrt::hw_contex
   // sections added
 
   m_hwq->bind_hwctx(this);
+
+  config_opcode_timeout();
+
   shim_debug("HW context initialization completed: handle=%u", m_handle);
+}
+
+void
+xdna_hwctx::
+config_opcode_timeout()
+{
+  u32 op_timeout = xrt_core::config::get_cert_timeout();
+  amdxdna_drm_config_hwctx adbo = {};
+  adbo.handle = m_handle;
+  adbo.param_val = (__u64)(uintptr_t)&op_timeout;
+  adbo.param_val_size = sizeof(op_timeout);
+  adbo.param_type = DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT;
+
+  shim_debug("Configuring hwctx opcode timeout: handle=%u, timeout=%u", m_handle, op_timeout);
+
+  try {
+    m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
+  } catch (const xrt_core::system_error& ex) {
+    shim_debug("DRM_IOCTL_AMDXDNA_CONFIG_HWCTX failed (non-fatal): %s (err=%d: %s)",
+               ex.what(), ex.get_code(), errno_to_str(ex.get_code()));
+    // This is non-fatal, continue with context creation
+  }
 }
 
 void

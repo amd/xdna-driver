@@ -142,6 +142,9 @@ private:
 
   void
   query_mem_bitmap();
+
+  void
+  config_opcode_timeout();
 };
 
 } // shim_xdna_edge
