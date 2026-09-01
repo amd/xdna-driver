@@ -181,11 +181,19 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
 
 xdna_bo::
 xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl)
-  : m_edev(device.get_edev())
+  : m_core_device(&device)
+  , m_edev(device.get_edev())
 {
   uint32_t boh = import_drm_bo(ehdl, &m_type, &m_aligned_size);
   m_edev->bo_handle_ref_inc(boh);
   get_drm_bo_info(boh);
+
+  // The exporting device's bank numbering means nothing on this device, and
+  // there is no requested bank on an import. Report the region the driver
+  // found for this buffer so get_memory_group() is meaningful.
+  xcl_bo_flags xflags{ m_flags };
+  xflags.bank = static_cast<uint16_t>(m_mem_region);
+  m_flags = xflags.all;
 }
 
 xdna_bo::
@@ -390,6 +398,7 @@ get_drm_bo_info(uint32_t boh)
   m_map_offset = bo_info.map_offset;
   m_vaddr = bo_info.vaddr;
   m_xdna_addr = bo_info.xdna_addr;
+  m_mem_region = bo_info.mem_region;
 }
 
 void

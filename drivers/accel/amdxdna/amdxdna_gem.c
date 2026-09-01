@@ -986,7 +986,7 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 		return ERR_PTR(-EINVAL);
 	}
 
-	dma_buf = amdxdna_get_cma_buf_with_fallback(xdna->cma_region_devs,
+	dma_buf = amdxdna_get_cma_buf_with_fallback(xdna->cma_regions,
 						    MAX_MEM_REGIONS,
 						    dev, size, args->flags);
 	if (IS_ERR(dma_buf))
@@ -1405,7 +1405,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	struct drm_gem_object *gobj;
 	int ret = 0;
 
-	if (args->ext || args->ext_flags || args->pad)
+	if (args->ext || args->ext_flags || args->mem_region)
 		return -EINVAL;
 
 	gobj = drm_gem_object_lookup(filp, args->handle);
@@ -1418,13 +1418,27 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	args->vaddr = amdxdna_gem_uva(abo);
 	args->xdna_addr = amdxdna_gem_dev_addr(abo);
 
+#if defined(AMDXDNA_NPU3A) || defined(AMDXDNA_AUX)
+	/*
+	 * Only a SHARE BO is backed by CMA and addressed physically. For a DEV
+	 * BO amdxdna_gem_dev_addr() is a heap-relative offset and for a DEV_HEAP
+	 * BO it is dev_addr, so a region index would be meaningless there.
+	 * Elsewhere mem_region stays 0, which the MBZ check above guarantees.
+	 */
+	if (abo->type == AMDXDNA_BO_SHARE)
+		args->mem_region = amdxdna_mem_region_from_addr(xdna->cma_regions,
+								MAX_MEM_REGIONS,
+								args->xdna_addr);
+#endif
+
 	if (abo->type != AMDXDNA_BO_DEV)
 		args->map_offset = drm_vma_node_offset_addr(&gobj->vma_node);
 	else
 		args->map_offset = AMDXDNA_INVALID_ADDR;
 
-	XDNA_DBG(xdna, "BO hdl %d map_offset 0x%llx vaddr 0x%llx xdna_addr 0x%llx",
-		 args->handle, args->map_offset, args->vaddr, args->xdna_addr);
+	XDNA_DBG(xdna, "BO hdl %d map_offset 0x%llx vaddr 0x%llx xdna_addr 0x%llx mem_region %u",
+		 args->handle, args->map_offset, args->vaddr, args->xdna_addr,
+		 args->mem_region);
 
 	drm_gem_object_put(gobj);
 	return ret;
