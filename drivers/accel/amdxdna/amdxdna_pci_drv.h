@@ -153,6 +153,11 @@ struct amdxdna_dpt_chan {
 	struct srcu_struct		srcu;
 	struct amdxdna_dpt __rcu	*data;
 	const struct amdxdna_dpt_desc	*desc;
+	/*
+	 * Ring size the next publish asks for, starting at @desc's default.
+	 * Serialized by dev_lock.
+	 */
+	u32				buf_size;
 };
 
 struct amdxdna_dev {

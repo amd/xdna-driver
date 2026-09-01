@@ -11,6 +11,7 @@
 #include <drm/drm_file.h>
 #include <linux/cleanup.h>
 #include <linux/debugfs.h>
+#include <linux/mmzone.h>
 #include <linux/pm_runtime.h>
 #include <linux/seq_file.h>
 #include <linux/string.h>
@@ -164,6 +165,124 @@ static int fw_log_level_show(struct seq_file *m, void *unused)
 AMDXDNA_DBGFS_FOPS(fw_log_level, fw_log_level_show, fw_log_level_write);
 
 /*
+ * fw_log_size: ring size in bytes for firmware logging. The ring is a
+ * physically contiguous allocation rounded up to a page order, so the size
+ * that fits depends on how fragmented memory is; a smaller ring holds less
+ * history but needs a smaller block. Takes effect at the next enable, or
+ * right away when logging is already on. Read prints the ring in use while
+ * logging is active, and otherwise the size the next enable will ask for.
+ */
+static ssize_t fw_log_size_write(struct file *file, const char __user *ptr,
+				 size_t len, loff_t *off)
+{
+	struct amdxdna_dev *xdna = file_to_xdna(file);
+	struct amdxdna_dpt *dpt;
+	u32 size, old_size, level;
+	bool dump;
+	int ret;
+
+	ret = kstrtouint_from_user(ptr, len, 0, &size);
+	if (ret)
+		return ret;
+
+	if (!size || size > (PAGE_SIZE << MAX_PAGE_ORDER))
+		return -EINVAL;
+
+	guard(mutex)(&xdna->dev_lock);
+
+	old_size = READ_ONCE(xdna->fw_log.buf_size);
+	WRITE_ONCE(xdna->fw_log.buf_size, size);
+
+	dpt = rcu_dereference_protected(xdna->fw_log.data,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt)
+		return len;
+
+	/*
+	 * A published ring only takes the new size by being republished at the
+	 * level already in use, which is the same firmware exchange as
+	 * fw_log_level and so needs the device awake. Resume before reading the
+	 * channel's state, not after: runtime PM parks an enabled channel in
+	 * SUSPENDED with its buffer preserved, so testing for ACTIVE first
+	 * would skip the republish, report success, and then let resume
+	 * reattach the old ring while the size reads back as the new one.
+	 */
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret) {
+		WRITE_ONCE(xdna->fw_log.buf_size, old_size);
+		return ret;
+	}
+
+	dpt = rcu_dereference_protected(xdna->fw_log.data,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt || READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE) {
+		amdxdna_pm_suspend_put(xdna);
+		return len;
+	}
+
+	/*
+	 * Republishing frees the whole amdxdna_dpt and builds a fresh one, so
+	 * everything living on it has to be carried across by hand: the level,
+	 * and the dmesg consumer, which amdxdna_dpt_fini_chan clears.
+	 */
+	level = READ_ONCE(dpt->config);
+	dump = READ_ONCE(dpt->dump_to_dmesg);
+
+	ret = amdxdna_fw_log_set_state(xdna, AMDXDNA_DPT_FW_LOG_LEVEL_NONE);
+	if (!ret)
+		ret = amdxdna_fw_log_set_state(xdna, level);
+	if (ret) {
+		/*
+		 * The old ring is already gone, and the likeliest failure here
+		 * is the contiguous allocation this knob exists to work around.
+		 * Go back to the size that was working rather than leave the
+		 * device with no logging at all; the write still reports the
+		 * error, so the caller knows the size it asked for did not take.
+		 */
+		XDNA_ERR(xdna, "Failed to republish FW log at %u bytes: %d",
+			 size, ret);
+		WRITE_ONCE(xdna->fw_log.buf_size, old_size);
+		if (amdxdna_fw_log_set_state(xdna, level)) {
+			XDNA_ERR(xdna, "FW log left disabled, %u bytes did not fit either",
+				 old_size);
+			amdxdna_pm_suspend_put(xdna);
+			return ret;
+		}
+	}
+
+	if (dump) {
+		dpt = rcu_dereference_protected(xdna->fw_log.data,
+						lockdep_is_held(&xdna->dev_lock));
+		if (!dpt || amdxdna_dpt_dump_to_dmesg(dpt, true))
+			XDNA_WARN(xdna, "FW log dmesg dumping left off after resize");
+	}
+
+	amdxdna_pm_suspend_put(xdna);
+
+	return ret ? ret : len;
+}
+
+static int fw_log_size_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev *xdna = m->private;
+	struct amdxdna_dpt *dpt;
+	u32 size;
+	int idx;
+
+	size = READ_ONCE(xdna->fw_log.buf_size);
+	dpt = amdxdna_dpt_enter(&xdna->fw_log, &idx);
+	if (dpt) {
+		size = READ_ONCE(dpt->size);
+		amdxdna_dpt_exit(&xdna->fw_log, idx);
+	}
+
+	seq_printf(m, "%u\n", size);
+	return 0;
+}
+
+AMDXDNA_DBGFS_FOPS(fw_log_size, fw_log_size_show, fw_log_size_write);
+
+/*
  * fw_log_dump_to_dmesg: toggle kernel-side streaming of FW log entries to
  * dmesg. Returns -EINVAL if FW logging is not ACTIVE.
  */
@@ -237,6 +356,7 @@ static const struct {
 } amdxdna_dbgfs_files[] = {
 	AMDXDNA_DBGFS_FILE(carveout, 0600),
 	AMDXDNA_DBGFS_FILE(fw_log_level, 0600),
+	AMDXDNA_DBGFS_FILE(fw_log_size, 0600),
 	AMDXDNA_DBGFS_FILE(fw_log_dump_to_dmesg, 0600),
 };
 
