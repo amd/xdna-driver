@@ -128,6 +128,18 @@ void xdna_mailbox_free_channel(struct mailbox_channel *mailbox_chann);
 void xdna_mailbox_stop_channel(struct mailbox_channel *mailbox_chann);
 
 /*
+ * xdna_mailbox_drain_channel() -- consume responses already in the ring buffer
+ *
+ * @mailbox_chann: the handle return from xdna_mailbox_alloc_channel()
+ *
+ * Run the receive path once and wait for it, for callers that cannot assume a
+ * response was announced by an interrupt. Does nothing if the channel is in
+ * bad state, since the receive path refuses to run there. Safe to call with a
+ * NULL channel.
+ */
+void xdna_mailbox_drain_channel(struct mailbox_channel *mailbox_chann);
+
+/*
  * xdna_mailbox_send_msg() -- Send a message
  *
  * @mailbox_chann: Mailbox channel handle

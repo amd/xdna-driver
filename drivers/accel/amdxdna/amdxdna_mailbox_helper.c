@@ -68,8 +68,23 @@ int xdna_send_msg_wait(struct amdxdna_dev *xdna, struct mailbox_channel *chann,
 	ret = wait_for_completion_timeout(&hdl->comp,
 					  msecs_to_jiffies(RX_TIMEOUT));
 	if (!ret) {
-		XDNA_ERR(xdna, "Wait for completion timeout");
-		return -ETIME;
+		/*
+		 * Firmware is reported to complete some commands, SUSPEND in
+		 * particular, by writing the response into the ring buffer
+		 * without raising the completion interrupt, so nothing wakes
+		 * the receive path and the wait above expires on a command that
+		 * did finish. Drain the ring by hand before declaring the
+		 * command lost; this also picks up a response that landed in
+		 * the instant the wait was timing out.
+		 */
+		xdna_mailbox_drain_channel(chann);
+		if (!try_wait_for_completion(&hdl->comp)) {
+			XDNA_ERR(xdna, "Wait for completion timeout");
+			return -ETIME;
+		}
+		XDNA_DBG(xdna,
+			 "Opcode 0x%x completed without an interrupt, response taken from the ring buffer",
+			 msg->opcode);
 	}
 
 	return hdl->error;
