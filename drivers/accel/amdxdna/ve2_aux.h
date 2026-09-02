@@ -85,6 +85,8 @@ static inline struct amdxdna_dev_hdl *ve2_dev_hdl(struct amdxdna_dev *xdna)
 
 int ve2_probe(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl *hdl);
 void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx);
+void *ve2_alloc_cert_coherent(struct amdxdna_dev *xdna, u32 mem_bitmap, size_t size,
+			      dma_addr_t *dma_addr, struct device **alloc_dev);
 
 /* Capture the per-column CERT firmware status for @hwctx's partition. */
 int ve2_get_firmware_status(struct amdxdna_hwctx *hwctx);
