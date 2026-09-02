@@ -438,6 +438,24 @@ again:
 		goto again;
 }
 
+void xdna_mailbox_drain_channel(struct mailbox_channel *mb_chann)
+{
+	if (!mb_chann)
+		return;
+
+	/*
+	 * Run the receive path through the channel workqueue rather than
+	 * inline. i2x_head and the ring buffer are owned by the single
+	 * mailbox_rx_worker context and are not otherwise serialised, so
+	 * reading the ring from the caller would race a worker started by an
+	 * interrupt. queue_work() re-arms the work even if it is running, and
+	 * flush_work() waits for the queued run, so the drain always observes
+	 * the ring as of at least this call.
+	 */
+	queue_work(mb_chann->work_q, &mb_chann->rx_work);
+	flush_work(&mb_chann->rx_work);
+}
+
 int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 			  const struct xdna_mailbox_msg *msg, u64 tx_timeout)
 {
