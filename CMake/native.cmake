@@ -4,12 +4,6 @@
 # For native xdna-driver builds, XRT headers and link library
 # comes from xdna-driver's XRT submodule.
 
-# User can choose to package either legacy driver or upstream driver source.
-# By default the upstream (staging) driver is packaged as the primary
-# amdxdna.ko, and the out-of-tree/legacy driver is packaged alongside it
-# as amdxdna_legacy.ko.
-option(PACKAGE_LEGACY_DRIVER "Package legacy driver source" OFF)
-
 # The VE2 shim test (test/shim_test) is not part of the normal VE2 runtime
 # build. It is opt-in (e.g. built on demand by a dedicated packaging recipe)
 # so the default xrt/amdxdna build does not compile or install test artifacts.

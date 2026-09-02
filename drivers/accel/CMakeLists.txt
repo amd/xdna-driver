@@ -49,20 +49,13 @@ add_custom_command(
 add_custom_target(driver ALL DEPENDS in_tree_${XDNA_DRV_TGT})
 
 # Tar and install driver source code for packaging
-if(NOT PACKAGE_LEGACY_DRIVER)
-  message("-- Packaging upstream driver source")
-  set(XDNA_DRV_SRC_DIR
-    drivers
-    include
-    )
-  set(TAR_DRV_SOURCE_TGT driver)
-  include(${CMAKE_SOURCE_DIR}/CMake/pkg_driver_source.cmake)
-endif()
+message("-- Packaging upstream driver source")
+set(XDNA_DRV_SRC_DIR
+  drivers
+  include
+  )
+set(TAR_DRV_SOURCE_TGT driver)
+include(${CMAKE_SOURCE_DIR}/CMake/pkg_driver_source.cmake)
 
 # install .ko for testing
-set(TEST_KO_NAME amdxdna.ko)
-if(PACKAGE_LEGACY_DRIVER)
-  # When legacy driver is packaged, we become the "legacy" ko for CI test
-  set(TEST_KO_NAME amdxdna_legacy.ko)
-endif()
-install(FILES ${XDNA_DRV_PATH} DESTINATION ${XDNA_BIN_DIR}/driver RENAME ${TEST_KO_NAME})
+install(FILES ${XDNA_DRV_PATH} DESTINATION ${XDNA_BIN_DIR}/driver RENAME amdxdna.ko)
