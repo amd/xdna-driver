@@ -142,6 +142,8 @@ static int ve2_dbg_queue_data_rw(struct amdxdna_dev *xdna, struct amdxdna_hwctx 
 				 u32 col, u32 row, u32 addr, void *data, size_t size,
 				 int cmd_type)
 {
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct device *alloc_dev;
 	dma_addr_t dma_handle;
 	void *virt_ptr = NULL;
 	int ret = 0;
@@ -151,11 +153,13 @@ static int ve2_dbg_queue_data_rw(struct amdxdna_dev *xdna, struct amdxdna_hwctx 
 		return -EINVAL;
 	}
 
-	virt_ptr = dma_alloc_coherent(xdna->ddev.dev, size, &dma_handle, GFP_KERNEL);
-	if (!virt_ptr) {
-		XDNA_ERR(xdna, "Failed to allocate DMA buffer");
+	if (!vp)
+		return -EINVAL;
+
+	/* CERT dereferences this buffer, so it must come from a bank it can reach. */
+	virt_ptr = ve2_alloc_cert_coherent(xdna, vp->mem_bitmap, size, &dma_handle, &alloc_dev);
+	if (!virt_ptr)
 		return -ENOMEM;
-	}
 
 	addr = addr + ((col << VE2_COL_SHIFT) + (row << VE2_ROW_SHIFT));
 
@@ -181,7 +185,7 @@ static int ve2_dbg_queue_data_rw(struct amdxdna_dev *xdna, struct amdxdna_hwctx 
 		break;
 	}
 
-	dma_free_coherent(xdna->ddev.dev, size, virt_ptr, dma_handle);
+	dma_free_coherent(alloc_dev, size, virt_ptr, dma_handle);
 	return ret;
 }
 
