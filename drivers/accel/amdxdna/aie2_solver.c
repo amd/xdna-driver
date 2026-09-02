@@ -339,7 +339,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 
 	ret = set_dpm_level(xrs, req, &dpm_level);
 	if (ret)
-		goto free_node;
+		goto unload;
 
 	snode->dpm_level = dpm_level;
 	snode->cb_arg = cb_arg;
@@ -349,6 +349,8 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 
 	return 0;
 
+unload:
+	xrs->cfg.actions->unload(cb_arg);
 free_node:
 	remove_solver_node(&xrs->rgp, snode);
 
