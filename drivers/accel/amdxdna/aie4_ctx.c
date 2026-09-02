@@ -32,19 +32,9 @@
 
 static void job_worker(struct work_struct *work);
 
-static irqreturn_t cert_comp_isr(int irq, void *p)
-{
-	struct cert_comp *cert_comp = p;
-
-	trace_uc_irq_handle("cert", cert_comp->msix_idx);
-	wake_up_all(&cert_comp->waitq);
-	return IRQ_HANDLED;
-}
-
 static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct cert_comp *cert_comp;
 	int ret;
 
@@ -66,17 +56,10 @@ static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32
 	init_waitqueue_head(&cert_comp->waitq);
 	kref_init(&cert_comp->kref);
 
-	ret = pci_irq_vector(pdev, cert_comp->msix_idx);
-	if (ret < 0) {
-		XDNA_ERR(xdna, "MSI-X idx %u is invalid, ret:%d", msix_idx, ret);
-		goto free_cert_comp;
-	}
-	cert_comp->irq = ret;
-
-	ret = request_irq(cert_comp->irq, cert_comp_isr, 0, "xdna_hsa", cert_comp);
+	/* Transport-specific: PCI wires an MSI-X irq, platform an IPI callback. */
+	ret = aie4_request_notification(cert_comp);
 	if (ret) {
-		XDNA_ERR(xdna, "request irq %d failed %d", cert_comp->irq, ret);
-		cert_comp->irq = -ENOENT;
+		XDNA_ERR(xdna, "request notification for msix idx %u failed %d", msix_idx, ret);
 		goto free_cert_comp;
 	}
 
@@ -89,7 +72,7 @@ static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32
 	return cert_comp;
 
 free_irq:
-	free_irq(cert_comp->irq, cert_comp);
+	aie4_free_notification(cert_comp);
 free_cert_comp:
 	kfree(cert_comp);
 	return ERR_PTR(ret);
@@ -101,8 +84,7 @@ static void cert_comp_release(struct kref *kref)
 	struct amdxdna_dev_hdl *ndev = cert_comp->ndev;
 
 	xa_erase(&ndev->cert_comp_xa, cert_comp->msix_idx);
-	if (cert_comp->irq >= 0)
-		free_irq(cert_comp->irq, cert_comp);
+	aie4_free_notification(cert_comp);
 	kfree(cert_comp);
 }
 
@@ -201,25 +183,6 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		 resp.job_complete_msix_idx, resp.hw_context_id,
 		 resp.doorbell_offset);
 
-	if (priv->kernel_submit) {
-		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-		u64 db_off = (u64)ndev->priv->doorbell_off + resp.doorbell_offset;
-
-		/*
-		 * doorbell_base is a pcim_iomap() of the whole doorbell BAR.  The
-		 * doorbell offset comes from firmware (or, on a VF, the PF/hypervisor);
-		 * reject one that would place the u32 doorbell write past the mapped
-		 * BAR before ring_doorbell() ever dereferences priv->doorbell_addr.
-		 * Mirrors the bounds check on the user mmap path (aie4_doorbell_mmap).
-		 */
-		if (db_off + sizeof(u32) >
-		    pci_resource_len(pdev, xdna->dev_info->doorbell_bar)) {
-			XDNA_ERR(xdna, "doorbell offset 0x%llx out of BAR", db_off);
-			aie4_msg_destroy_context(ndev, resp.hw_context_id);
-			return -EINVAL;
-		}
-	}
-
 	/* setup interrupt completion per msix index */
 	cert_comp = aie4_lookup_cert_comp(ndev, resp.job_complete_msix_idx);
 	if (IS_ERR(cert_comp)) {
@@ -244,22 +207,29 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 
 	if (priv->kernel_submit) {
 		/*
-		 * Kernel-mode submission: point at this context's doorbell within
-		 * the device-level doorbell BAR mapping (fixed for the device's
-		 * lifetime) so the driver can ring it, and keep it out of user
-		 * space (hand back an invalid offset so the doorbell cannot be
-		 * mmap'd/rung by the user).
+		 * Kernel-mode submission: set up this context's doorbell kick target
+		 * (transport-specific, via aie4_doorbell_setup) so the driver can ring
+		 * it, and keep it out of user space (hand back an invalid offset so the
+		 * doorbell cannot be mmap'd/rung by the user).
 		 *
 		 * Publish under io_lock so a concurrent submitter - which reads the
 		 * connected sentinel and rings the doorbell under io_lock - cannot, on a
-		 * TDR recreate of a live ctx, observe a torn or stale doorbell_addr.
+		 * TDR recreate of a live ctx, observe a torn or stale kick target.
 		 * priv->cert_comp is the connected sentinel; publish it last, after the
 		 * doorbell is set up, so a submitter that observes the ctx connected also
 		 * sees a valid doorbell.
 		 */
 		mutex_lock(&priv->io_lock);
-		priv->doorbell_addr = ndev->doorbell_base +
-				      ndev->priv->doorbell_off + resp.doorbell_offset;
+		ret = aie4_doorbell_setup(hwctx, &resp);
+		if (ret) {
+			mutex_unlock(&priv->io_lock);
+			aie4_put_cert_comp(cert_comp);
+			aie4_msg_destroy_context(ndev, resp.hw_context_id);
+			/* Match a clean teardown so a later fini does not re-destroy. */
+			priv->hw_ctx_id = CTX_INVALID_ID;
+			hwctx->fw_ctx_id = -1;
+			return ret;
+		}
 		WRITE_ONCE(priv->has_reset, false);
 		/*
 		 * Consume the cached ctx-error report on (re)connect. The faulting
@@ -790,11 +760,6 @@ int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 
 /* ---- kernel-mode submission (driver fills the queue and rings doorbell) ---- */
 
-static inline void ring_doorbell(struct amdxdna_hwctx *hwctx)
-{
-	writel(0, hwctx->priv->doorbell_addr);
-}
-
 /* Publish a command to CERT and return the assigned command sequence (slot). */
 static u64 publish_cmd(struct amdxdna_hwctx *hwctx)
 {
@@ -1043,7 +1008,7 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 					    offsetof(struct amdxdna_cmd, header);
 	ri = get_read_index(hwctx);
 	*seq = publish_cmd(hwctx);
-	ring_doorbell(hwctx);
+	aie4_doorbell_ring(hwctx);
 	trace_xdna_job_queue(hwctx->name, *seq, *seq + 1 - ri, "job submitted");
 	XDNA_DBG(xdna, "Submitted one cmd, %s seq %lld", hwctx->name, *seq);
 	return 0;
@@ -1325,7 +1290,7 @@ void aie4_hwctx_resume_jobs(struct amdxdna_hwctx *hwctx)
 		mutex_unlock(&priv->io_lock);
 		return;
 	}
-	ring_doorbell(hwctx);
+	aie4_doorbell_ring(hwctx);
 	mutex_unlock(&priv->io_lock);
 
 	queue_work(priv->job_work_q, &priv->job_work);

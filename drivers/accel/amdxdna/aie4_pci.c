@@ -10,6 +10,8 @@
 #include <drm/drm_print.h>
 #include <linux/debugfs.h>
 #include <linux/firmware.h>
+#include <linux/interrupt.h>
+#include <linux/pci.h>
 #include <linux/rcupdate.h>
 #include <linux/sizes.h>
 #include <linux/pm_runtime.h>
@@ -28,6 +30,7 @@
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_pm.h"
 #include "amdxdna_sensors.h"
+#include "trace/events/amdxdna.h"
 
 #define NO_IOHUB		0
 #define CERTFW_MAX_SIZE         (SZ_32K + SZ_256)
@@ -173,6 +176,86 @@ static void aie4_mailbox_fini(struct amdxdna_dev_hdl *ndev)
 	aie_destroy_chann(&ndev->aie, &ndev->aie.mgmt_chann);
 	drmm_kfree(&xdna->ddev, ndev->mbox);
 	ndev->mbox = NULL;
+}
+
+static irqreturn_t cert_comp_isr(int irq, void *p)
+{
+	struct cert_comp *cert_comp = p;
+
+	trace_uc_irq_handle("cert", cert_comp->msix_idx);
+	wake_up_all(&cert_comp->waitq);
+	return IRQ_HANDLED;
+}
+
+/*
+ * Transport hook: wire the per-cert completion notification.  PCI maps the
+ * firmware-provided MSI-X index to a Linux irq and registers cert_comp_isr;
+ * the platform build registers an IPI mailbox callback instead.
+ */
+int aie4_request_notification(struct cert_comp *comp)
+{
+	struct pci_dev *pdev = to_pci_dev(comp->ndev->aie.xdna->ddev.dev);
+	int ret;
+
+	ret = pci_irq_vector(pdev, comp->msix_idx);
+	if (ret < 0)
+		return ret;
+	comp->irq = ret;
+
+	ret = request_irq(comp->irq, cert_comp_isr, 0, "xdna_hsa", comp);
+	if (ret) {
+		comp->irq = -ENOENT;
+		return ret;
+	}
+
+	return 0;
+}
+
+/* Transport hook: tear down the completion notification wired by the hook above. */
+void aie4_free_notification(struct cert_comp *comp)
+{
+	if (comp->irq >= 0)
+		free_irq(comp->irq, comp);
+}
+
+/*
+ * Transport hook: take what this transport needs from the create-context
+ * response.  PCI validates the firmware-provided doorbell offset against the
+ * mapped doorbell BAR and stores this context's kick target.  Caller holds
+ * io_lock, which also serializes the read in aie4_doorbell_ring(), so plain
+ * accesses (no WRITE_ONCE/READ_ONCE) are sufficient.
+ */
+int aie4_doorbell_setup(struct amdxdna_hwctx *hwctx,
+			const struct aie4_msg_create_hw_context_resp *resp)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	u64 db_off = (u64)ndev->priv->doorbell_off + resp->doorbell_offset;
+
+	/*
+	 * doorbell_base is a pcim_iomap() of the whole doorbell BAR.  The offset
+	 * comes from firmware (or, on a VF, the PF/hypervisor); reject one that
+	 * would place the u32 doorbell write past the mapped BAR before
+	 * aie4_doorbell_ring() ever dereferences priv->doorbell_addr.  Mirrors the
+	 * bounds check on the user mmap path (aie4_doorbell_mmap).
+	 */
+	if (db_off + sizeof(u32) >
+	    pci_resource_len(pdev, xdna->dev_info->doorbell_bar)) {
+		XDNA_ERR(xdna, "doorbell offset 0x%llx out of BAR", db_off);
+		return -EINVAL;
+	}
+
+	priv->doorbell_addr = ndev->doorbell_base + ndev->priv->doorbell_off +
+			      resp->doorbell_offset;
+	return 0;
+}
+
+/* Transport hook: ring this context's doorbell (kick CERT). */
+void aie4_doorbell_ring(struct amdxdna_hwctx *hwctx)
+{
+	writel(0, hwctx->priv->doorbell_addr);
 }
 
 static int aie4_irq_init(struct amdxdna_dev *xdna)
