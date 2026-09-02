@@ -622,11 +622,10 @@ static int ve2_create_host_queue(struct amdxdna_hwctx *hwctx)
 	queue = &vp->hsa_queue;
 	alloc_size = sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY;
 
-	queue->hsa_queue_p = dma_alloc_coherent(xdna->ddev.dev, alloc_size,
-						&dma_handle, GFP_KERNEL);
+	queue->hsa_queue_p = ve2_alloc_cert_coherent(xdna, vp->mem_bitmap, alloc_size,
+						     &dma_handle, &queue->alloc_dev);
 	if (!queue->hsa_queue_p)
 		return -ENOMEM;
-	queue->alloc_dev = xdna->ddev.dev;
 
 	mutex_init(&queue->hq_lock);
 	queue->reserved_write_index = 0;
@@ -672,8 +671,8 @@ static int ve2_create_host_queue(struct amdxdna_hwctx *hwctx)
 	dma_sync_single_for_device(queue->alloc_dev, dma_handle, alloc_size,
 				   DMA_TO_DEVICE);
 
-	XDNA_DBG(xdna, "Host queue alloc dma=0x%llx capacity=%u", (u64)dma_handle,
-		 HOST_QUEUE_ENTRY);
+	XDNA_DBG(xdna, "Host queue alloc dma=0x%llx capacity=%u bank=%s", (u64)dma_handle,
+		 HOST_QUEUE_ENTRY, dev_name(queue->alloc_dev));
 
 	return 0;
 }
@@ -876,14 +875,10 @@ static int ve2_create_dbg_queue(struct amdxdna_hwctx *hwctx)
 	queue = &vp->dbg_queue;
 	alloc_size = sizeof(struct dbg_queue) + sizeof(u64) * HOST_QUEUE_ENTRY;
 
-	queue->dbg_queue_p = dma_alloc_coherent(xdna->ddev.dev, alloc_size,
-						&dma_handle, GFP_KERNEL);
-	if (!queue->dbg_queue_p) {
-		XDNA_ERR(xdna, "DBG queue alloc failed: hwctx=%u ret=%d",
-			 hwctx->id, -ENOMEM);
+	queue->dbg_queue_p = ve2_alloc_cert_coherent(xdna, vp->mem_bitmap, alloc_size,
+						     &dma_handle, &queue->alloc_dev);
+	if (!queue->dbg_queue_p)
 		return -ENOMEM;
-	}
-	queue->alloc_dev = xdna->ddev.dev;
 
 	mutex_init(&queue->hq_lock);
 	queue->reserved_write_index = 0;
@@ -906,8 +901,8 @@ static int ve2_create_dbg_queue(struct amdxdna_hwctx *hwctx)
 
 	dma_sync_single_for_device(queue->alloc_dev, dma_handle, alloc_size, DMA_TO_DEVICE);
 
-	XDNA_DBG(xdna, "DBG queue alloc: hwctx=%u dma_addr=0x%llx capacity=%u",
-		 hwctx->id, (u64)dma_handle, HOST_QUEUE_ENTRY);
+	XDNA_DBG(xdna, "DBG queue alloc: hwctx=%u dma_addr=0x%llx capacity=%u bank=%s",
+		 hwctx->id, (u64)dma_handle, HOST_QUEUE_ENTRY, dev_name(queue->alloc_dev));
 
 	return 0;
 }

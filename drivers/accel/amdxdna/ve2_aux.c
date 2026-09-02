@@ -457,6 +457,51 @@ void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_hwctx *
 	vp->mem_bitmap = 0;
 }
 
+/*
+ * Allocate DMA-coherent memory for a buffer that CERT dereferences itself.
+ *
+ * Such buffers must sit in a DDR bank the context's columns can actually
+ * reach, so only the banks named by @mem_bitmap are eligible; each is tried in
+ * turn and the device that served the allocation is returned in @alloc_dev for
+ * the caller's later sync and free. The default CMA pool is used only when the
+ * context named no bank at all, which is the case on platforms without an
+ * aie-mem-topology. Falling back to it for a context that did name banks would
+ * hand CERT an address it cannot route, surfacing as a NoC error at submit
+ * instead of an error here.
+ */
+void *ve2_alloc_cert_coherent(struct amdxdna_dev *xdna, u32 mem_bitmap, size_t size,
+			      dma_addr_t *dma_addr, struct device **alloc_dev)
+{
+	void *va = NULL;
+	int i;
+
+	*alloc_dev = NULL;
+
+	if (mem_bitmap) {
+		for (i = 0; i < MAX_MEM_REGIONS; i++) {
+			struct device *dev = xdna->cma_regions[i].dev;
+
+			if (!(mem_bitmap & (1U << i)) || !dev)
+				continue;
+
+			va = dma_alloc_coherent(dev, size, dma_addr, GFP_KERNEL);
+			if (va) {
+				*alloc_dev = dev;
+				break;
+			}
+		}
+	} else {
+		va = dma_alloc_coherent(xdna->ddev.dev, size, dma_addr, GFP_KERNEL);
+		if (va)
+			*alloc_dev = xdna->ddev.dev;
+	}
+
+	if (!va)
+		XDNA_ERR(xdna, "Coherent alloc failed: size=%zu mem_bitmap=0x%x", size, mem_bitmap);
+
+	return va;
+}
+
 int ve2_probe(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl *hdl)
 {
 	struct init_config xrs_cfg = { };
@@ -582,14 +627,22 @@ static int ve2_aux_init(struct amdxdna_dev *xdna)
 	aie_np = dev->parent ? dev->parent->of_node : NULL;
 	if (aie_np) {
 		ret = ve2_cma_mem_region_init(xdna, aie_np);
-		if (ret)
+		if (ret) {
+			/*
+			 * Bank setup is all-or-nothing, so skip the topology
+			 * parse: it resolves DT phandles by index and would
+			 * otherwise hand contexts a mem_bitmap naming banks
+			 * that have no device behind them.
+			 */
 			XDNA_INFO(xdna, "CMA mem region init failed (%d), using default CMA", ret);
-
-		ret = ve2_parse_mem_topology(xdna, aie_np);
-		if (ret == -ENOENT)
-			XDNA_INFO(xdna, "No aie-mem-topology in DT, using default CMA");
-		else if (ret)
-			XDNA_INFO(xdna, "mem topology parse failed (%d), using default CMA", ret);
+		} else {
+			ret = ve2_parse_mem_topology(xdna, aie_np);
+			if (ret == -ENOENT)
+				XDNA_INFO(xdna, "No aie-mem-topology in DT, using default CMA");
+			else if (ret)
+				XDNA_INFO(xdna, "mem topology parse failed (%d), using default CMA",
+					  ret);
+		}
 	} else {
 		XDNA_WARN(xdna, "No parent DT node, skipping CMA region and topology init");
 	}
