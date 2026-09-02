@@ -1,21 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0
 #
-# Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+# Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
 #
 
 KERNEL_VER ?= $(shell uname -r)
 KERNEL_SRC ?= /lib/modules/$(KERNEL_VER)/build
-XDNA_BUS_TYPE := pci
-
-ifeq ($(XDNA_BUS_TYPE), pci)
-PCI = y
-OF = n
-else ifeq ($(XDNA_BUS_TYPE), of)
-PCI = n
-OF = y
-else
-$(error Unknown XDNA_BUS_TYPE $(XDNA_BUS_TYPE))!!
-endif
 
 mkfile_path = $(abspath $(lastword $(MAKEFILE_LIST)))
 SRC_DIR = $(patsubst %/,%,$(dir $(mkfile_path)))
@@ -51,20 +40,9 @@ DEFINES += -DAMDXDNA_NPU3A
 endif
 
 # Compiler (gcc/clang) comes from the LLVM= kbuild var set by DKMS/caller, not probed here (#1377)
-ifeq ($(XDNA_BUS_TYPE), of)
-DEFINES += -DAMDXDNA_OF
-# Generate config_kernel.h when building directly (Yocto/DKMS flow)
-modules: $(SRC_DIR)/config_kernel.h
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) modules
-
-$(SRC_DIR)/config_kernel.h:
-	@echo "[INFO] Generating config_kernel.h for OF build..."
-	@KERNEL_SRC=$(KERNEL_SRC) OUT="$(SRC_DIR)/config_kernel.h" bash $(SRC_DIR)/../../../../tools/configure_kernel.sh
-else
-# PCI builds: CMake generates config_kernel.h
+# CMake generates config_kernel.h
 modules:
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) modules
-endif
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" modules
 
 modules_install:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) modules_install

@@ -37,7 +37,7 @@ amdxdna-y := \
 	amdxdna_xen.o \
 	amdxdna_sensors.o
 
-amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
+amdxdna-y += \
 	aie.o \
 	aie_psp.o \
 	aie_smu.o \
