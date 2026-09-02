@@ -30,15 +30,6 @@
 #define CTX_INVALID_ID			(~0U)
 #define CTX_INVALID_DOORBELL		AMDXDNA_INVALID_DOORBELL_OFFSET
 
-/*
- * Poison value for priv->doorbell_addr: an unmapped kernel address, not NULL.
- * A valid doorbell is doorbell_base (a non-NULL pcim_iomap() of the BAR) plus a
- * small offset, so it can never be 0; the driver still uses an explicit INVALID
- * sentinel (mirroring CTX_INVALID_DOORBELL) rather than overloading 0/NULL, and
- * a stray ring on a poisoned pointer faults loudly instead of writing to 0.
- */
-#define DOORBELL_ADDR_INVALID		((void __iomem *)~0UL)
-
 static void job_worker(struct work_struct *work);
 
 static irqreturn_t cert_comp_isr(int irq, void *p)
@@ -50,10 +41,8 @@ static irqreturn_t cert_comp_isr(int irq, void *p)
 	return IRQ_HANDLED;
 }
 
-static int aie4_link_cert_comp(struct amdxdna_hwctx *hwctx, u32 msix_idx)
+static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
 {
-	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
-	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct cert_comp *cert_comp;
@@ -64,13 +53,12 @@ static int aie4_link_cert_comp(struct amdxdna_hwctx *hwctx, u32 msix_idx)
 	cert_comp = xa_load(&ndev->cert_comp_xa, msix_idx);
 	if (cert_comp) {
 		kref_get(&cert_comp->kref);
-		WRITE_ONCE(priv->cert_comp, cert_comp);
-		return 0;
+		return cert_comp;
 	}
 
 	cert_comp = kzalloc_obj(*cert_comp);
 	if (!cert_comp)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
 	cert_comp->ndev = ndev;
 	cert_comp->msix_idx = msix_idx;
@@ -94,18 +82,17 @@ static int aie4_link_cert_comp(struct amdxdna_hwctx *hwctx, u32 msix_idx)
 
 	ret = xa_err(xa_store(&ndev->cert_comp_xa, msix_idx, cert_comp, GFP_KERNEL));
 	if (ret) {
-		XDNA_ERR(xdna, "store cert_comp for msix idx %d failed %d", msix_idx, ret);
+		XDNA_ERR(xdna, "store cert_comp for msix idx %u failed %d", msix_idx, ret);
 		goto free_irq;
 	}
 
-	WRITE_ONCE(priv->cert_comp, cert_comp);
-	return 0;
+	return cert_comp;
 
 free_irq:
 	free_irq(cert_comp->irq, cert_comp);
 free_cert_comp:
 	kfree(cert_comp);
-	return -ENODEV;
+	return ERR_PTR(ret);
 }
 
 static void cert_comp_release(struct kref *kref)
@@ -130,34 +117,22 @@ static void aie4_put_cert_comp(struct cert_comp *cert_comp)
 
 static struct cert_comp *aie4_get_cert_comp(struct amdxdna_hwctx *hwctx)
 {
-	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
-	struct amdxdna_hwctx_priv *priv = hwctx->priv;
-
-	guard(mutex)(&ndev->cert_comp_lock);
-
-	if (!priv->cert_comp)
-		return NULL;
-
-	kref_get(&priv->cert_comp->kref);
-	return priv->cert_comp;
-}
-
-static void aie4_unlink_cert_comp(struct amdxdna_hwctx *hwctx)
-{
-	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct cert_comp *cert_comp;
 
-	guard(mutex)(&ndev->cert_comp_lock);
+	/*
+	 * priv->cert_comp is the per-hwctx field, guarded by io_lock.  A non-NULL
+	 * value means this ctx still holds its link-ref, so the object is alive and
+	 * the kref_get here cannot race the free (which only happens once the field
+	 * is cleared under io_lock in aie4_hwctx_destroy()).
+	 */
+	guard(mutex)(&priv->io_lock);
 
 	cert_comp = priv->cert_comp;
-	/* unlink hwctx_priv link with cert_comp */
-	WRITE_ONCE(priv->cert_comp, NULL);
+	if (cert_comp)
+		kref_get(&cert_comp->kref);
 
-	if (cert_comp) {
-		wake_up_all(&cert_comp->waitq);
-		kref_put(&cert_comp->kref, cert_comp_release);
-	}
+	return cert_comp;
 }
 
 static void aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id)
@@ -195,6 +170,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct cert_comp *cert_comp;
 	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
@@ -245,10 +221,10 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	}
 
 	/* setup interrupt completion per msix index */
-	ret = aie4_link_cert_comp(hwctx, resp.job_complete_msix_idx);
-	if (ret) {
+	cert_comp = aie4_lookup_cert_comp(ndev, resp.job_complete_msix_idx);
+	if (IS_ERR(cert_comp)) {
 		aie4_msg_destroy_context(ndev, resp.hw_context_id);
-		return ret;
+		return PTR_ERR(cert_comp);
 	}
 
 	priv->hw_ctx_id = resp.hw_context_id;
@@ -274,16 +250,16 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		 * space (hand back an invalid offset so the doorbell cannot be
 		 * mmap'd/rung by the user).
 		 *
-		 * Publish under io_lock so a concurrent submitter - which reads and
-		 * rings the doorbell under io_lock - cannot, on a TDR recreate of a
-		 * live ctx, observe a torn or stale doorbell_addr. Clearing has_reset
-		 * under the same lock re-connects the ctx as one publish. cert_comp is
-		 * already linked above, so the ctx reads as connected once this is set.
+		 * Publish under io_lock so a concurrent submitter - which reads the
+		 * connected sentinel and rings the doorbell under io_lock - cannot, on a
+		 * TDR recreate of a live ctx, observe a torn or stale doorbell_addr.
+		 * priv->cert_comp is the connected sentinel; publish it last, after the
+		 * doorbell is set up, so a submitter that observes the ctx connected also
+		 * sees a valid doorbell.
 		 */
 		mutex_lock(&priv->io_lock);
-		WRITE_ONCE(priv->doorbell_addr,
-			   ndev->doorbell_base + ndev->priv->doorbell_off +
-			   resp.doorbell_offset);
+		priv->doorbell_addr = ndev->doorbell_base +
+				      ndev->priv->doorbell_off + resp.doorbell_offset;
 		WRITE_ONCE(priv->has_reset, false);
 		/*
 		 * Consume the cached ctx-error report on (re)connect. The faulting
@@ -294,15 +270,32 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		 * (see job_worker), so the next reset starts from a clean slate.
 		 */
 		priv->cached_ctx_error_valid = false;
+		/* Publish the connected sentinel last (see comment above). */
+		WRITE_ONCE(priv->cert_comp, cert_comp);
 		mutex_unlock(&priv->io_lock);
 		hwctx->doorbell_offset = CTX_INVALID_DOORBELL;
 		wake_up_all(&priv->job_list_wq);
 	} else {
 		/* User-mode submission: hand the doorbell to user space to ring. */
+		mutex_lock(&priv->io_lock);
+		WRITE_ONCE(priv->cert_comp, cert_comp);
+		mutex_unlock(&priv->io_lock);
 		hwctx->doorbell_offset = resp.doorbell_offset;
 	}
 
 	return 0;
+}
+
+/*
+ * The connected sentinel for the submit wait gate: a linked cert_comp means the
+ * ctx is created and (for kernel submission) its doorbell is set up.  Read
+ * locklessly (a pointer null-check, never a dereference); create publishes it as
+ * the last store under io_lock and destroy clears it first, so "connected"
+ * implies a valid doorbell.
+ */
+static bool aie4_hwctx_connected(struct amdxdna_hwctx *hwctx)
+{
+	return !!READ_ONCE(hwctx->priv->cert_comp);
 }
 
 static bool aie4_hwctx_has_reset(struct amdxdna_hwctx *hwctx)
@@ -316,23 +309,39 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct cert_comp *cert_comp;
 	bool has_reset = false;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	if (flags == AIE4_HWCTX_DISCONNECT || flags == AIE4_HWCTX_ERROR)
 		has_reset = true;
-	if (priv->kernel_submit) {
-		/* io_lock is only initialized for kernel-mode contexts. */
-		mutex_lock(&priv->io_lock);
-		if (has_reset)
-			WRITE_ONCE(priv->has_reset, true);
-		WRITE_ONCE(priv->doorbell_addr, DOORBELL_ADDR_INVALID);
-		mutex_unlock(&priv->io_lock);
+
+	/*
+	 * Disconnect: latch the reset reason and clear priv->cert_comp (the
+	 * connected sentinel) together under io_lock - the field's lock - then wake
+	 * completion waiters and drop the ref.  Clearing the field first (before
+	 * tearing down the firmware context) makes a waiter on cert_comp->waitq
+	 * observe the disconnect and retry (-EAGAIN) rather than mistaking it for
+	 * completion, and the submit gate reads the ctx as disconnected.  has_reset
+	 * is set before the wake so a worker parked in wait_till_seq_completed()
+	 * takes the drain path rather than re-parking its in-flight job.  The
+	 * kref_put runs under cert_comp_lock (aie4_put_cert_comp).
+	 */
+	mutex_lock(&priv->io_lock);
+	if (has_reset)
+		WRITE_ONCE(priv->has_reset, true);
+	cert_comp = priv->cert_comp;
+	WRITE_ONCE(priv->cert_comp, NULL);
+	mutex_unlock(&priv->io_lock);
+
+	if (cert_comp) {
+		wake_up_all(&cert_comp->waitq);
+		aie4_put_cert_comp(cert_comp);
 	}
 
 	/*
-	 * On a reset, wake any submitter parked on the doorbell in
+	 * On a reset, wake any submitter parked in
 	 * wait_till_connected_hsa_not_full(). One that has already published a
 	 * prefix observes has_reset and unwinds with -ECONNRESET rather than
 	 * waiting for the recreate (which runs after aie4_hwctx_wait_for_running()),
@@ -349,13 +358,12 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags
 	priv->hw_ctx_id = CTX_INVALID_ID;
 	hwctx->fw_ctx_id = -1;
 	hwctx->doorbell_offset = CTX_INVALID_DOORBELL;
-	aie4_unlink_cert_comp(hwctx);
 
 	/*
 	 * On a non-reset teardown (NORMAL suspend / fini), quiesce the worker so
 	 * running_job_list is stable for aie4_hwctx_resume_jobs() (suspend) or the
-	 * fini abort loop. The worker observes the disconnect (doorbell invalid,
-	 * cert_comp waitq woken above), re-parks its in-flight job at the head of
+	 * fini abort loop. The worker observes the disconnect (cert_comp unlinked
+	 * and its waitq woken above), re-parks its in-flight job at the head of
 	 * running_job_list, and returns, so cancel_work_sync() completes rather
 	 * than blocking.
 	 *
@@ -578,14 +586,18 @@ int aie4_hwctx_init(struct amdxdna_hwctx *hwctx)
 	priv->kernel_submit = ndev->kernel_submit;
 
 	/*
+	 * io_lock guards the per-hwctx cert_comp binding (the connected sentinel)
+	 * for every ctx, so initialize it unconditionally.  kzalloc left cert_comp
+	 * NULL: disconnected until create links it.
+	 */
+	mutex_init(&priv->io_lock);
+
+	/*
 	 * Kernel-mode submission: the driver fills the queue and rings the
 	 * doorbell, so it needs the job machinery.  User-mode submission leaves
 	 * the queue and doorbell to user space (no job machinery here).
 	 */
 	if (priv->kernel_submit) {
-		/* kzalloc zeroes to NULL; poison to INVALID until create publishes it. */
-		WRITE_ONCE(priv->doorbell_addr, DOORBELL_ADDR_INVALID);
-		mutex_init(&priv->io_lock);
 		INIT_LIST_HEAD(&priv->pending_job_list);
 		INIT_LIST_HEAD(&priv->running_job_list);
 		init_waitqueue_head(&priv->job_list_wq);
@@ -626,8 +638,7 @@ destroy_wq:
 	if (priv->kernel_submit)
 		destroy_workqueue(priv->job_work_q);
 destroy_lock:
-	if (priv->kernel_submit)
-		mutex_destroy(&priv->io_lock);
+	mutex_destroy(&priv->io_lock);
 	kfree(priv);
 	hwctx->priv = NULL;
 	return ret;
@@ -650,8 +661,7 @@ void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		destroy_workqueue(priv->job_work_q);
 	}
 	aie4_hwctx_umq_fini(hwctx);
-	if (priv->kernel_submit)
-		mutex_destroy(&priv->io_lock);
+	mutex_destroy(&priv->io_lock);
 	kfree(priv);
 }
 
@@ -727,8 +737,8 @@ static u64 get_read_index(struct amdxdna_hwctx *hwctx)
  * wait_event() condition on the completion hot path (cert_comp->waitq is shared
  * per MSI-X), so keep it lockless: the caller pins @comp with a kref, making
  * this a pure pointer-identity compare - never a dereference, ABA-safe - and
- * READ_ONCE pairs with the WRITE_ONCE in aie4_link_cert_comp()/
- * aie4_unlink_cert_comp().
+ * READ_ONCE pairs with the WRITE_ONCE in aie4_hwctx_create()/
+ * aie4_hwctx_destroy().
  */
 static bool check_cert_comp_linked(struct amdxdna_hwctx *hwctx, struct cert_comp *comp)
 {
@@ -782,7 +792,7 @@ int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 
 static inline void ring_doorbell(struct amdxdna_hwctx *hwctx)
 {
-	writel(0, READ_ONCE(hwctx->priv->doorbell_addr));
+	writel(0, hwctx->priv->doorbell_addr);
 }
 
 /* Publish a command to CERT and return the assigned command sequence (slot). */
@@ -855,24 +865,23 @@ static int wait_till_connected_hsa_not_full(struct amdxdna_hwctx *hwctx,
 				hsa_not_full = true;
 		}
 		/*
-		 * Disconnected: wait for the doorbell to come back. A suspend/resume
-		 * or TDR recreate republishes doorbell_addr; block here transparently
-		 * across it. The first command of a job (wait_through_reset) waits out
-		 * the recreate so a not-yet-published submit survives a reset and runs
-		 * on the fresh ctx - the queue indices are continuous across the
-		 * recreate (create does not reset them; the drain advances read_index
-		 * to write_index), so the already-sampled wi stays valid. Once a prefix
-		 * is published (!wait_through_reset) a reset must instead unwind with
-		 * -ECONNRESET: the chain cannot be split across the reset, and the
-		 * SUBMITTING submitter must release pending_head so that
-		 * aie4_hwctx_wait_for_running() does not block on it. aie4_hwctx_destroy()
-		 * wakes job_list_wq after setting has_reset so a parked submitter
-		 * re-checks. Never spins; cert_comp is set before doorbell_addr on
-		 * create.
+		 * Disconnected: wait for the ctx to reconnect. A suspend/resume or TDR
+		 * recreate relinks cert_comp (the connected sentinel) after republishing
+		 * the doorbell; block here transparently across it. The first command of
+		 * a job (wait_through_reset) waits out the recreate so a not-yet-published
+		 * submit survives a reset and runs on the fresh ctx - the queue indices
+		 * are continuous across the recreate (create does not reset them; the
+		 * drain advances read_index to write_index), so the already-sampled wi
+		 * stays valid. Once a prefix is published (!wait_through_reset) a reset
+		 * must instead unwind with -ECONNRESET: the chain cannot be split across
+		 * the reset, and the SUBMITTING submitter must release pending_head so
+		 * that aie4_hwctx_wait_for_running() does not block on it.
+		 * aie4_hwctx_destroy() wakes job_list_wq after setting has_reset so a
+		 * parked submitter re-checks. Never spins; cert_comp is published after
+		 * the doorbell on create.
 		 */
 		ret = wait_event_freezable(priv->job_list_wq,
-					   READ_ONCE(priv->doorbell_addr) !=
-					   DOORBELL_ADDR_INVALID ||
+					   aie4_hwctx_connected(hwctx) ||
 					   (!wait_through_reset &&
 					    aie4_hwctx_has_reset(hwctx)));
 		mutex_lock(&priv->io_lock);
@@ -883,8 +892,7 @@ static int wait_till_connected_hsa_not_full(struct amdxdna_hwctx *hwctx,
 				 hwctx->name);
 			return -ECONNRESET;
 		}
-	} while (!hsa_not_full ||
-		 READ_ONCE(priv->doorbell_addr) == DOORBELL_ADDR_INVALID);
+	} while (!hsa_not_full || !aie4_hwctx_connected(hwctx));
 	return 0;
 }
 
@@ -1525,10 +1533,11 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	 * suspend a parked submitter in place across S3/S4 rather than aborting
 	 * the suspend; still interruptible so a signal (app exit/kill/^C) unwinds
 	 * it and does not keep ctx teardown (synchronize_srcu) blocked.  No
-	 * disconnect check is needed here: submit_one_cmd() waits on doorbell_addr in
-	 * wait_till_connected_hsa_not_full(), so a submit onto a torn-down ctx blocks
-	 * until reconnect instead of publishing onto a dead doorbell (a published-
-	 * prefix chain then unwinds with -ECONNRESET; a signal unwinds it meanwhile).
+	 * disconnect check is needed here: submit_one_cmd() waits on the connected
+	 * sentinel in wait_till_connected_hsa_not_full(), so a submit onto a
+	 * torn-down ctx blocks until reconnect instead of publishing onto a dead
+	 * doorbell (a published-prefix chain then unwinds with -ECONNRESET; a signal
+	 * unwinds it meanwhile).
 	 */
 	enqueue_pending_job(hwctx, job);
 	ret = wait_event_freezable(priv->job_list_wq,
