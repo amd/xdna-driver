@@ -46,6 +46,23 @@ if [ -f "$OUT" ]; then
     fi
 fi
 
+# ---- Detect whether the kernel was built with clang ------------------
+# If so, pass LLVM=1 to make so that the same toolchain is used for conftests.
+USE_LLVM=""
+if [ -e "${KERNEL_SRC}/.config" ]; then
+    if grep -q "CONFIG_CC_IS_CLANG=y" "${KERNEL_SRC}/.config" 2>/dev/null; then
+        USE_LLVM="LLVM=1"
+    fi
+elif [ -e /proc/config.gz ]; then
+    if zgrep -q "CONFIG_CC_IS_CLANG=y" /proc/config.gz 2>/dev/null; then
+        USE_LLVM="LLVM=1"
+    fi
+elif [ -e "/boot/config-$KERNEL_VER" ]; then
+    if grep -q "CONFIG_CC_IS_CLANG=y" "/boot/config-$KERNEL_VER" 2>/dev/null; then
+        USE_LLVM="LLVM=1"
+    fi
+fi
+
 echo ">>> Probing kernel features in $KERNEL_SRC..." >&2
 echo ">>> Output file: $(pwd)/${OUT}" >&2
 
@@ -66,20 +83,6 @@ try_compile() {
     tmpdir=$(mktemp -d /tmp/conftest-XXXXXX)
     conftest_c="$tmpdir/conftest.c"
     conftest_mk="$tmpdir/Makefile"
-    USE_LLVM=""
-    if [ -e "${KERNEL_SRC}/.config" ]; then
-        if grep -q "CONFIG_CC_IS_CLANG=y" "${KERNEL_SRC}/.config" 2>/dev/null; then
-            USE_LLVM="LLVM=1"
-        fi
-    elif [ -e /proc/config.gz ]; then
-        if zgrep -q "CONFIG_CC_IS_CLANG=y" /proc/config.gz 2>/dev/null; then
-            USE_LLVM="LLVM=1"
-        fi
-    elif [ -e "/boot/config-$KERNEL_VER" ]; then
-        if grep -q "CONFIG_CC_IS_CLANG=y" "/boot/config-$KERNEL_VER" 2>/dev/null; then
-            USE_LLVM="LLVM=1"
-        fi
-    fi
 
     # Minimal Kbuild for an external module
     cat > "$conftest_mk" <<EOF
@@ -123,7 +126,7 @@ static void __exit conftest_exit(void) {}
 module_init(conftest_init);
 module_exit(conftest_exit);
 EOF
-if ! _canary_err=$(make -s -C "$KERNEL_SRC" M="$_canary_dir" modules 2>&1); then
+if ! _canary_err=$(make -s -C "$KERNEL_SRC" M="$_canary_dir" modules $USE_LLVM 2>&1); then
     echo "ERROR: Kernel module build sanity check failed." >&2
     echo "ERROR: Build output:" >&2
     echo "$_canary_err" | sed 's/^/  /' >&2
@@ -134,7 +137,7 @@ if ! _canary_err=$(make -s -C "$KERNEL_SRC" M="$_canary_dir" modules 2>&1); then
     echo "     sudo ln -s /usr/lib/x86_64-linux-gnu/libopcodes-<ver>-system.so \\" >&2
     echo "                /usr/lib/x86_64-linux-gnu/libopcodes-<required-ver>-system.so" >&2
     echo "  2. Check kernel headers exist: ls $KERNEL_SRC/include/linux/module.h" >&2
-    echo "  3. Reproduce manually: make -C $KERNEL_SRC M=$_canary_dir modules" >&2
+    echo "  3. Reproduce manually: make -C $KERNEL_SRC M=$_canary_dir modules $USE_LLVM" >&2
     rm -rf "$_canary_dir"
     exit 1
 fi
