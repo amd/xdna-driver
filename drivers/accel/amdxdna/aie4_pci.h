@@ -81,6 +81,13 @@ struct amdxdna_hwctx_priv {
 	struct host_queue_packet        *umq_pkts;
 	struct host_indirect_packet_data *umq_indirect_pkts;
 	u64                             umq_indirect_pkts_dev_addr;
+	/*
+	 * Transport-private doorbell kick target.  On PCI this is doorbell_base +
+	 * doorbell_off + firmware offset, set by aie4_doorbell_setup() and
+	 * dereferenced only by aie4_doorbell_ring() in aie4_pci.c.  Never touched
+	 * by aie4_ctx.c (unused on the platform build).  Gated by the cert_comp
+	 * connected sentinel, so it needs no INVALID poison.
+	 */
 	void                    __iomem *doorbell_addr;
 
 	struct mutex                    io_lock; /* serialize submit, protect job lists */
@@ -145,6 +152,7 @@ struct amdxdna_dev_hdl {
 };
 
 struct aie4_msg_context_config_cert_logging;
+struct aie4_msg_create_hw_context_resp;
 
 /* aie4_ctx.c */
 enum aie4_hwctx_flags {
@@ -165,6 +173,20 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags);
 void aie4_hwctx_resume_jobs(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_wait_for_running(struct amdxdna_hwctx *hwctx);
 void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx *hwctx);
+
+/*
+ * Transport hooks: one definition per build (aie4_pci.c for PCI; a future
+ * OF/platform transport provides its own), selected at compile time.  aie4_ctx.c is
+ * transport-neutral and reaches the doorbell kick and the completion interrupt
+ * only through these.  The cert_comp object itself (allocation/xarray/kref/
+ * waitq) is firmware-driven and stays neutral in aie4_ctx.c; only the notification
+ * wiring (PCI MSI-X vs platform IPI callback) is transport-specific.
+ */
+int aie4_doorbell_setup(struct amdxdna_hwctx *hwctx,
+			const struct aie4_msg_create_hw_context_resp *resp);
+void aie4_doorbell_ring(struct amdxdna_hwctx *hwctx);
+int aie4_request_notification(struct cert_comp *comp);
+void aie4_free_notification(struct cert_comp *comp);
 
 /* aie4_sriov.c */
 #if IS_ENABLED(CONFIG_PCI_IOV)
