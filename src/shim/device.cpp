@@ -1206,7 +1206,7 @@ struct telemetry
   static constexpr size_t AIE4_TELEMETRY_BUFFER_SIZE = 128 * 1024;  // 128KB minimum required by firmware
 
   // The firmware header (mpnpu-api aie4/npu_msg_priv.h, mirrored in
-  // src/driver/amdxdna/aie4_msg_priv.h) wraps its whole message ABI in
+  // drivers/accel/amdxdna/aie4_msg_priv.h) wraps its whole message ABI in
   // #pragma pack(push, 4), so every uint64_t below is only 4-byte aligned and
   // the two pads a natural layout would insert - one before l1_interrupt and
   // one before the frame counter array - do not exist. Declaring these structs

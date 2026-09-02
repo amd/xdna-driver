@@ -31,7 +31,7 @@ staged_files=()
 while IFS= read -r f; do
     [ -n "${f}" ] && staged_files+=("${f}")
 done < <(git diff --cached --name-only --diff-filter=ACM -- \
-    'src/include/**/*.h' 'src/driver/**/*.c' 'src/driver/**/*.h' \
+    'src/include/**/*.h' \
     'include/**/*.h' 'drivers/accel/amdxdna/*.c' 'drivers/accel/amdxdna/*.h')
 
 if [ "${#staged_files[@]}" -eq 0 ]; then

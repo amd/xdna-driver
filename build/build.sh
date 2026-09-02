@@ -24,8 +24,6 @@ Options:
   -nokmod                  Don't build or install the kernel module
   -novxdna                 Don't build vxdna library
   -vxdna_test              Build and run vxdna unit tests (-novxdna disable this option)
-  -package_legacy_driver   Build package with legacy driver source code
-  -package_upstream_driver Build package with upstream driver source code (default)
 USAGE_END
 }
 
@@ -241,7 +239,6 @@ verbose=
 skip_kmod=0
 build_vxdna=1
 run_vxdna_tests=0
-package_legacy_driver=0
 njobs=`grep -c ^processor /proc/cpuinfo`
 download_dir=
 xrt_install_prefix="/opt/xilinx/xrt"
@@ -295,12 +292,6 @@ while [ $# -gt 0 ]; do
     -vxdna_test)
       run_vxdna_tests=1
       ;;
-    -package_legacy_driver)
-      package_legacy_driver=1
-      ;;
-    -package_upstream_driver)
-      package_legacy_driver=0
-      ;;
     -dir)
       download_dir=$2
       shift
@@ -352,7 +343,6 @@ fi
 cmake_extra_flags+=" -DCMAKE_INSTALL_PREFIX=$xrt_install_prefix"
 cmake_extra_flags+=" -DSKIP_KMOD=$skip_kmod"
 cmake_extra_flags+=" -DBUILD_VXDNA=$build_vxdna"
-cmake_extra_flags+=" -DPACKAGE_LEGACY_DRIVER=$package_legacy_driver"
 # Enable testing if -vxdna_test flag is provided
 if [[ $run_vxdna_tests == 1 ]]; then
   cmake_extra_flags+=" -DBUILD_VXDNA_TESTING=ON"

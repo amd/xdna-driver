@@ -55,7 +55,6 @@ build_configuration()
     fi
     {
       echo 'TOOLCHAIN_TARGET_TASK:append = " hip-dev"'
-      echo 'IMAGE_INSTALL:append = " amdxdna"'
       echo 'BBFILE_PRIORITY_xilinx = "7"'
       echo 'PREFERRED_VERSION_protobuf = "3.21.12"'
       echo 'PREFERRED_VERSION_protobuf-native = "3.21.12"'
@@ -70,10 +69,8 @@ install_recipes()
     set +e
     mkdir -p ${META_USER_PATH}/recipes-xrt/xrt
     mkdir -p ${META_USER_PATH}/recipes-xrt/zocl
-    mkdir -p ${META_USER_PATH}/recipes-xrt/amdxdna
     XRT_BB=${META_USER_PATH}/recipes-xrt/xrt/xrt_%.bbappend
     ZOCL_BB=${META_USER_PATH}/recipes-xrt/zocl/zocl_%.bbappend
-    AMDXDNA_BB=${META_USER_PATH}/recipes-xrt/amdxdna/amdxdna_git.bb
     grep "inherit externalsrc" $XRT_BB
     if [ $? != 0 ]; then
         echo "inherit externalsrc" > $XRT_BB
@@ -81,7 +78,7 @@ install_recipes()
         echo "EXTRA_OECMAKE += \"-DXDNA_VE2=ON -DXRT_EDGE=1 -DXRT_YOCTO=1 -DXRT_ENABLE_HIP=1 -DCMAKE_INSTALL_PREFIX=/usr\"" >> $XRT_BB
         echo 'EXTERNALSRC_BUILD = "${WORKDIR}/build"' >> $XRT_BB
 	echo 'OECMAKE_GENERATOR = "Unix Makefiles"' >> $XRT_BB
-	echo 'DEPENDS += "virtual/kernel hip systemtap amdxdna"' >> $XRT_BB
+	echo 'DEPENDS += "virtual/kernel hip systemtap"' >> $XRT_BB
 	echo 'INSANE_SKIP:${PN} += "arch"' >> $XRT_BB
         echo 'PACKAGE_CLASSES = "package_rpm"' >> $XRT_BB
         echo 'LICENSE = "GPLv2 & Apache-2.0"' >> $XRT_BB
@@ -101,58 +98,6 @@ install_recipes()
         fi
     fi
     
-    grep "inherit externalsrc" $AMDXDNA_BB
-    if [ $? != 0 ]; then
-        echo 'SUMMARY = "Xilinx Runtime(XRT) driver module"' >> "$AMDXDNA_BB"
-        echo 'DESCRIPTION = "Xilinx Runtime driver module provides aie management and compute unit schedule"' >> "$AMDXDNA_BB"
-        echo '' >> "$AMDXDNA_BB"
-        echo 'LICENSE = "GPL-2.0-or-later & Apache-2.0"' >> "$AMDXDNA_BB"
-        echo 'LIC_FILES_CHKSUM = "file://../../../LICENSE.amdnpu;md5=ea42c0f38f2d42aad08bd50c822460dc"' >> "$AMDXDNA_BB"
-        echo '' >> "$AMDXDNA_BB"
-        echo 'COMPATIBLE_MACHINE = "zynqmp|versal|versal2|versal-2ve-2vm"' >> "$AMDXDNA_BB"
-        echo '' >> "$AMDXDNA_BB"
-        echo 'PREFERRED_PROVIDER_virtual/opencl-icd ??= "opencl-icd-loader"' >> "$AMDXDNA_BB"
-        echo 'PACKAGECONFIG ??= "${PREFERRED_PROVIDER_virtual/opencl-icd}"' >> "$AMDXDNA_BB"
-        echo 'PACKAGECONFIG[ocl-icd] = ",,ocl-icd,ocl-icd"' >> "$AMDXDNA_BB"
-        echo 'PACKAGECONFIG[opencl-icd-loader] = ",,opencl-icd-loader,opencl-icd-loader"' >> "$AMDXDNA_BB"
-        echo '' >> "$AMDXDNA_BB"
-        echo 'DEPENDS = "libdrm opencl-headers virtual/opencl-icd opencl-clhpp boost util-linux git-replacement-native protobuf-native protobuf elfutils libffi rapidjson systemtap libdfx"' >> "$AMDXDNA_BB"
-        echo 'RDEPENDS:${PN} = "libdrm bash boost-system boost-filesystem systemtap kmod"' >> "$AMDXDNA_BB"
-        echo 'PACKAGE_CLASSES = "package_rpm"' >> "$AMDXDNA_BB"
-        echo '' >> "$AMDXDNA_BB"
-        echo '# Driver version of XDNA. Update this manually when the XRT submodule is updated.' >> "$AMDXDNA_BB"
-        echo 'XDNA_DRIVER_VERSION = "2.23.0"' >> "$AMDXDNA_BB"
-        echo 'PV = "${XDNA_DRIVER_VERSION}"' >> "$AMDXDNA_BB"
-        echo 'EXTRA_OEMAKE += "XDNA_DRIVER_VERSION=${XDNA_DRIVER_VERSION}"' >> "$AMDXDNA_BB"
-        echo "TARGET_CXXFLAGS:append = \"\${@bb.utils.contains('PACKAGECONFIG', 'opencl-icd-loader', ' -DOPENCL_ICD_LOADER=on', '', d)}\"" >> "$AMDXDNA_BB"
-        echo 'EXTRA_OEMAKE += "XDNA_BUS_TYPE=of"' >> "$AMDXDNA_BB"
-        echo '' >> "$AMDXDNA_BB"
-        echo 'inherit module externalsrc' >> "$AMDXDNA_BB"
-        echo '' >> "$AMDXDNA_BB"
-        echo "EXTERNALSRC = \"$XDNA_REPO_DIR/src/driver/amdxdna/\"" >> "$AMDXDNA_BB"
-        echo 'EXTERNALSRC_BUILD = "${EXTERNALSRC}"' >> "$AMDXDNA_BB"
-        echo 'MODULES_MODULE_SYMVERS_LOCATION = "driver/amdxdna"' >> "$AMDXDNA_BB"
-        echo '' >> "$AMDXDNA_BB"
-        echo 'do_install() {' >> "$AMDXDNA_BB"
-        echo '    install -d ${D}${nonarch_base_libdir}/modules/${KERNEL_VERSION}/extra/' >> "$AMDXDNA_BB"
-        echo '    install -m 0644 ${S}/build/driver/amdxdna/amdxdna.ko ${D}${nonarch_base_libdir}/modules/${KERNEL_VERSION}/extra/' >> "$AMDXDNA_BB"
-        echo '}' >> "$AMDXDNA_BB"
-        echo '' >> "$AMDXDNA_BB"
-        echo 'MODULE_NAME = "amdxdna"' >> "$AMDXDNA_BB"
-        echo 'KERNEL_MODULE_AUTOLOAD += "amdxdna"' >> "$AMDXDNA_BB"
-        echo '' >> "$AMDXDNA_BB"
-        echo 'pkg_postinst:${PN}() {' >> "$AMDXDNA_BB"
-        echo '    if [ -n "$D" ]; then' >> "$AMDXDNA_BB"
-        echo '        exit 0' >> "$AMDXDNA_BB"
-        echo '    fi' >> "$AMDXDNA_BB"
-        echo '    if command -v depmod >/dev/null 2>&1; then' >> "$AMDXDNA_BB"
-        echo '        depmod -a 2>/dev/null || true' >> "$AMDXDNA_BB"
-        echo '    fi' >> "$AMDXDNA_BB"
-        echo '    rmmod amdxdna 2>/dev/null || true' >> "$AMDXDNA_BB"
-        echo '    modprobe amdxdna 2>/dev/null || true' >> "$AMDXDNA_BB"
-        echo '}' >> "$AMDXDNA_BB"
-
-    fi
     eval "$SAVED_OPTIONS_LOCAL"
 }
 
@@ -211,21 +156,16 @@ fi
 if MACHINE=$MACHINE bitbake xrt; then
     echo "bitbake xrt succeeded."
 
-    # Republish amdxdna RPMs into tmp/deploy/rpm (externalsrc uses SSTATE_SKIP_CREATION;
-    # stamps can otherwise skip do_package_write_rpm while deploy/rpm is empty).
-    MACHINE=$MACHINE bitbake amdxdna -c package_write_rpm -f
-
     rm -rf "$yocto_path/rpms"
     mkdir -p "$yocto_path/rpms"
 
     cp -rf "$yocto_path/build/tmp/deploy/rpm/cortexa72_cortexa53/xrt-"* "$yocto_path/rpms/"
-    cp -rf "$yocto_path/build/tmp/deploy/rpm/$RPM_ARCH_DIR/amdxdna-"* "$yocto_path/rpms/"
     cp -rf "$yocto_path/build/tmp/deploy/rpm/$RPM_ARCH_DIR/zocl-"* "$yocto_path/rpms/"
     cp -rf "$yocto_path/build/tmp/deploy/rpm/$RPM_ARCH_DIR/kernel-"* "$yocto_path/rpms/"
 
     cd $yocto_path/rpms
     echo "Creating $yocto_path/rpms/install_xrt.sh"
-    xrt_dbg=`ls xrt-dbg* zocl-dbg* amdxdna-dbg*`
+    xrt_dbg=`ls xrt-dbg* zocl-dbg*`
 
     rpm_list=$(ls *.rpm)
     for dbg in $xrt_dbg; do

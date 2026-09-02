@@ -164,35 +164,19 @@ Follow the installation guide in the [Test](#test) to install and test. Arch use
 
 This ensures proper integration with pacman for installation, upgrades, and removal.
 
-### Default driver in the plugin package
+### Driver in the plugin package
 
-This repository contains **two** independent driver source trees for the
-AMD XDNA NPU:
+The kernel driver lives in `drivers/accel/amdxdna/`, mirrored from the
+Linux kernel staging tree.
 
-* `drivers/accel/amdxdna/` — the upstream (staging) driver, mirrored
-  from the same path in the Linux kernel tree and being upstreamed.
-* `src/driver/amdxdna/` — the out-of-tree (OOT, also referred to as
-  "legacy") driver. Maintained here for compatibility and bring-up.
+`./build.sh -release` builds the driver and packages it into the plugin DEB:
 
-`./build.sh -release` always builds **both** trees and packages the
-resulting kernel modules into the plugin DEB:
-
-* `amdxdna.ko` — built from the upstream (staging) tree. This is the
-  primary driver: DKMS compiles it on install and `modprobe` loads it
-  automatically.
-* `amdxdna_legacy.ko` — built from the out-of-tree (OOT) tree, installed
-  alongside `amdxdna.ko` for compatibility and bring-up.
-
-See `./build.sh -h` for the flags that swap which module ships as the
-primary `amdxdna.ko`.
+* `amdxdna.ko` — built from the upstream (staging) tree. DKMS compiles it
+  on install and `modprobe` loads it automatically.
 
 You will find `xrt_plugin.<version>_<distro-version>-<arch>-amdxdna.deb` (Ubuntu/Debian) or `xrt_plugin.<version>_-<arch>-amdxdna.tar.gz` (Arch Linux) in the `Release/` folder. This package includes:
 * The `.so` library files, which will be installed into `/opt/xilinx/xrt/lib` folder
-* The XDNA driver source and DKMS script that build, install, and load the
-  primary `amdxdna.ko` on the target machine. A second module,
-  `amdxdna_legacy.ko`, is also shipped for compatibility (see
-  [Default driver in the plugin package](#default-driver-in-the-plugin-package)
-  for how to swap them).
+* The XDNA driver source and DKMS script that build, install, and load `amdxdna.ko` on the target machine.
 * The firmware binary files, which will be installed to `/usr/lib/firmware/amdnpu` folder
 
 
@@ -348,7 +332,7 @@ another is the common cause of post-load command aborts.
 A: Your XRT/plugin is newer than the loaded kernel driver. A distro **in-tree** `amdxdna` can
 predate ioctls that the current XRT SHIM issues, so those calls return `EOPNOTSUPP`/`EINVAL` while
 basic BO/exec paths still work. Use the driver built and shipped from this repo (the staging
-`amdxdna.ko` — see [Default driver in the plugin package](#default-driver-in-the-plugin-package)),
+`amdxdna.ko` — see [Driver in the plugin package](#driver-in-the-plugin-package),
 which implements the matching ioctls, rather than an older in-tree module.
 
 ## Contributor Guidelines
