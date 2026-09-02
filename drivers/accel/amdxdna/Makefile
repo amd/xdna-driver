@@ -58,7 +58,7 @@ $(BUILD_ROOT_DIR): $(SRC_DIR)
 	@mv $(TMP_DIR) $(BUILD_ROOT_DIR)
 
 copy_ko:
-	@find $(BUILD_ROOT_DIR) -mindepth 2 -name *.ko -type f -exec cp -f {} $(BUILD_ROOT_DIR) \;
+	@find $(BUILD_ROOT_DIR) -mindepth 2 -name "*.ko" -type f -exec cp -f {} $(BUILD_ROOT_DIR) \;
 
 clean:
 	rm -rf $(BUILD_ROOT_DIR)
