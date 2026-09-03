@@ -1810,7 +1810,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_io_timeout, {}
   },
   test_case{ "app health query multi-context with and without ctx-id filter", {},
-    TEST_POSITIVE, {npu4}, {amdxdna}, TEST_app_health_query_multi_ctx, {}
+    TEST_POSITIVE, {npu4, npu3, npu3vf}, {amdxdna}, TEST_app_health_query_multi_ctx, {}
   },
   test_case{ "query hw_contexts (get_info)", {},
     TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {amdxdna}, TEST_query_hw_contexts, {}

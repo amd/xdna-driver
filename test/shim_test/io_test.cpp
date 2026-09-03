@@ -600,22 +600,25 @@ verify_hclk_atleast(device* dev, uint32_t expected, const std::string& ctx)
 }
 
 /*
- * Runtime app-health query test (NPU4 only), single process.
+ * Runtime app-health query test (npu4/AIE2 and npu3/AIE4), single process.
  *
  * The test process creates APP_HEALTH_NUM_CTX preemptible "good run" contexts
  * (sharing its own pid, each with a distinct context_id), runs the workload
  * many times on each to accumulate runtime so firmware reports app-health,
- * then queries the firmware-reported health (ctx_pc) for every context via the
- * XRT core context_health_info query (the same path xrt-smi uses) both without
- * a filter (all contexts) and per (ctx_id, pid) pair.
+ * then queries the firmware-reported health for every context via the XRT
+ * core context_health_info query (the same path xrt-smi uses) both without a
+ * filter (all contexts) and per (ctx_id, pid) pair.
  */
 constexpr int APP_HEALTH_NUM_CTX = 2;          /* contexts created in this process */
 constexpr int APP_HEALTH_WARMUP_ITERS = 1000;  /* workload replays per context */
-constexpr int APP_HEALTH_QUERY_RETRIES = 10;   /* bounded query retries if ctx_pc == 0 */
+constexpr int APP_HEALTH_QUERY_RETRIES = 10;   /* bounded query retries if health == 0 */
 
-/* Read the firmware context program counter from a context_health_info entry. */
+/*
+ * Non-zero means firmware populated a live health report for this context.
+ * AIE2 reports that as ctx_pc; AIE4 reports a uC count (ctx_pc is unused).
+ */
 uint32_t
-app_health_ctx_pc(const xrt_core::query::context_health_info::smi_context_health& e)
+app_health_marker(const xrt_core::query::context_health_info::smi_context_health& e)
 {
   ert_ctx_health_data_v1 health{};
 
@@ -626,13 +629,15 @@ app_health_ctx_pc(const xrt_core::query::context_health_info::smi_context_health
    * is not guaranteed to be aligned for ert_ctx_health_data_v1, so a direct
    * reinterpret_cast would be unaligned access / strict-aliasing UB. */
   std::memcpy(&health, e.health_data_raw.data(), sizeof(health));
+  if (health.npu_gen == NPU_GEN_AIE4)
+    return health.aie4.num_uc;
   return health.aie2.ctx_pc;
 }
 
-/* One persistent context plus its preemptible "good run" workload BO set. */
+/* One persistent context plus its "good run" workload BO set. */
 struct app_health_ctx_unit {
   std::unique_ptr<hw_ctx> ctx;
-  std::unique_ptr<elf_preempt_io_test_bo_set> boset;
+  std::unique_ptr<io_test_bo_set_base> boset;
 };
 
 }
@@ -820,24 +825,35 @@ TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
  * process via the XRT core context_health_info query (the same path xrt-smi
  * uses), both unfiltered (all contexts) and per (ctx_id, pid) pair.
  *
- * Design: the test process creates APP_HEALTH_NUM_CTX preemptible "good run"
- * contexts (the same workload TEST_preempt_elf_io uses, via the hw_ctx /
- * elf_preempt_io_test_bo_set helpers). All contexts share the test's own pid
- * and get distinct context_ids. The workload is replayed on each context
- * (io_test_bo_set_base::run_on_ctx()) until firmware reports app-health for
- * every context, bounded by APP_HEALTH_WARMUP_ITERS rounds. It then asserts
+ * Design: the test process creates APP_HEALTH_NUM_CTX "good run" contexts
+ * (npu4: PREEMPT_PARTIAL_ELF, npu3: PREEMPT_FULL_ELF). All contexts share the
+ * test's own pid and get distinct context_ids. The workload is replayed on
+ * each context (io_test_bo_set_base::run_on_ctx()) until firmware reports
+ * app-health for every context, bounded by APP_HEALTH_WARMUP_ITERS rounds.
+ * It then asserts
  * that, for each context, the unfiltered query lists it and the by-(ctx_id,
- * pid) query returns exactly one matching entry, both with a non-zero ctx_pc
- * (read from the entry's ert_ctx_health_data_v1). A small bounded retry replays
- * one more round before re-querying in case the context has gone idle (ctx_pc
- * reads 0). The contexts stay alive (RAII) until after the queries.
+ * pid) query returns exactly one matching entry, both with a non-zero health
+ * marker (AIE2 ctx_pc, or AIE4 num_uc). A small bounded retry replays one more
+ * round before re-querying in case the context has gone idle (marker reads 0).
+ * The contexts stay alive (RAII) until after the queries.
  */
 void
 TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  static const flow_type flow = PREEMPT_PARTIAL_ELF;
   auto dev = sdev.get();
   const int64_t pid = static_cast<int64_t>(::getpid());
+  /* npu4 (AIE2): preemptible partial-ELF; npu3 (AIE4): preemptible full-ELF. */
+  static const flow_type flow_preempt_partial = PREEMPT_PARTIAL_ELF;
+  static const flow_type flow_full = PREEMPT_FULL_ELF;
+  const flow_type flow = [&]() -> flow_type {
+    try {
+      return get_binary_info(dev, "good", &flow_preempt_partial).flow;
+    } catch (const std::runtime_error&) {
+      return get_binary_info(dev, "good", &flow_full).flow;
+    }
+  }();
+
+  io_test_parameter_init(IO_TEST_NO_PERF, IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT);
 
   /* Create the contexts (RAII: torn down when units goes out of scope). */
   std::vector<app_health_ctx_unit> units;
@@ -845,7 +861,7 @@ TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sde
   for (int i = 0; i < APP_HEALTH_NUM_CTX; i++) {
     app_health_ctx_unit u;
     u.ctx = std::make_unique<hw_ctx>(dev, "good", &flow);
-    u.boset = std::make_unique<elf_preempt_io_test_bo_set>(dev, "good", &flow);
+    u.boset = alloc_and_init_bo_set(dev, "good", &flow);
     u.boset->init_cmd(*u.ctx, false);
     u.boset->sync_before_run();
     ctx_ids.push_back(static_cast<uint32_t>(u.ctx->get()->get_slotidx()));
@@ -863,9 +879,9 @@ TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sde
 
   /*
    * Warm up so firmware accumulates runtime and starts reporting app-health.
-   * Adaptive: stop as soon as every context reports a non-zero ctx_pc, bounded
-   * by APP_HEALTH_WARMUP_ITERS rounds so it never spins indefinitely (and stays
-   * fast on quick systems instead of always replaying the full count).
+   * Adaptive: stop as soon as every context reports a populated health marker,
+   * bounded by APP_HEALTH_WARMUP_ITERS rounds so it never spins indefinitely
+   * (and stays fast on quick systems instead of always replaying the full count).
    */
   for (int it = 0; it < APP_HEALTH_WARMUP_ITERS; it++) {
     run_round();
@@ -875,7 +891,7 @@ TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sde
     for (uint32_t ctx_id : ctx_ids) {
       bool ready = false;
       for (const auto& e : all) {
-        if (e.pid == upid && e.ctx_id == ctx_id && app_health_ctx_pc(e) != 0) {
+        if (e.pid == upid && e.ctx_id == ctx_id && app_health_marker(e) != 0) {
           ready = true;
           break;
         }
@@ -891,7 +907,7 @@ TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sde
 
   /*
    * (a) No filter: query all contexts (same path as `xrt-smi`); each of our
-   * contexts must be present (matching pid) and active (ctx_pc != 0).
+   * contexts must be present (matching pid) with a populated health report.
    */
   for (uint32_t ctx_id : ctx_ids) {
     bool found = false;
@@ -901,11 +917,11 @@ TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sde
       for (const auto& e : all) {
         if (e.pid != upid || e.ctx_id != ctx_id)
           continue;
-        uint32_t pc = app_health_ctx_pc(e);
-        if (pc != 0) {
+        uint32_t marker = app_health_marker(e);
+        if (marker != 0) {
           found = true;
           std::cout << "  [ALL]   pid=" << pid << " ctx_id=" << ctx_id
-                    << " ctx_pc=0x" << std::hex << pc << std::dec << " [OK]" << std::endl;
+                    << " health=0x" << std::hex << marker << std::dec << " [OK]" << std::endl;
         }
         break;
       }
@@ -913,12 +929,12 @@ TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sde
     if (!found)
       throw std::runtime_error("context_health_info (all): context pid=" + std::to_string(pid)
         + " ctx_id=" + std::to_string(ctx_id)
-        + " missing or app-health (ctx_pc) never became non-zero");
+        + " missing or app-health never became non-zero");
   }
 
   /*
    * (b) Per (ctx_id, pid): query just that pair; must return exactly that ctx
-   * with matching context_id and ctx_pc != 0.
+   * with matching context_id and a populated health report.
    */
   for (uint32_t ctx_id : ctx_ids) {
     bool ok = false;
@@ -937,16 +953,16 @@ TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sde
         throw std::runtime_error("context_health_info (by id) returned ctx_id="
           + std::to_string(e.ctx_id) + ", expected " + std::to_string(ctx_id)
           + " (pid=" + std::to_string(pid) + ")");
-      uint32_t pc = app_health_ctx_pc(e);
-      if (pc != 0) {
+      uint32_t marker = app_health_marker(e);
+      if (marker != 0) {
         ok = true;
         std::cout << "  [BY_ID] pid=" << pid << " ctx_id=" << ctx_id
-                  << " ctx_pc=0x" << std::hex << pc << std::dec << " [OK]" << std::endl;
+                  << " health=0x" << std::hex << marker << std::dec << " [OK]" << std::endl;
       }
     }
     if (!ok)
       throw std::runtime_error("context_health_info (by id): context pid=" + std::to_string(pid)
-        + " ctx_id=" + std::to_string(ctx_id) + " app-health (ctx_pc) never became non-zero");
+        + " ctx_id=" + std::to_string(ctx_id) + " app-health never became non-zero");
   }
 }
 
