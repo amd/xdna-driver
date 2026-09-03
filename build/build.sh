@@ -112,50 +112,6 @@ sync_npufws()
   fi
 }
 
-sync_vtd_archives()
-{
-  local vtd_dir=${DOWNLOAD_BINS_DIR}/vtd_archives
-  local whence_manifest=${BUILD_DIR}/../tools/WHENCE
-  local sync_script=${BUILD_DIR}/../tools/sync_from_whence.py
-  # Record the resolved VTD commit next to the firmware .whence_commit so the
-  # build caches both hashes together for the packaging step.
-  local commit_file=${DOWNLOAD_BINS_DIR}/firmware/.vtd_commit
-
-  mkdir -p "${vtd_dir}" "$(dirname "${commit_file}")"
-
-  # Release branches and main both use tools/WHENCE for VTD. When "# vtd-commit:"
-  # is absent the sync resolves the latest Xilinx/VTD commit; when present the
-  # fetch is pinned. main carries a VTD-only WHENCE; release snapshots add the
-  # firmware section and both pins.
-  local vtd_whence="${whence_manifest}"
-  local tmp_whence=""
-  if [ ! -f "${whence_manifest}" ]; then
-    tmp_whence=$(mktemp)
-    # Remove the temporary manifest even if the sync below fails under "set -e"
-    # before the explicit cleanup at the end of the function runs.
-    trap 'rm -f "${tmp_whence}"' EXIT
-    cat > "${tmp_whence}" <<'EOF'
-Repo: VTD - xrt-smi validation archives fetched from github.com/Xilinx/VTD
-
-File: archive/strx/xrt_smi_strx.a
-File: archive/phx/xrt_smi_phx.a
-File: archive/npu3/xrt_smi_npu3.a
-EOF
-    vtd_whence="${tmp_whence}"
-    echo "Sync VTD archives from latest Xilinx/VTD (no committed WHENCE)"
-  else
-    echo "Sync VTD archives from ${whence_manifest}"
-  fi
-
-  python3 "${sync_script}" vtd --whence "${vtd_whence}" \
-    --out "${vtd_dir}" --commit-file "${commit_file}"
-
-  if [ -n "${tmp_whence}" ]; then
-    rm -f "${tmp_whence}"
-    trap - EXIT
-  fi
-}
-
 run_vxdna_tests_func()
 {
   BUILD_TYPE=$1
@@ -208,15 +164,12 @@ do_build()
   BUILD_TYPE=$1
   build_targets $BUILD_TYPE
   if [[ $nocmake == 0 ]]; then
-    # Firmware and VTD archives are packaging inputs, not compile inputs, so
-    # they are fetched here on the packaging path only, after the compile. A
-    # plain compile never downloads. No need to sync firmware if the driver
-    # build is skipped.
+    # Firmware is a packaging input, not a compile input, so it is fetched here
+    # on the packaging path only, after the compile. VTD archives come from the
+    # vtd/ submodule and need no explicit download step.
     if [[ $skip_kmod == 0 ]]; then
       sync_npufws
     fi
-    # Sync VTD archives
-    sync_vtd_archives
     # Prepare xbutil validate related files for packaging
     mkdir -p "$XBUTIL_VALIDATE_BINS_DIR"
     cp -r ${BUILD_DIR}/../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR

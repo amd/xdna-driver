@@ -57,20 +57,3 @@ Link: amdnpu/17f2_15/npu.dev.sbin -> ../17f1_13/npu.sbin.2.14.0.114
 Link: amdnpu/17f2_15/cert.dev.sbin -> ../17f1_10/cert.sbin.1.10.0.49
 
 Licence: Redistributable. See LICENSE.amdnpu for details.
-
--------------------------------------------------------------------------------
-
-# VTD (validation test data) archive manifest, fetched from Xilinx/VTD.
-# The archives are packaged into the plugin as the xrt-smi validation binaries.
-# A committed "# vtd-commit:" pin marks a release branch and makes the download
-# reproducible; when the pin is absent (main) the fetch resolves the latest
-# Xilinx/VTD commit and records the resolved hash for the build.
-# vtd-commit: fa945e489497397269cbb912e3e7cce33d1935ff
-
-Repo: VTD - xrt-smi validation archives fetched from github.com/Xilinx/VTD
-
-File: archive/strx/xrt_smi_strx.a
-File: archive/phx/xrt_smi_phx.a
-File: archive/npu3/xrt_smi_npu3.a
-
-Licence: Redistributable.

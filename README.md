@@ -81,6 +81,21 @@ sudo apt reinstall ../linux-headers-6.10.0_6.10.0-1_amd64.deb ../linux-image-6.1
 
 ## Clone
 
+The `vtd` submodule stores binary archives via Git LFS. Install `git-lfs`
+and run `git lfs install` once before cloning (or before running
+`git submodule update`):
+``` bash
+# Ubuntu/Debian
+sudo apt-get install git-lfs
+# Fedora/RHEL
+sudo dnf install git-lfs
+# Arch Linux
+sudo pacman -S git-lfs
+
+# Register LFS hooks globally (once per machine)
+git lfs install
+```
+
 ```
 git clone git@github.com:amd/xdna-driver.git
 cd <root-of-source-tree>

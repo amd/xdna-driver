@@ -65,16 +65,24 @@ math(EXPR next_minor "${CPACK_PACKAGE_VERSION_MINOR} + 1")
 set(XDNA_CPACK_XRT_BASE_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR})
 set(XDNA_CPACK_XRT_BASE_NEXT_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${next_minor})
 
-# VTD archives are fetched by build/build.sh from the "Repo: VTD" section of
-# tools/WHENCE (see tools/sync_from_whence.py vtd).
-set(VTD_ARCHIVES_DIR "${CMAKE_CURRENT_BINARY_DIR}/../amdxdna_bins/vtd_archives")
-message(STATUS "Using VTD archives from ${VTD_ARCHIVES_DIR}")
+# VTD archives come from the vtd/ git submodule (github.com/Xilinx/VTD).
+set(VTD_ARCHIVE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vtd/archive")
+message(STATUS "Using VTD archives from ${VTD_ARCHIVE_ROOT}")
 
-install(DIRECTORY ${VTD_ARCHIVES_DIR}/
+set(VTD_ARCHIVES
+  "${VTD_ARCHIVE_ROOT}/phx/xrt_smi_phx.a"
+  "${VTD_ARCHIVE_ROOT}/strx/xrt_smi_strx.a"
+  "${VTD_ARCHIVE_ROOT}/npu3/xrt_smi_npu3.a"
+  )
+foreach(VTD_ARCHIVE ${VTD_ARCHIVES})
+  if(NOT EXISTS "${VTD_ARCHIVE}")
+    message(FATAL_ERROR "VTD archive not found: ${VTD_ARCHIVE}\n"
+      "Run: git submodule update --init vtd")
+  endif()
+endforeach()
+install(FILES ${VTD_ARCHIVES}
   DESTINATION ${XDNA_PKG_DATA_DIR}/bins
   COMPONENT ${XDNA_COMPONENT}
-  FILES_MATCHING
-  PATTERN "*.a"
   )
 
 if(NOT SKIP_KMOD)
