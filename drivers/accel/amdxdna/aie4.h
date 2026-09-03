@@ -185,6 +185,10 @@ int aie4_query_npu_firmware_version(struct amdxdna_dev_hdl *ndev,
 				    struct amdxdna_drm_query_firmware_version *fw_version);
 int aie4_query_dpm_level(struct amdxdna_dev_hdl *ndev,
 			 u32 *aieclk_dpm_level, u32 *npuhclk_dpm_level);
+int aie4_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
+			  struct aie4_msg_app_health_report *report);
+int aie4_fill_hwctx_health(struct aie_device *aie, struct amdxdna_hwctx *hwctx,
+			   struct amdxdna_drm_hwctx_entry *entry);
 int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev);
 int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 				     struct amdxdna_drm_query_firmware_version *cert_version);
@@ -218,6 +222,7 @@ enum aie4_fw_feature {
 	AIE4_FW_TRACE,
 	AIE4_CALIBRATE_CLOCK,
 	AIE4_HSA_COMMAND,
+	AIE4_APP_HEALTH,
 	AIE4_FEATURE_MAX
 };
 

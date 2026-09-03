@@ -660,6 +660,39 @@ struct amdxdna_drm_hwctx_entry {
 	__u32 pad;
 	/** @name: Name of the process which created this context. */
 	char name[AMDXDNA_HWCTX_PROC_NAME_LEN];
+	/**
+	 * @npu_gen: NPU generation for the health fields below.
+	 * %AMDXDNA_HWCTX_NPU_GEN_AIE2
+	 * %AMDXDNA_HWCTX_NPU_GEN_AIE4
+	 */
+#define AMDXDNA_HWCTX_NPU_GEN_AIE2	0
+#define AMDXDNA_HWCTX_NPU_GEN_AIE4	1
+	__u32 npu_gen;
+	/**
+	 * @fw_ctx_status: Firmware hardware-context status from the app health
+	 * report. Valid when @npu_gen is %AMDXDNA_HWCTX_NPU_GEN_AIE4.
+	 */
+	__u32 fw_ctx_status;
+	/**
+	 * @num_uc: Number of valid entries in @uc_info. Valid when @npu_gen is
+	 * %AMDXDNA_HWCTX_NPU_GEN_AIE4.
+	 */
+	__u32 num_uc;
+	/**
+	 * @ctx_error_type: Firmware async context error type. Live health
+	 * queries leave this 0; a cached fault may populate it. Valid when
+	 * @npu_gen is %AMDXDNA_HWCTX_NPU_GEN_AIE4.
+	 */
+	__u32 ctx_error_type;
+	/**
+	 * @uc_info: Opaque per-uC health payload. Valid when @npu_gen is
+	 * %AMDXDNA_HWCTX_NPU_GEN_AIE4. Each of the @num_uc entries is
+	 * %AMDXDNA_HWCTX_UC_HEALTH_BYTES and matches the firmware app-health
+	 * per-uC record (same layout as the command-timeout health payload).
+	 */
+#define AMDXDNA_HWCTX_MAX_UC		6
+#define AMDXDNA_HWCTX_UC_HEALTH_BYTES	44
+	__u8 uc_info[AMDXDNA_HWCTX_MAX_UC][AMDXDNA_HWCTX_UC_HEALTH_BYTES];
 };
 
 /**
