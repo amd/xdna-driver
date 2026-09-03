@@ -9,7 +9,7 @@
 #include <drm/gpu_scheduler.h>
 
 #include "aie2_pci.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_pm.h"
 
 #define AIE2_CLK_GATING_ENABLE	1

@@ -12,7 +12,7 @@
 #include "aie.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_mailbox_helper.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_tile_read_write.h"
 
 struct amdxdna_tile_rw_walk_arg {

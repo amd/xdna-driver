@@ -11,7 +11,7 @@
 #include "aie4_msg_priv.h"
 #include "amdxdna_dpt.h"
 #include "amdxdna_mailbox_helper.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level)
 {
