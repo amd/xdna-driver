@@ -622,6 +622,103 @@ static int aie4_query_status(struct aie_device *aie,
 	return 0;
 }
 
+int aie4_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
+			  struct aie4_msg_app_health_report *report)
+{
+	DECLARE_AIE_MSG(aie4_msg_app_health, AIE4_MSG_OP_GET_APP_HEALTH_STATUS);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct amdxdna_msg_buf_hdl *buf_hdl;
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_APP_HEALTH)) {
+		XDNA_DBG(xdna, "App health feature not supported");
+		return -EOPNOTSUPP;
+	}
+
+	buf_hdl = amdxdna_alloc_msg_buff(xdna, sizeof(*report));
+	if (IS_ERR(buf_hdl)) {
+		XDNA_ERR(xdna, "Failed to allocate buffer for app health");
+		return PTR_ERR(buf_hdl);
+	}
+
+	req.context_id = context_id;
+	req.pasid = 0;
+	req.report_buff_addr = to_dma_addr(buf_hdl, 0);
+	req.report_buff_size = to_buf_size(buf_hdl);
+
+	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
+	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret || resp.app_health_status != AIE4_APP_HEALTH_CHECK_SUCCESS) {
+		if (!ret)
+			ret = -EIO;
+		switch (resp.app_health_status) {
+		case AIE4_APP_HEALTH_CHECK_INVALID_PARAM:
+			XDNA_ERR(xdna,
+				 "Get app health failed: invalid param or context id %u",
+				 context_id);
+			break;
+		case AIE4_APP_HEALTH_CHECK_DRAM_BUFFER_INVALID:
+			XDNA_ERR(xdna,
+				 "Get app health failed: DRAM buffer invalid, min size 0x%x",
+				 resp.min_buffer_size);
+			break;
+		case AIE4_APP_HEALTH_CHECK_NOAVAIL:
+			XDNA_ERR(xdna,
+				 "Get app health failed: TLB failed or PASID not available");
+			break;
+		default:
+			XDNA_ERR(xdna, "Get app health failed, ret %d status 0x%x",
+				 ret, resp.status);
+			break;
+		}
+		goto free_buf;
+	}
+
+	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	memcpy(report, to_cpu_addr(buf_hdl, 0), sizeof(*report));
+
+	if (report->context_id != context_id) {
+		XDNA_ERR(xdna, "App health context id mismatch, expected %u got %u",
+			 context_id, report->context_id);
+		ret = -EINVAL;
+	}
+
+free_buf:
+	amdxdna_free_msg_buff(buf_hdl);
+	return ret;
+}
+
+int aie4_fill_hwctx_health(struct aie_device *aie, struct amdxdna_hwctx *hwctx,
+			   struct amdxdna_drm_hwctx_entry *entry)
+{
+	struct amdxdna_dev_hdl *ndev = container_of(aie, struct amdxdna_dev_hdl, aie);
+	struct aie4_msg_app_health_report report;
+	u32 num_uc;
+	int ret;
+
+	ret = aie4_query_app_health(ndev, hwctx->fw_ctx_id, &report);
+	if (ret)
+		return ret;
+
+	num_uc = min_t(u32, FIELD_GET(AIE4_APP_HEALTH_NUM_UC, report.ctx_num_uc),
+		       AMDXDNA_HWCTX_MAX_UC);
+
+	entry->npu_gen = AMDXDNA_HWCTX_NPU_GEN_AIE4;
+	entry->fw_ctx_status = FIELD_GET(AIE4_APP_HEALTH_CTX_STATUS, report.ctx_num_uc);
+	entry->num_uc = num_uc;
+	entry->ctx_error_type = 0;
+	if (num_uc)
+		memcpy(entry->uc_info, report.uc_info,
+		       num_uc * sizeof(report.uc_info[0]));
+
+	return 0;
+}
+
+static_assert(sizeof(struct uc_health_info) ==
+	      sizeof(struct amdxdna_drm_uc_health_info));
+static_assert(AIE4_MPNPUFW_MAX_UC_COUNT == AMDXDNA_HWCTX_MAX_UC);
+
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 {
 	if (AIE_FEATURE_ON(&ndev->aie, AIE4_GET_COREDUMP))
@@ -634,6 +731,7 @@ void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 
 	ndev->aie.msg_ops.query_status = aie4_query_status;
 	ndev->aie.msg_ops.query_telemetry = aie4_query_telemetry;
+	ndev->aie.msg_ops.fill_hwctx_health = aie4_fill_hwctx_health;
 	/*
 	 * A non-zero limit makes amdxdna_get_telemetry() emit a
 	 * firmware-context-id to driver-context-id map at the head of the

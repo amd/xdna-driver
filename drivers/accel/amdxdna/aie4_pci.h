@@ -224,6 +224,10 @@ int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 int aie4_calibrate_clock(struct amdxdna_dev_hdl *ndev);
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev);
 u32 aie4_msg_pasid(struct amdxdna_client *client);
+int aie4_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
+			  struct aie4_msg_app_health_report *report);
+int aie4_fill_hwctx_health(struct aie_device *aie, struct amdxdna_hwctx *hwctx,
+			   struct amdxdna_drm_hwctx_entry *entry);
 int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
 				 void *handle, int (*cb)(void *, void __iomem *, size_t));
 
@@ -243,6 +247,7 @@ enum aie4_fw_feature {
 	AIE4_FW_TRACE,
 	AIE4_CALIBRATE_CLOCK,
 	AIE4_HSA_COMMAND,
+	AIE4_APP_HEALTH,
 	AIE4_FEATURE_MAX
 };
 
