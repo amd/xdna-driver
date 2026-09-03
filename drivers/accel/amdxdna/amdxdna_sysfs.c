@@ -11,7 +11,7 @@
 #include <linux/types.h>
 
 #include "amdxdna_gem.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 static ssize_t vbnv_show(struct device *dev, struct device_attribute *attr, char *buf)
 {

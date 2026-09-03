@@ -14,7 +14,7 @@
 #include "aie.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_ctx_status.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 struct amdxdna_hwctx_status_ctx {
 	struct amdxdna_hwctx_key	key;

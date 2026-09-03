@@ -5,7 +5,7 @@
 #ifndef _AMDXDNA_SENSORS_H_
 #define _AMDXDNA_SENSORS_H_
 
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "drm/amdxdna_accel.h"
 #include <linux/errno.h>
 #include <linux/kconfig.h>

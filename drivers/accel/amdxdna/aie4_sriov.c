@@ -13,7 +13,7 @@
 #include "aie4_pci.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 static int aie4_destroy_vfs(struct amdxdna_dev_hdl *ndev)
 {

@@ -9,7 +9,7 @@
 #include <drm/drm_gem_shmem_helper.h>
 #include <linux/hmm.h>
 #include <linux/iova.h>
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 struct amdxdna_umap {
 	struct mmu_interval_notifier	notifier;
