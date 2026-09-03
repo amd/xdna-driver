@@ -17,7 +17,7 @@
 
 #include "aie.h"
 #include "amdxdna_error.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 /* Private workqueue name (also the worker/rescuer thread name). */
 #define AMDXDNA_ASYNC_ERR_WQ_NAME	"amdxdna_async_err"

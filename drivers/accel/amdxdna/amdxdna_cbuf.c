@@ -7,7 +7,7 @@
 #include <drm/drm_prime.h>
 
 #include "amdxdna_cbuf.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 /*
  * Carveout memory is a chunk of memory which is physically contiguous and

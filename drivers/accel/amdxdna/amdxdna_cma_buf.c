@@ -9,7 +9,7 @@
 #include <linux/kernel.h>
 
 #include "amdxdna_cma_buf.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 /*
  * CMA backend. On platforms without IOMMU/SVA (e.g. arm64), the device cannot

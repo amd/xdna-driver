@@ -5,7 +5,7 @@
 #ifndef _AIE_H_
 #define _AIE_H_
 
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_mailbox.h"
 
 #define AIE_INTERVAL	20000	/* us */

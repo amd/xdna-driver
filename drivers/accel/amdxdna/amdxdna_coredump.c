@@ -14,7 +14,7 @@
 #include "aie.h"
 #include "amdxdna_coredump.h"
 #include "amdxdna_ctx.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 static const size_t coredump_data_chunk_size = SZ_1M;
 

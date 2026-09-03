@@ -14,7 +14,7 @@
 #include <xen/xen.h>
 
 #include "amdxdna_gem.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_ubuf.h"
 
 static void amdxdna_ubuf_unmap_dma(struct amdxdna_gem_obj *abo)

@@ -21,7 +21,7 @@
 
 #include "aie.h"
 #include "amdxdna_dpt.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 /*
  * Everything that distinguishes one DPT channel from another. The firmware

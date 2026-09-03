@@ -24,7 +24,7 @@
 #ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
 #include "aie2_pci.h"
 #include "amdxdna_coredump.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_ctx.h"
 #include <linux/jiffies.h>
 
