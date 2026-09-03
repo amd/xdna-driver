@@ -465,6 +465,18 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 		goto release_hs_data;
 
 	vp->handshake_initialized = true;
+	/*
+	 * The partition has been re-initialized and CERT restarted for this
+	 * context, so a previously latched MISC/exception condition no longer
+	 * describes the hardware. A poisoned context will not normally reach
+	 * here: ve2_cmd_submit() rejects with -ENOTRECOVERABLE first.
+	 */
+	if (vp->misc_intrpt_flag) {
+		XDNA_DBG(xdna, "Clearing misc_intrpt_flag after partition re-init hwctx=%p",
+			 hwctx);
+		vp->misc_intrpt_flag = false;
+		vp->misc_status_latched = 0;
+	}
 	ret = 0;
 
 release_hs_data:
@@ -681,8 +693,27 @@ static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
 
 	if (mgmtctx->active_ctx) {
 		vp = ve2_hw_priv(mgmtctx->active_ctx);
-		if (vp)
-			vp->misc_intrpt_flag = true;
+		if (vp) {
+			/*
+			 * misc_status is level state: it stays set until
+			 * firmware/partition re-init clears it, so this helper
+			 * re-reads the same non-zero value on every later IRQ.
+			 * Only attribute it to a context once - otherwise a later,
+			 * innocent context that happens to be active gets
+			 * poisoned by a fault it did not cause.
+			 *
+			 * Caller (IRQ / scheduler) already holds ctx_lock.
+			 */
+			if (!vp->misc_intrpt_flag) {
+				vp->misc_status_latched = misc_status;
+				vp->misc_intrpt_flag = true;
+				XDNA_ERR(mgmtctx->xdna,
+					 "misc_status 0x%x on col %u: marking hwctx %u (pid %d) unusable\n",
+					 misc_status, mgmtctx->start_col,
+					 mgmtctx->active_ctx->id,
+					 mgmtctx->active_ctx->client->pid);
+			}
+		}
 	}
 
 	return true;
@@ -751,7 +782,15 @@ static void ve2_scheduler_work(struct work_struct *work)
 	ve2_check_context_req(mgmtctx);
 
 	if (vp->misc_intrpt_flag) {
-		XDNA_ERR(mgmtctx->xdna, "MISC interrupt from firmware");
+		/*
+		 * This branch neither recovers the faulted context nor yields
+		 * the partition. Switching away needs CERT context-switch
+		 * semantics for a faulted partition confirmed first.
+		 */
+		XDNA_ERR(mgmtctx->xdna,
+			 "MISC interrupt from firmware, hwctx %u (pid %d) on col %u is unusable (misc_status 0x%x)\n",
+			 hwctx->id, hwctx->client->pid, mgmtctx->start_col,
+			 vp->misc_status_latched);
 	} else if (ve2_check_queue_not_empty(mgmtctx)) {
 		/*
 		 * The firmware acked the switch but the active context still has
@@ -1177,7 +1216,8 @@ static void ve2_aie_error_cb(void *arg)
 		struct amdxdna_ctx_priv *vp = ve2_hw_priv(mgmtctx->active_ctx);
 
 		if (vp) {
-			vp->misc_intrpt_flag = true;
+			if (!vp->misc_intrpt_flag)
+				vp->misc_intrpt_flag = true;
 			wake_up_interruptible_all(&vp->waitq);
 			XDNA_ERR(xdna, "AIE error detected, waking up waiting threads\n");
 		}
