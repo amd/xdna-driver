@@ -597,6 +597,23 @@ struct amdxdna_drm_get_info {
 #define AMDXDNA_HWCTX_PROC_NAME_LEN	16
 
 /**
+ * struct amdxdna_drm_uc_health_info - Per-microcontroller health from firmware/CERT
+ */
+struct amdxdna_drm_uc_health_info {
+	__u32 uc_idx;
+	__u32 uc_idle_status;
+	__u32 misc_status;
+	__u32 fw_state;
+	__u32 page_idx;
+	__u32 offset;
+	__u32 restore_page;
+	__u32 restore_offset;
+	__u32 uc_ear;
+	__u32 uc_esr;
+	__u32 uc_pc;
+};
+
+/**
  * struct amdxdna_drm_hwctx_entry - The hardware context array entry
  */
 struct amdxdna_drm_hwctx_entry {
@@ -660,6 +677,36 @@ struct amdxdna_drm_hwctx_entry {
 	__u32 pad;
 	/** @name: Name of the process which created this context. */
 	char name[AMDXDNA_HWCTX_PROC_NAME_LEN];
+	/**
+	 * @npu_gen: NPU generation for the health fields below.
+	 * %AMDXDNA_HWCTX_NPU_GEN_AIE2
+	 * %AMDXDNA_HWCTX_NPU_GEN_AIE4
+	 */
+#define AMDXDNA_HWCTX_NPU_GEN_AIE2	0
+#define AMDXDNA_HWCTX_NPU_GEN_AIE4	1
+	__u32 npu_gen;
+	/**
+	 * @fw_ctx_status: Firmware hardware-context status from the app health
+	 * report. Valid when @npu_gen is %AMDXDNA_HWCTX_NPU_GEN_AIE4.
+	 */
+	__u32 fw_ctx_status;
+	/**
+	 * @num_uc: Number of valid entries in @uc_info. Valid when @npu_gen is
+	 * %AMDXDNA_HWCTX_NPU_GEN_AIE4.
+	 */
+	__u32 num_uc;
+	/**
+	 * @ctx_error_type: Firmware async context error type. Live health
+	 * queries leave this 0; a cached fault may populate it. Valid when
+	 * @npu_gen is %AMDXDNA_HWCTX_NPU_GEN_AIE4.
+	 */
+	__u32 ctx_error_type;
+	/**
+	 * @uc_info: Per-microcontroller health from the app health report.
+	 * Valid when @npu_gen is %AMDXDNA_HWCTX_NPU_GEN_AIE4.
+	 */
+#define AMDXDNA_HWCTX_MAX_UC		6
+	struct amdxdna_drm_uc_health_info uc_info[AMDXDNA_HWCTX_MAX_UC];
 };
 
 /**

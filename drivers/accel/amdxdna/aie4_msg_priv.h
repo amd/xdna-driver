@@ -43,6 +43,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_AIE_COLUMN_INFO                  = 0x30008,
 	AIE4_MSG_OP_POWER_OVERRIDE                   = 0x3000B,
 	AIE4_MSG_OP_AIE_RW_ACCESS                    = 0x3000E,
+	AIE4_MSG_OP_GET_APP_HEALTH_STATUS            = 0x3000F,
 	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
 	AIE4_MSG_OP_GET_DPM_FREQ_TABLE               = 0x30012,
 	AIE4_MSG_OP_GET_CURRENT_DPM_LEVEL            = 0x30013,
@@ -472,6 +473,42 @@ enum aie4_msg_async_ctx_error_type {
 
 /* struct uc_health_info (per-uC health entry) is defined in amdxdna_ctx.h. */
 
+/*
+ * AIE4_MSG_OP_GET_APP_HEALTH_STATUS return status (firmware
+ * enum app_health_status), distinct from the mailbox enum aie4_msg_status.
+ */
+enum aie4_app_health_status {
+	AIE4_APP_HEALTH_CHECK_SUCCESS = 0,
+	AIE4_APP_HEALTH_CHECK_INVALID_PARAM,
+	AIE4_APP_HEALTH_CHECK_DRAM_BUFFER_INVALID,
+	AIE4_APP_HEALTH_CHECK_NOAVAIL,
+};
+
+/* Hardware context status in the app health report (firmware enum hw_ctx_status). */
+enum aie4_hw_ctx_status {
+	AIE4_CTX_STATUS_UNASSIGNED = 0,
+	AIE4_CTX_STATUS_ERROR,
+	AIE4_CTX_STATUS_IDLE,
+	AIE4_CTX_STATUS_RUNNABLE,
+	AIE4_CTX_STATUS_RUNNING,
+	AIE4_CTX_STATUS_PREEMPTING,
+};
+
+/* AIE4_MSG_OP_GET_APP_HEALTH_STATUS */
+struct aie4_msg_app_health_req {
+	__u32 context_id;
+	__u32 pasid;
+	__u64 report_buff_addr;
+	__u32 report_buff_size;
+} __packed;
+
+struct aie4_msg_app_health_resp {
+	enum aie4_msg_status status;
+	__u32 app_health_status;
+	__u32 min_buffer_size;
+	__u32 reserved[6];
+} __packed;
+
 /* Field masks for the packed @version and @ctx_num_uc words below. */
 #define AIE4_APP_HEALTH_MAJOR_VER	GENMASK(15, 0)
 #define AIE4_APP_HEALTH_MINOR_VER	GENMASK(31, 16)
@@ -479,7 +516,8 @@ enum aie4_msg_async_ctx_error_type {
 #define AIE4_APP_HEALTH_NUM_UC		GENMASK(31, 16)
 
 /*
- * App health report stored in the async report buffer on a context error.
+ * App health report stored in the DRAM buffer of GET_APP_HEALTH_STATUS and
+ * in the async report buffer on a context error.
  * @version: health report structure version, packed as
  *           AIE4_APP_HEALTH_MAJOR_VER | AIE4_APP_HEALTH_MINOR_VER.
  * @context_id: context ID copied from the request.

@@ -632,6 +632,22 @@ struct amdxdna_drm_get_info {
 	__u64 buffer; /* in/out */
 };
 
+#define AMDXDNA_HWCTX_PROC_NAME_LEN	16
+
+struct amdxdna_drm_uc_health_info {
+	__u32 uc_idx;
+	__u32 uc_idle_status;
+	__u32 misc_status;
+	__u32 fw_state;
+	__u32 page_idx;
+	__u32 offset;
+	__u32 restore_page;
+	__u32 restore_offset;
+	__u32 uc_ear;
+	__u32 uc_esr;
+	__u32 uc_pc;
+};
+
 /**
  * struct amdxdna_drm_hwctx_entry - The element of a context in array
  * @context_id: The ID for this context.
@@ -694,8 +710,15 @@ struct amdxdna_drm_hwctx_entry {
 	__u32 fatal_error_exception_pc;
 	__u32 fatal_error_app_module;
 	__u32 pad;
-#define AMDXDNA_HWCTX_PROC_NAME_LEN	16
 	char name[AMDXDNA_HWCTX_PROC_NAME_LEN];
+#define AMDXDNA_HWCTX_NPU_GEN_AIE2	0
+#define AMDXDNA_HWCTX_NPU_GEN_AIE4	1
+	__u32 npu_gen;
+	__u32 fw_ctx_status;
+	__u32 num_uc;
+	__u32 ctx_error_type;
+#define AMDXDNA_HWCTX_MAX_UC		6
+	struct amdxdna_drm_uc_health_info uc_info[AMDXDNA_HWCTX_MAX_UC];
 };
 
 /**
