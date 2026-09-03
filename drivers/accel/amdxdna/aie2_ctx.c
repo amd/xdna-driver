@@ -21,7 +21,7 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_pm.h"
 
 static bool force_cmdlist = true;

@@ -5,7 +5,7 @@
 #ifndef _AMDXDNA_DEBUGFS_H_
 #define _AMDXDNA_DEBUGFS_H_
 
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 #if defined(CONFIG_DEBUG_FS)
 void amdxdna_debugfs_init(struct amdxdna_dev *xdna);

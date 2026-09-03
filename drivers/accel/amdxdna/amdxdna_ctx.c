@@ -16,7 +16,7 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_pm.h"
 
 static void amdxdna_hwctx_release_expanded_heap(struct amdxdna_hwctx *hwctx)

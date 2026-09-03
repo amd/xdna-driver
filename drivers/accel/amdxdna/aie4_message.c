@@ -17,7 +17,7 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 u32 aie4_msg_pasid(struct amdxdna_client *client)
 {

@@ -11,7 +11,7 @@
 
 #include "aie.h"
 #include "aie4.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_pm.h"
 
 static int aie4_ctx_hysteresis_get(void *data, u64 *val)
