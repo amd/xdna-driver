@@ -562,7 +562,7 @@ index a867f71a41f4..48780f7b218b 100644
 -	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1, AIE_WRITE_RESET_LOCK);
 +	opts |= (args->init_opts & AIE_PART_INIT_OPT_ZEROIZEMEM);
 +	opts |= (args->init_opts & AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV);
-+	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 0, AIE_WRITE_RESET_LOCK);
++	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1, AIE_WRITE_RESET_LOCK);
  	if (ret) {
  		dev_err(&apart->dev, "pm ops: 0x%x failed: %d", opts, ret);
 -		goto out;
@@ -599,7 +599,7 @@ index a867f71a41f4..48780f7b218b 100644
 -		opts |= AIE_PART_INIT_OPT_SET_L2_IRQ;
 -
 -		ret = aie2ps_part_set_l2_irq(apart);
-+				      apart->range, 0, AIE_READ_RESET_LOCK);
++				      apart->range, 1, AIE_READ_RESET_LOCK);
  		if (ret)
 -			goto out;
 -	}
