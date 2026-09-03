@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mtakasi <mtakasi@amd.com>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] xilinx-ai-engine: Stop USER_EVENT1 column scan after first hit
+
+The completion IRQ handler scanned every shim column even after
+USER_EVENT1 was found and cleared. For wide partitions this adds ~100 us
+of unnecessary MMIO reads per command when the event is on start_col.
+
+Add break after clearing the event in both aie2ps_interrupt_user_event1()
+and _aie2ps_interrupt_user_event1().
+
+Signed-off-by: mtakasi <mtakasi@amd.com>
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+index 0295b455d87f..111111111111 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+@@ -980,6 +980,7 @@ static void _aie2ps_interrupt_user_event1(struct aie_partition *apart)
+ 		trace_aie_tile_eevent(apart, &loc, AIE_PL_MOD, event_mod->user_event1);
+ 		complete = true;
+ 		aie_clear_event_status(apart, &loc, AIE_PL_MOD, event_mod->user_event1);
++		break;
+ 	}
+ 	if (complete && apart->user_event1_complete)
+ 		apart->user_event1_complete(apart->partition_id, apart->user_event1_priv);
+@@ -1257,6 +1258,7 @@ irqreturn_t aie2ps_interrupt_user_event1(int irq, void *data)
+ 		trace_aie_tile_eevent(apart, &loc, AIE_PL_MOD, event_mod->user_event1);
+ 		aie_clear_event_status(apart, &loc, AIE_PL_MOD,
+ 				       event_mod->user_event1);
++		break;
+ 	}
+ 	mutex_unlock(&apart->mlock);
+ 	if (complete && apart->user_event1_complete)
+-- 
+2.43.0
