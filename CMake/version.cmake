@@ -110,38 +110,22 @@ if(XDNA_FW_WHENCE_COMMIT STREQUAL "")
   endif()
 endif()
 
-# Resolve the Xilinx/VTD commit that the VTD archives will be fetched from,
-# using the same lightweight, download-free approach as the firmware above so
-# version.json records it at configure time without downloading any archive.
-#
-#   * A committed tools/WHENCE snapshot pins the commit in a "# vtd-commit:"
-#     line (release branches and main's VTD-only manifest), so read it directly.
-#   * Otherwise resolve the Xilinx/VTD HEAD via git ls-remote, which is
-#     metadata only and downloads no archive.
-#
-# Resolution is best-effort and never fails the configure when offline.
+# Read the VTD commit directly from the checked-out vtd/ submodule so
+# version.json always records the exact commit that was packaged.
+# Guard on vtd/.git so an uninitialized submodule does not cause git to
+# walk up to the parent repository and record its SHA instead.
 set(XDNA_VTD_COMMIT "")
-if(EXISTS ${XDNA_WHENCE_SNAPSHOT})
-  file(STRINGS ${XDNA_WHENCE_SNAPSHOT} XDNA_VTD_PIN_LINES
-       REGEX "^# vtd-commit:")
-  if(XDNA_VTD_PIN_LINES)
-    list(GET XDNA_VTD_PIN_LINES 0 XDNA_VTD_PIN)
-    string(REGEX REPLACE "^# vtd-commit:[ \t]*" "" XDNA_VTD_COMMIT
-           "${XDNA_VTD_PIN}")
-    string(STRIP "${XDNA_VTD_COMMIT}" XDNA_VTD_COMMIT)
-  endif()
-endif()
-if(XDNA_VTD_COMMIT STREQUAL "")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vtd/.git")
   execute_process(
-    COMMAND git ls-remote https://github.com/Xilinx/VTD.git HEAD
-    OUTPUT_VARIABLE XDNA_VTD_LS_REMOTE
-    RESULT_VARIABLE XDNA_VTD_LS_RESULT
+    COMMAND git rev-parse HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/vtd
+    OUTPUT_VARIABLE XDNA_VTD_COMMIT
+    RESULT_VARIABLE XDNA_VTD_RESULT
     ERROR_QUIET
     OUTPUT_STRIP_TRAILING_WHITESPACE
-    TIMEOUT 60
   )
-  if(XDNA_VTD_LS_RESULT EQUAL 0 AND NOT XDNA_VTD_LS_REMOTE STREQUAL "")
-    string(REGEX MATCH "^[0-9a-fA-F]+" XDNA_VTD_COMMIT "${XDNA_VTD_LS_REMOTE}")
+  if(NOT XDNA_VTD_RESULT EQUAL 0)
+    set(XDNA_VTD_COMMIT "")
   endif()
 endif()
 

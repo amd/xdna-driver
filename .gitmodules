@@ -1,3 +1,6 @@
 [submodule "xrt"]
 	path = xrt
 	url = https://github.com/Xilinx/XRT.git
+[submodule "vtd"]
+	path = vtd
+	url = https://github.com/Xilinx/VTD.git

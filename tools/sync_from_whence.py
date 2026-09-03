@@ -1,22 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-"""Populate the firmware and VTD archive trees from a WHENCE manifest.
+"""Populate the NPU firmware tree from the drm-firmware WHENCE manifest.
 
-This tool unifies the two WHENCE-driven syncs behind a single entry point with
-two subcommands that share the WHENCE parsing, pinned-vs-latest selection, the
-download helper, and commit-file recording:
-
-  * "firmware" parses the "Driver: amdxdna" section of a drm-firmware WHENCE
-    manifest, downloads each versioned file once, and reconstructs the
-    npu.dev.sbin / cert.dev.sbin symlinks (and device-variant directory links)
-    so the installed file name still reveals the firmware version.
-  * "vtd" parses the "Repo: VTD" section of tools/WHENCE and downloads the
-    xrt-smi validation archives from either a committed pin (release) or the
-    latest Xilinx/VTD commit (main).
-
-Both subcommands replace hand-maintained lists that used to live in
-tools/info.json.
+Parses the "Driver: amdxdna" section of a drm-firmware WHENCE manifest,
+downloads each versioned file once, and reconstructs the npu.dev.sbin /
+cert.dev.sbin symlinks (and device-variant directory links) so the installed
+file name still reveals the firmware version.
 
 Firmware layout in the drm-firmware WHENCE file:
 
@@ -28,28 +18,16 @@ while the versioned real file lets us tell which firmware version is installed.
 Device variants that share the same binary are captured upstream as directory
 or file level symlinks and are reconstructed here as well.
 
-VTD layout in tools/WHENCE:
+Two modes are selected by the presence of a committed pin:
 
-    # vtd-commit: 406bbbc0f72920567d417f3cf5e25284c12d9176
+  * RELEASE: "# whence-commit:" is present in the local WHENCE snapshot, so
+    downloads come from that immutable commit for reproducible release builds.
+  * MAIN: no pin is present, so the amd-ipu-staging branch tip is resolved
+    once via "git ls-remote" and the resolved hash is recorded for the build
+    to cache. WHENCE is never rewritten here.
 
-    Repo: VTD - xrt-smi validation archives fetched from github.com/Xilinx/VTD
-
-    File: archive/strx/xrt_smi_strx.a
-    File: archive/phx/xrt_smi_phx.a
-    File: archive/npu3/xrt_smi_npu3.a
-
-Each "File:" path is both the download path under a Xilinx/VTD commit and the
-source of the device/filename mapping (archive/<device>/<filename>).  The files
-are downloaded flat into the output directory so packaging stays unchanged.
-
-Two modes are selected the same way for both subcommands: presence of a
-committed pin.
-
-  * RELEASE: a pin is present, so downloads come from that immutable commit for
-    reproducible release builds.
-  * MAIN: no pin is present, so the latest commit is resolved once via
-    "git ls-remote" and the resolved hash is recorded for the build to cache.
-    WHENCE is never rewritten here.
+VTD archives (xrt-smi validation binaries) are now provided via the vtd/ git
+submodule (github.com/Xilinx/VTD) and require no download step.
 """
 
 import argparse
@@ -66,9 +44,6 @@ FW_REPO = "kernel-firmware/drm-firmware"
 FW_RAW_URL = "https://gitlab.com/{repo}/-/raw/{ref}/{path}"
 FW_CLONE_URL = "https://gitlab.com/{repo}.git"
 AMDNPU_PREFIX = "amdnpu/"
-
-VTD_REPO = "https://github.com/Xilinx/VTD.git"
-VTD_RAW_URL = "https://github.com/Xilinx/VTD/raw/{ref}/{path}"
 
 # Total attempts per download and the base delay between them. The hosts we
 # fetch from (gitlab.com, github.com) intermittently drop a connection or rate
@@ -497,100 +472,11 @@ def sync_firmware(args):
 
 
 # --------------------------------------------------------------------------- #
-# VTD (Repo: VTD)
-# --------------------------------------------------------------------------- #
-def resolve_latest():
-    """Resolve the tip of the default branch (HEAD) on the Xilinx/VTD remote."""
-    sha = ls_remote(VTD_REPO, "HEAD")
-    if sha:
-        return sha
-    raise SystemExit("error: could not resolve HEAD on %s" % VTD_REPO)
-
-
-def read_vtd_whence(path):
-    """Return (pin_commit, files).
-
-    pin_commit is the committed "# vtd-commit:" value (empty when absent) and
-    files is the ordered list of archive/<device>/<filename> paths in the
-    "Repo: VTD" section.
-    """
-    with open(path, "r") as handle:
-        text = handle.read()
-
-    pin = read_pin(text, "# vtd-commit:")
-    files = []
-    in_section = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("-----"):
-            if in_section:
-                break
-            continue
-        if stripped.startswith("Repo:"):
-            in_section = stripped.startswith("Repo: VTD")
-            continue
-        if stripped.startswith("Driver:"):
-            in_section = False
-            continue
-        if in_section and stripped.startswith("File:"):
-            files.append(stripped[len("File:"):].strip())
-    return pin, files
-
-
-def download_vtd(ref, remote_path, dest):
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    url = VTD_RAW_URL.format(ref=ref, path=remote_path)
-    print("  download %s (%s)" % (remote_path, ref))
-    fetch_to(url, dest)
-
-
-def sync_vtd(args):
-    pin, files = read_vtd_whence(args.whence)
-    if not files:
-        raise SystemExit(
-            "error: no 'Repo: VTD' File: entries found in %s" % args.whence)
-
-    if pin:
-        commit = pin
-        source = "pinned"
-        print("Sync VTD archives from pinned commit %s" % commit)
-    else:
-        commit = resolve_latest()
-        source = "HEAD"
-        print("Sync VTD archives from latest Xilinx/VTD commit %s" % commit)
-
-    out_dir = os.path.abspath(args.out)
-    os.makedirs(out_dir, exist_ok=True)
-
-    # An archive comes from an immutable commit, so a cached copy still matches
-    # the source only while it was fetched from the commit now being synced.
-    # Skipping those re-downloads keeps a warm amdxdna_bins cache (reused across
-    # CI runs) from depending on the network at all, and matches how the
-    # firmware sync treats its own cache. Any other recorded commit, or none,
-    # may leave stale bytes under an unchanged file name, so re-download.
-    cached = read_cached_commit(args.commit_file) == commit
-    for remote_path in files:
-        # The download always uses the resolved commit; the archive is stored
-        # flat under its file name so packaging (pkg.cmake) stays unchanged.
-        dest = os.path.join(out_dir, posixpath.basename(remote_path))
-        if cached and os.path.exists(dest):
-            continue
-        # fetch_to() streams into a ".part" file and atomically os.replace()s it
-        # over any existing archive, so no non-atomic pre-delete is needed and a
-        # mid-run download failure leaves the previous archive intact.
-        download_vtd(commit, remote_path, dest)
-
-    if args.commit_file:
-        write_commit_file(args.commit_file, source, commit, makedirs=True)
-    print("VTD archives ready in %s (commit %s)" % (out_dir, commit))
-
-
-# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 def main():
     parser = argparse.ArgumentParser(
-        description="Sync firmware or VTD archives from a WHENCE manifest.")
+        description="Sync NPU firmware from the drm-firmware WHENCE manifest.")
     sub = parser.add_subparsers(dest="command")
     sub.required = True
 
@@ -607,17 +493,6 @@ def main():
     fw.add_argument("--commit-file",
                     help="write '<ref>\\n<commit>' for the build to cache")
     fw.set_defaults(func=sync_firmware)
-
-    vtd = sub.add_parser(
-        "vtd",
-        help="sync the VTD archive tree from the 'Repo: VTD' WHENCE section")
-    vtd.add_argument("--out", required=True,
-                     help="VTD archive output directory (packaged as bins/)")
-    vtd.add_argument("--whence", required=True,
-                     help="WHENCE manifest holding the 'Repo: VTD' section")
-    vtd.add_argument("--commit-file",
-                     help="write '<source>\\n<commit>' for the build to cache")
-    vtd.set_defaults(func=sync_vtd)
 
     args = parser.parse_args()
     args.func(args)
