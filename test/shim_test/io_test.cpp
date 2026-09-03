@@ -1799,3 +1799,47 @@ TEST_dpm_refcount_scaling(device::id_type id, std::shared_ptr<device>& sdev, arg
     verify_hclk(dev, expected, "after destroying context " + std::to_string(i));
   }
 }
+
+static void
+check_npu_load(uint32_t load, const char* label)
+{
+  if (load == AMDXDNA_AIE_LOAD_UNAVAILABLE) {
+    std::cout << label << ": unavailable" << std::endl;
+    return;
+  }
+
+  std::cout << label << ": " << load << "%" << std::endl;
+  if (load > 100)
+    throw std::runtime_error(std::string(label) + ": npu_load out of range: "
+                             + std::to_string(load));
+}
+
+/*
+ * Exercise query::npu_load through the shim (device.cpp npu_load_info).
+ * Queries once at idle, then submits resnet50 ("good" / PREEMPT_FULL_ELF)
+ * without waiting and queries again while the command is in flight.
+ */
+void
+TEST_query_npu_load(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+
+  check_npu_load(device_query<query::npu_load>(dev), "npu_load idle");
+
+  static const flow_type flow = PREEMPT_FULL_ELF;
+  hw_ctx ctx{dev, "good", &flow};
+  elf_preempt_io_test_bo_set boset{dev, "good", &flow};
+  boset.init_cmd(ctx, false);
+  boset.sync_before_run();
+  boset.reset_cmd_header();
+
+  auto hwq = ctx.get()->get_hw_queue();
+  auto* cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo.get();
+  hwq->submit_command(cbo->get());
+
+  check_npu_load(device_query<query::npu_load>(dev), "npu_load in-flight");
+
+  hwq->wait_command(cbo->get(), WAIT_CMD_NO_TIMEOUT);
+  boset.sync_after_run();
+  boset.verify_result();
+}

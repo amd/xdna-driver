@@ -519,6 +519,28 @@ struct amdxdna_drm_query_firmware_version {
 	__u32 build; /* out */
 };
 
+/* Returned in @load_percent when utilization cannot be determined. */
+#define AMDXDNA_AIE_LOAD_UNAVAILABLE		0xFFFFFFFFU
+
+/**
+ * struct amdxdna_drm_query_aie_load - AIE hardware utilization snapshot
+ * @sample_duration_ms: Milliseconds to wait between counter snapshots; 0 selects
+ *                      the driver default (2 ms).
+ * @load_percent: AIE utilization 0-100, or %AMDXDNA_AIE_LOAD_UNAVAILABLE.
+ * @timestamp_ms: Firmware uptime (ms) of the second snapshot.
+ * @operations_per_second: Total counter delta across all counters per second.
+ * @num_activity_counters: Number of valid entries in @activity_counters; set by driver.
+ * @activity_counters: Raw counter values from the second snapshot.
+ */
+struct amdxdna_drm_query_aie_load {
+	__u32 sample_duration_ms; /* in */
+	__u32 load_percent; /* out */
+	__u64 timestamp_ms; /* out */
+	__u64 operations_per_second; /* out */
+	__u32 num_activity_counters; /* out */
+	__u64 activity_counters[]; /* out */
+};
+
 enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_QUERY_AIE_STATUS,
 	DRM_AMDXDNA_QUERY_AIE_METADATA,
@@ -534,6 +556,7 @@ enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
 	DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION = 14,
 	DRM_AMDXDNA_GET_AUTO_COREDUMP,
+	DRM_AMDXDNA_QUERY_AIE_LOAD,
 };
 
 /**
