@@ -627,7 +627,34 @@ struct context_health_info {
   static xrt_core::query::context_health_info::smi_context_health
   fill_health_entry(const amdxdna_drm_hwctx_entry& entry)
   {
+    xrt_core::query::context_health_info::smi_context_health val{};
+    val.ctx_id = entry.context_id;
+    val.pid = entry.pid;
+
+    if (entry.npu_gen == AMDXDNA_HWCTX_NPU_GEN_AIE4) {
+      const uint32_t num_uc = std::min<uint32_t>(entry.num_uc, AMDXDNA_HWCTX_MAX_UC);
+      const size_t hdr_size = offsetof(ert_ctx_health_data_v1, aie4.uc_info);
+      const size_t blob_size =
+        hdr_size + static_cast<size_t>(num_uc) * sizeof(ert_uc_health_info);
+      ert_ctx_health_data_v1 health{};
+      std::vector<char> blob(blob_size, 0);
+
+      health.version = ERT_CTX_HEALTH_DATA_V1;
+      health.npu_gen = NPU_GEN_AIE4;
+      health.aie4.ctx_state = entry.fw_ctx_status;
+      health.aie4.num_uc = num_uc;
+      health.aie4.ctx_error_type = entry.ctx_error_type;
+      std::memcpy(blob.data(), &health, hdr_size);
+      if (num_uc)
+        std::memcpy(blob.data() + hdr_size, entry.uc_info,
+                    static_cast<size_t>(num_uc) * sizeof(ert_uc_health_info));
+      val.health_data_raw = std::move(blob);
+      return val;
+    }
+
     ert_ctx_health_data_v1 new_entry{};
+    new_entry.version = ERT_CTX_HEALTH_DATA_V1;
+    new_entry.npu_gen = NPU_GEN_AIE2;
     new_entry.aie2.txn_op_idx = entry.txn_op_idx;
     new_entry.aie2.ctx_pc = entry.ctx_pc;
     new_entry.aie2.fatal_error_type = entry.fatal_error_type;
@@ -635,11 +662,8 @@ struct context_health_info {
     new_entry.aie2.fatal_error_exception_pc = entry.fatal_error_exception_pc;
     new_entry.aie2.fatal_error_app_module = entry.fatal_error_app_module;
 
-    xrt_core::query::context_health_info::smi_context_health val{};
-    val.ctx_id = entry.context_id;
-    val.pid = entry.pid;
     val.health_data_raw.resize(sizeof(ert_ctx_health_data_v1));
-    memcpy(val.health_data_raw.data(), &new_entry, sizeof(new_entry));
+    std::memcpy(val.health_data_raw.data(), &new_entry, sizeof(new_entry));
     return val;
   }
   using result_type = std::any;
