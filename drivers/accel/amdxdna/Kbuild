@@ -23,7 +23,7 @@ ccflags-${UMQ_HELLO_TEST} += -DUMQ_HELLO_TEST
 obj-m	+= amdxdna.o
 # Bus-agnostic core objects (always built for both PCI and AUX attachment).
 amdxdna-y := \
-	amdxdna_drv.o \
+	amdxdna_drm.o \
 	amdxdna_ctx.o \
 	amdxdna_gem.o \
 	amdxdna_iommu.o \

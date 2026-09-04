@@ -5,7 +5,7 @@
  * Auxiliary-bus attachment for AMD XDNA devices (VE2/Versal SoC). A matching
  * auxiliary client name selects struct amdxdna_dev_info via the matched
  * entry's .driver_data; see amdxdna_aux_id_table below. The bus-agnostic DRM
- * core lives in amdxdna_drv.c.
+ * core lives in amdxdna_drm.c.
  */
 
 #include "drm/amdxdna_accel.h"
