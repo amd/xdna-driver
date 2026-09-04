@@ -5,7 +5,7 @@
 #ifndef _AMDXDNA_CBUF_H_
 #define _AMDXDNA_CBUF_H_
 
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include <drm/drm_device.h>
 #include <linux/dma-buf.h>
 

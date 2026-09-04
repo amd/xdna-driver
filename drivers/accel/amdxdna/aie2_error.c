@@ -12,7 +12,7 @@
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 #include "amdxdna_error.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 /*
  * The async event scaffolding, worker, mailbox callback, GET_ARRAY query and

@@ -16,14 +16,14 @@
 #include <linux/types.h>
 
 #include "aie.h"
+#include "aie4.h"
 #include "aie4_host_queue.h"
-#include "aie4_pci.h"
 #include "aie4_msg_priv.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_pm.h"
 #include "trace/events/amdxdna.h"
 
