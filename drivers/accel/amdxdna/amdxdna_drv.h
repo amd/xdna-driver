@@ -296,7 +296,7 @@ void amdxdna_iommu_free(struct amdxdna_dev *xdna, size_t size,
 int amdxdna_dma_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo);
 void amdxdna_dma_unmap_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo);
 
-/* Bus-agnostic client helpers shared by PCI/aux attachment. */
+/* Bus-agnostic client helpers defined in the shared amdxdna_drm.c. */
 void amdxdna_sva_fini(struct amdxdna_client *client);
 void amdxdna_client_cleanup(struct amdxdna_client *client);
 
