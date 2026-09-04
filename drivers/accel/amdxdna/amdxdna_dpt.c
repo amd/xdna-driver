@@ -8,9 +8,7 @@
 #include <drm/drm_drv.h>
 #include <drm/drm_print.h>
 #include <linux/errno.h>
-#include <linux/interrupt.h>
 #include <linux/jiffies.h>
-#include <linux/pci.h>
 #include <linux/rcupdate.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
@@ -105,6 +103,14 @@ static const struct amdxdna_dpt_desc amdxdna_dpt_fw_trace_desc = {
 const char *amdxdna_dpt_name(const struct amdxdna_dpt *dpt)
 {
 	return dpt->chan->desc->name;
+}
+
+/* Name for the transport's completion notification (e.g. request_irq). The
+ * desc is private to this file, so expose the string to the transport backends.
+ */
+const char *amdxdna_dpt_irq_name(const struct amdxdna_dpt *dpt)
+{
+	return dpt->chan->desc->irq_name;
 }
 
 /*
@@ -325,52 +331,6 @@ static void amdxdna_dpt_read_metadata(struct amdxdna_dpt *dpt)
 
 	XDNA_DPT_DBG(dpt, "Version: %d.%d payload: 0x%x",
 		     dpt->major, dpt->minor, dpt->payload_version);
-}
-
-static irqreturn_t amdxdna_dpt_irq_handler(int irq, void *data)
-{
-	struct amdxdna_dpt *dpt = data;
-
-	if (dpt->io_base)
-		writel(0, dpt->io_base + dpt->msi_address);
-
-	queue_work(system_percpu_wq, &dpt->work);
-	return IRQ_HANDLED;
-}
-
-static int amdxdna_dpt_irq_init(struct amdxdna_dpt *dpt)
-{
-	struct amdxdna_dev *xdna = dpt->xdna;
-	int ret;
-
-	if (!dpt->msi_idx || !dpt->msi_address)
-		return -EINVAL;
-
-	ret = pci_irq_vector(to_pci_dev(xdna->ddev.dev), dpt->msi_idx);
-	if (ret < 0) {
-		dpt->irq = 0;
-		return ret;
-	}
-	dpt->irq = ret;
-
-	ret = request_irq(dpt->irq, amdxdna_dpt_irq_handler, 0,
-			  dpt->chan->desc->irq_name, dpt);
-	if (ret) {
-		dpt->irq = 0;
-		return ret;
-	}
-
-	return 0;
-}
-
-static void amdxdna_dpt_irq_fini(struct amdxdna_dpt *dpt)
-{
-	if (dpt->irq) {
-		free_irq(dpt->irq, dpt);
-		dpt->irq = 0;
-	}
-	dpt->msi_address = 0;
-	dpt->msi_idx = 0;
 }
 
 /*
@@ -649,7 +609,7 @@ amdxdna_dpt_publish(struct aie_device *aie, struct amdxdna_dpt_chan *chan,
 	 * IRQ is best-effort. On failure, on-demand polling driven by
 	 * amdxdna_dpt_timer_get in the watcher and dmesg paths still works.
 	 */
-	if (amdxdna_dpt_irq_init(dpt))
+	if (amdxdna_dpt_notification_init(dpt))
 		XDNA_DPT_WARN(dpt, "IRQ unavailable; tail updates on demand only");
 
 	amdxdna_dpt_read_metadata(dpt);
@@ -839,7 +799,7 @@ static int amdxdna_dpt_fini_chan(struct aie_device *aie,
 	 * cancel_work_sync no path is left that could call
 	 * amdxdna_dpt_update_tail on the detached firmware.
 	 */
-	amdxdna_dpt_irq_fini(dpt);
+	amdxdna_dpt_notification_fini(dpt);
 	timer_shutdown_sync(&dpt->timer);
 	cancel_work_sync(&dpt->work);
 
@@ -915,7 +875,7 @@ static int amdxdna_dpt_suspend_chan(struct amdxdna_dev *xdna,
 	 */
 	WRITE_ONCE(dpt->status, AMDXDNA_DPT_SUSPENDING);
 
-	amdxdna_dpt_irq_fini(dpt);
+	amdxdna_dpt_notification_fini(dpt);
 
 	/* timer_delete_sync (not _shutdown_sync) so resume can re-arm. */
 	timer_delete_sync(&dpt->timer);
@@ -1008,7 +968,7 @@ static int amdxdna_dpt_resume_chan(struct amdxdna_dev *xdna,
 		return ret;
 	}
 
-	if (amdxdna_dpt_irq_init(dpt))
+	if (amdxdna_dpt_notification_init(dpt))
 		XDNA_DPT_WARN(dpt, "IRQ unavailable post-resume; polling on demand");
 
 	WRITE_ONCE(dpt->status, AMDXDNA_DPT_ACTIVE);
