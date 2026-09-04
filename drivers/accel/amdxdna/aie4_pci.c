@@ -2438,6 +2438,11 @@ const struct amdxdna_dev_ops aie4_vf_ops = {
 	.handle_dev_async_event	= aie4_handle_dev_event,
 };
 
+bool aie4_is_vf(struct amdxdna_dev_hdl *ndev)
+{
+	return ndev->aie.xdna->dev_info->ops == &aie4_vf_ops;
+}
+
 const struct amdxdna_dev_ops aie4_classic_ops = {
 	.init			= aie4_classic_init,
 	.fini			= aie4_classic_fini,
