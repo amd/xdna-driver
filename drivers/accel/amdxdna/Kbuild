@@ -24,6 +24,7 @@ obj-m	+= amdxdna.o
 # Only objects that have corresponding .c sources in this directory
 amdxdna-y := \
 	amdxdna_ctx.o \
+	amdxdna_drm.o \
 	amdxdna_gem.o \
 	amdxdna_iommu.o \
 	amdxdna_mailbox.o \
@@ -53,6 +54,7 @@ amdxdna-y += \
 	aie4_message.o \
 	aie4_pci.o \
 	amdxdna_dpt.o \
+	amdxdna_dpt_pci.o \
 	amdxdna_error.o \
 	amdxdna_coredump.o \
 	amdxdna_ctx_status.o \
