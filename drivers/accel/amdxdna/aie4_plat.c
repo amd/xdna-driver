@@ -59,6 +59,12 @@ void aie4_free_notification(struct cert_comp *comp)
 {
 }
 
+/* SR-IOV is PCI-only; a platform aie4 device is never a virtual function. */
+bool aie4_is_vf(struct amdxdna_dev_hdl *ndev)
+{
+	return false;
+}
+
 /* TODO: platform DPM / performance counters (no PCI SMU hw_ops here). */
 int aie4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 {
