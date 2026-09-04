@@ -173,6 +173,16 @@ int amdxdna_dpt_resume(struct amdxdna_dev *xdna);
 int amdxdna_dpt_reset_prepare(struct amdxdna_dev *xdna);
 int amdxdna_dpt_reset_done(struct amdxdna_dev *xdna);
 
+/*
+ * Transport completion notification. The common DPT code calls
+ * amdxdna_dpt_notification_init/fini; the PCI backend (amdxdna_dpt_pci.c) wires
+ * an MSI-X interrupt, using amdxdna_dpt_irq_name() to fetch the request_irq name
+ * from the channel desc that is private to amdxdna_dpt.c.
+ */
+const char *amdxdna_dpt_irq_name(const struct amdxdna_dpt *dpt);
+int amdxdna_dpt_notification_init(struct amdxdna_dpt *dpt);
+void amdxdna_dpt_notification_fini(struct amdxdna_dpt *dpt);
+
 /* dmesg-dump consumer control (debugfs). */
 int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable);
 int amdxdna_fw_log_set_state(struct amdxdna_dev *xdna, u32 level);
