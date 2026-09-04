@@ -117,16 +117,29 @@ static struct cert_comp *aie4_get_cert_comp(struct amdxdna_hwctx *hwctx)
 	return cert_comp;
 }
 
-static void aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id)
+/*
+ * Returns a negative errno if the message itself failed, otherwise the restore
+ * id firmware handed back. On a graceful destroy an id of 0 is firmware
+ * reporting that the context errored on its way down and its state could not
+ * be preserved; firmware only mints an id once preemption completes. Keep that
+ * apart from a failed message, where firmware never answered at all.
+ */
+static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id,
+				    bool graceful)
 {
 	DECLARE_AIE_MSG(aie4_msg_destroy_hw_context, AIE4_MSG_OP_DESTROY_HW_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	int ret;
 
 	req.hw_context_id = hw_context_id;
+	req.graceful_flag = FIELD_PREP(AIE4_MSG_GRACEFUL_FLAG, graceful);
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
-	if (ret)
+	if (ret) {
 		XDNA_WARN(xdna, "destroy ctx id %d failed %d", hw_context_id, ret);
+		return ret;
+	}
+
+	return graceful ? resp.restore_id : 0;
 }
 
 static u32 aie4_parse_priority_to_dev(u32 priority)
@@ -167,6 +180,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	req.request_num_tiles = hwctx->num_tiles;
 	req.pasid = aie4_msg_pasid(client);
 	req.priority_band = aie4_parse_priority_to_dev(hwctx->qos.priority);
+	req.restore_id = priv->restore_id;
 	req.hsa_addr_high = upper_32_bits(amdxdna_gem_dev_addr(priv->umq_bo));
 	req.hsa_addr_low = lower_32_bits(amdxdna_gem_dev_addr(priv->umq_bo));
 
@@ -174,6 +188,8 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		 req.pasid, req.request_num_tiles, req.hsa_addr_high, req.hsa_addr_low);
 
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	/* Spent either way: firmware took it, or a retry must not resend a stale id. */
+	priv->restore_id = 0;
 	if (ret) {
 		XDNA_ERR(xdna, "create ctx failed: %d", ret);
 		return ret;
@@ -186,7 +202,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	/* setup interrupt completion per msix index */
 	cert_comp = aie4_lookup_cert_comp(ndev, resp.job_complete_msix_idx);
 	if (IS_ERR(cert_comp)) {
-		aie4_msg_destroy_context(ndev, resp.hw_context_id);
+		aie4_msg_destroy_context(ndev, resp.hw_context_id, false);
 		return PTR_ERR(cert_comp);
 	}
 
@@ -224,7 +240,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		if (ret) {
 			mutex_unlock(&priv->io_lock);
 			aie4_put_cert_comp(cert_comp);
-			aie4_msg_destroy_context(ndev, resp.hw_context_id);
+			aie4_msg_destroy_context(ndev, resp.hw_context_id, false);
 			/* Match a clean teardown so a later fini does not re-destroy. */
 			priv->hw_ctx_id = CTX_INVALID_ID;
 			hwctx->fw_ctx_id = -1;
@@ -279,8 +295,11 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	bool graceful = flags == AIE4_HWCTX_GRACEFUL;
 	struct cert_comp *cert_comp;
 	bool has_reset = false;
+	u16 restore_id = 0;
+	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
@@ -322,8 +341,26 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags
 	if (priv->kernel_submit && has_reset)
 		wake_up_all(&priv->job_list_wq);
 
-	if (flags != AIE4_HWCTX_DISCONNECT)
-		aie4_msg_destroy_context(ndev, priv->hw_ctx_id);
+	if (flags != AIE4_HWCTX_DISCONNECT && priv->hw_ctx_id != CTX_INVALID_ID) {
+		ret = aie4_msg_destroy_context(ndev, priv->hw_ctx_id, graceful);
+		if (ret > 0)
+			restore_id = ret;
+		else if (graceful && !ret)
+			XDNA_WARN(xdna, "ctx %s errored during graceful destroy, state lost",
+				  hwctx->name);
+	}
+
+	/*
+	 * Zero unless firmware parked the state, so a later create replays it
+	 * only when there is something to replay. Both a firmware-reported
+	 * context error and a destroy firmware never answered land here, and
+	 * both leave the jobs parked for resume to be re-driven against a fresh
+	 * context, as the non-graceful destroy this replaces always did.
+	 */
+	priv->restore_id = restore_id;
+	if (graceful)
+		XDNA_DBG(xdna, "ctx %s graceful destroy, restore id %u", hwctx->name,
+			 priv->restore_id);
 
 	priv->hw_ctx_id = CTX_INVALID_ID;
 	hwctx->fw_ctx_id = -1;

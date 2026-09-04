@@ -55,6 +55,8 @@ struct amdxdna_hwctx_priv {
 
 	struct cert_comp                *cert_comp;
 	u32                             hw_ctx_id;
+	/* restore_id from a graceful destroy; consumed on the next create (0 = none) */
+	u16                             restore_id;
 	/* Snapshot of kernel_mode_submission for this ctx's lifetime. */
 	bool                            kernel_submit;
 
@@ -136,6 +138,8 @@ struct amdxdna_dev_hdl {
 	struct mutex                    cert_comp_lock; /* protects cert_comp operations*/
 
 	struct amdxdna_msg_buf_hdl	*work_buf_hdl;
+	/* Ctx restore pool held from graceful suspend to resume, NULL if none. */
+	struct amdxdna_msg_buf_hdl	*restore_pool_hdl;
 
 	u8				pw_mode;
 
@@ -215,6 +219,9 @@ int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 				     struct amdxdna_drm_query_firmware_version *cert_version);
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+int aie4_msg_get_ctx_restore_pool_size(struct amdxdna_dev_hdl *ndev, u32 *buff_size);
+int aie4_msg_get_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+int aie4_msg_set_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);

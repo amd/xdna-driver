@@ -248,6 +248,58 @@ int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 s
 	return ret;
 }
 
+int aie4_msg_get_ctx_restore_pool_size(struct amdxdna_dev_hdl *ndev, u32 *buff_size)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_ctx_restore_pool_size,
+			AIE4_MSG_OP_GET_CTX_RESTORE_POOL_SIZE);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to query ctx restore pool size, ret %d", ret);
+		return ret;
+	}
+
+	*buff_size = resp.buff_size;
+
+	return 0;
+}
+
+int aie4_msg_get_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_ctx_restore_pool, AIE4_MSG_OP_GET_CTX_RESTORE_POOL);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	req.buff_addr = addr;
+	req.buff_size = size;
+	req.pasid = 0;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to save ctx restore pool, ret %d", ret);
+
+	return ret;
+}
+
+int aie4_msg_set_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size)
+{
+	DECLARE_AIE_MSG(aie4_msg_set_ctx_restore_pool, AIE4_MSG_OP_SET_CTX_RESTORE_POOL);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	req.buff_addr = addr;
+	req.buff_size = size;
+	req.pasid = 0;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to load ctx restore pool, ret %d", ret);
+
+	return ret;
+}
+
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode)
 {
 	DECLARE_AIE_MSG(aie4_msg_power_override, AIE4_MSG_OP_POWER_OVERRIDE);
