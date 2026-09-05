@@ -1,0 +1,256 @@
+diff --git a/drivers/media/platform/xilinx/xilinx-dma.c b/drivers/media/platform/xilinx/xilinx-dma.c
+index 6279db1ffbb8..6c7eb79436d2 100644
+--- a/drivers/media/platform/xilinx/xilinx-dma.c
++++ b/drivers/media/platform/xilinx/xilinx-dma.c
+@@ -18,6 +18,7 @@
+ #include <linux/list.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
++#include <linux/overflow.h>
+ #include <linux/property.h>
+ #include <linux/slab.h>
+ #include <linux/xilinx-v4l2-controls.h>
+@@ -335,6 +336,9 @@ xvip_dma_queue_setup(struct vb2_queue *vq,
+ 	unsigned int i;
+ 	int sizeimage;
+
++	if (!dma->fmtinfo)
++		return -EINVAL;
++
+ 	/* Multi planar case: Make sure the image size is large enough */
+ 	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
+ 		if (*nplanes) {
+@@ -369,14 +373,117 @@ xvip_dma_queue_setup(struct vb2_queue *vq,
+ 	return 0;
+ }
+
++static int xvip_dma_get_active_layout(struct xvip_dma *dma, u32 *stride,
++				      size_t *row_size,
++				      u32 *height)
++{
++	u32 padding_factor_nume, padding_factor_deno;
++	u32 bpl_nume, bpl_deno;
++	u32 pixelformat;
++	size_t numerator;
++	size_t denominator;
++
++	if (!dma->fmtinfo)
++		return -EINVAL;
++
++	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
++		struct v4l2_pix_format_mplane *pix_mp = &dma->format.fmt.pix_mp;
++
++		pixelformat = pix_mp->pixelformat;
++		*stride = pix_mp->plane_fmt[0].bytesperline;
++	} else {
++		struct v4l2_pix_format *pix = &dma->format.fmt.pix;
++
++		pixelformat = pix->pixelformat;
++		*stride = pix->bytesperline;
++	}
++
++	xvip_width_padding_factor(pixelformat, &padding_factor_nume,
++				  &padding_factor_deno);
++	xvip_bpl_scaling_factor(pixelformat, &bpl_nume, &bpl_deno);
++
++	if (!padding_factor_deno || !bpl_deno ||
++	    check_mul_overflow((size_t)dma->r.width,
++			       (size_t)dma->fmtinfo->bpl_factor, &numerator) ||
++	    check_mul_overflow(numerator, (size_t)padding_factor_nume,
++			       &numerator) ||
++	    check_mul_overflow(numerator, (size_t)bpl_nume, &numerator) ||
++	    check_mul_overflow((size_t)padding_factor_deno,
++			       (size_t)bpl_deno, &denominator))
++		return -EOVERFLOW;
++
++	*row_size = numerator / denominator;
++	*height = dma->r.height;
++	if (!*height || !*row_size || *row_size > *stride)
++		return -EINVAL;
++
++	return 0;
++}
++
+ static int xvip_dma_buffer_prepare(struct vb2_buffer *vb)
+ {
+ 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+ 	struct xvip_dma *dma = vb2_get_drv_priv(vb->vb2_queue);
+ 	struct xvip_dma_buffer *buf = to_xvip_dma_buffer(vbuf);
++	dma_addr_t addr;
++	dma_addr_t dst_addr;
++	size_t active_span;
++	size_t plane_size;
++	size_t row_size;
++	u32 stride;
++	u32 height;
++	int ret;
+
+ 	buf->dma = dma;
+
++	if (!dma->tile_offset)
++		return 0;
++
++	/* Bounds below describe one image plane. A single vb2 memory plane can
++	 * still contain multiple image planes. Reject those layouts until their
++	 * complete footprint is validated. */
++	if (vb->num_planes != 1 || dma->fmtinfo->num_planes != 1)
++		return -EOPNOTSUPP;
++
++	if (!IS_ALIGNED(dma->tile_offset, dma->align)) {
++		dev_err(dma->xdev->dev,
++			"tile offset 0x%x is not %u-byte aligned\n",
++			dma->tile_offset, dma->align);
++		return -EINVAL;
++	}
++
++	ret = xvip_dma_get_active_layout(dma, &stride, &row_size, &height);
++	if (ret)
++		return ret;
++
++	if ((size_t)(dma->tile_offset % stride) >
++	    (size_t)stride - row_size) {
++		dev_err(dma->xdev->dev,
++			"tile offset 0x%x places row size 0x%zx beyond stride 0x%x\n",
++			dma->tile_offset, row_size, stride);
++		return -EINVAL;
++	}
++
++	if (check_mul_overflow((size_t)(height - 1), (size_t)stride,
++			       &active_span) ||
++	    check_add_overflow(active_span, row_size, &active_span))
++		return -EOVERFLOW;
++
++	plane_size = vb2_plane_size(vb, 0);
++	if (dma->tile_offset > plane_size ||
++	    active_span > plane_size - dma->tile_offset) {
++		dev_err(dma->xdev->dev,
++			"tile offset 0x%x plus active span 0x%zx exceeds plane size 0x%zx\n",
++			dma->tile_offset, active_span, plane_size);
++		return -EINVAL;
++	}
++
++	addr = vb2_dma_contig_plane_dma_addr(vb, 0);
++	if (check_add_overflow(addr, (dma_addr_t)dma->tile_offset, &dst_addr))
++		return -EOVERFLOW;
++	if (!IS_ALIGNED(dst_addr, dma->align))
++		return -EINVAL;
++
+ 	return 0;
+ }
+
+@@ -399,6 +506,8 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
+ 		dma->xt.dir = DMA_DEV_TO_MEM;
+ 		dma->xt.src_sgl = false;
+ 		dma->xt.dst_sgl = true;
++		if (dma->tile_offset)
++			addr += dma->tile_offset;
+ 		dma->xt.dst_start = addr;
+ 	} else if (dma->queue.type == V4L2_BUF_TYPE_VIDEO_OUTPUT ||
+ 		   dma->queue.type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+@@ -1307,6 +1416,18 @@ static int xvip_dma_s_ctrl(struct v4l2_ctrl *ctl)
+ 			ret = -EINVAL;
+ 		}
+
++		break;
++	case V4L2_CID_XILINX_TILE_OFFSET:
++		if (vb2_is_busy(&dma->queue))
++			return -EBUSY;
++		if (ctl->val &&
++		    dma->queue.type != V4L2_BUF_TYPE_VIDEO_CAPTURE &&
++		    dma->queue.type != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
++			return -EINVAL;
++		if (ctl->val &&
++		    (!dma->align || !IS_ALIGNED(ctl->val, dma->align)))
++			return -EINVAL;
++		dma->tile_offset = ctl->val;
+ 		break;
+ 	default:
+ 		ret = -EINVAL;
+@@ -1317,6 +1438,8 @@ static int xvip_dma_s_ctrl(struct v4l2_ctrl *ctl)
+
+ static int xvip_dma_open(struct file *file)
+ {
++	struct xvip_dma *dma = video_drvdata(file);
++	struct v4l2_ctrl *tile_ctrl;
+ 	int ret;
+
+ 	ret = v4l2_fh_open(file);
+@@ -1325,12 +1448,20 @@ static int xvip_dma_open(struct file *file)
+
+ 	/* Disable the low latency mode as default */
+ 	if (v4l2_fh_is_singular_file(file)) {
+-		struct xvip_dma *dma = video_drvdata(file);
+-
+ 		mutex_lock(&dma->lock);
+ 		dma->low_latency_cap = false;
+ 		dma->xdma->set_mode(dma->dma, XILINX_VID_DMA_AUTO_RESTART);
+ 		mutex_unlock(&dma->lock);
++
++		tile_ctrl = v4l2_ctrl_find(&dma->ctrl_handler,
++					   V4L2_CID_XILINX_TILE_OFFSET);
++		if (tile_ctrl) {
++			ret = v4l2_ctrl_s_ctrl(tile_ctrl, 0);
++			if (ret) {
++				v4l2_fh_release(file);
++				return ret;
++			}
++		}
+ 	}
+
+ 	return 0;
+@@ -1350,6 +1481,15 @@ static const struct v4l2_ctrl_config xvip_dma_ctrls[] = {
+ 		.max = XVIP_START_DMA,
+ 		.step = 1,
+ 		.def = XVIP_LOW_LATENCY_DISABLE,
++	}, {
++		.ops = &xvip_dma_ctrl_ops,
++		.id = V4L2_CID_XILINX_TILE_OFFSET,
++		.name = "Tile Destination Offset",
++		.type = V4L2_CTRL_TYPE_INTEGER,
++		.min = 0,
++		.max = 0x7fffffff,
++		.step = 1,
++		.def = 0,
+ 	}
+ };
+
+diff --git a/drivers/media/platform/xilinx/xilinx-dma.h b/drivers/media/platform/xilinx/xilinx-dma.h
+index 55f3b7f80e25..fe2a057ec1cc 100644
+--- a/drivers/media/platform/xilinx/xilinx-dma.h
++++ b/drivers/media/platform/xilinx/xilinx-dma.h
+@@ -83,6 +83,7 @@ static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)
+  * @pad: media pad for the video device entity
+  * @remote_subdev_med_bus: media bus format of sub-device
+  * @ctrl_handler: V4L2 ctrl_handler for inheritance ctrls from subdev
++ * @tile_offset: capture destination byte offset within plane 0
+  * @xdev: composite device the DMA channel belongs to
+  * @pipe: pipeline belonging to the DMA channel
+  * @port: composite device DT node port number for the DMA channel
+@@ -113,6 +114,7 @@ struct xvip_dma {
+ 	u32 remote_subdev_med_bus;
+
+ 	struct v4l2_ctrl_handler ctrl_handler;
++	u32 tile_offset;
+
+ 	struct xvip_composite_device *xdev;
+ 	struct xvip_pipeline pipe;
+diff --git a/include/uapi/linux/xilinx-v4l2-controls.h b/include/uapi/linux/xilinx-v4l2-controls.h
+index baf4ea5946f2..626ae645f4a1 100644
+--- a/include/uapi/linux/xilinx-v4l2-controls.h
++++ b/include/uapi/linux/xilinx-v4l2-controls.h
+@@ -152,6 +152,15 @@
+ /* Low latency mode */
+ #define V4L2_CID_XILINX_LOW_LATENCY		(V4L2_CID_XILINX_VIP + 1)
+
++/*
++ * xvip_dma capture destination byte offset within plane 0.
++ *
++ * The offset must satisfy the DMA channel's address alignment and the active
++ * image rectangle must fit in the imported plane. Nonzero offsets currently
++ * support one-memory, one-plane capture formats only.
++ */
++#define V4L2_CID_XILINX_TILE_OFFSET		(V4L2_CID_XILINX_VIP + 2)
++
+ /* Control values to enable/disable low latency capture mode */
+ #define XVIP_LOW_LATENCY_ENABLE		BIT(1)
+ #define XVIP_LOW_LATENCY_DISABLE	BIT(2)

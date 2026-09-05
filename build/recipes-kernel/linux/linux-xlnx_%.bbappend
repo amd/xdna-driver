@@ -11,3 +11,6 @@ SRC_URI:append = " file://0006-xilinx-ai-engine-Fix-aie_part_pm_ops-function-arg
 SRC_URI:append = " file://0007-xilinx-ai-engine-Granularize-error-handling-init-options.patch"
 SRC_URI:append = " file://0001-xilinx-ai-engine-part-init-optimizations.patch"
 SRC_URI:append = " file://0002-aie-handshake-avoid-dmam_alloc_coherent-per-column-via-dma_addr.patch"
+SRC_URI:append = " file://0010-xilinx-ai-engine-user-event1-irq-latency-fix.patch"
+SRC_URI:append = " file://0008-xilinx-dma-tile-offset.patch"
+SRC_URI:append = " file://0001-media-platform-xilinx-preprocess.patch"
