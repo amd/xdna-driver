@@ -133,6 +133,7 @@ static int aie4_plat_resume(struct amdxdna_dev *xdna)
 const struct amdxdna_dev_ops aie4_plat_ops = {
 	.init			= aie4_plat_init,
 	.fini			= aie4_plat_fini,
+	.debugfs_init		= aie4_debugfs_init,
 	.hwctx_init		= aie4_hwctx_init,
 	.hwctx_fini		= aie4_hwctx_fini,
 	.hwctx_config		= aie4_hwctx_config,
