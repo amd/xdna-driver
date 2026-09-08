@@ -12,8 +12,8 @@
 #include <linux/mutex.h>
 
 #include "aie.h"
+#include "aie4.h"
 #include "aie4_msg_priv.h"
-#include "aie4_pci.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
@@ -142,45 +142,6 @@ int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 	cert_version->minor = resp.minor_version;
 	cert_version->patch = resp.hotfix;
 	cert_version->build = resp.build;
-
-	return 0;
-}
-
-int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev)
-{
-	DECLARE_AIE_MSG(aie4_msg_get_dpm_freq_table, AIE4_MSG_OP_GET_DPM_FREQ_TABLE);
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	u32 i;
-	int ret;
-
-	for (i = 0; i < AIE4_MAX_DPM_LEVEL_COUNT && ndev->priv->dpm_clk_tbl[i].hclk; i++)
-		ndev->dpm_clk_tbl[i] = ndev->priv->dpm_clk_tbl[i];
-	ndev->max_dpm_level = i ? i - 1 : 0;
-
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
-	if (ret) {
-		XDNA_WARN(xdna, "Get DPM freq table failed, ret %d status 0x%x",
-			  ret, resp.status);
-		return ret;
-	}
-
-	if (resp.aieclk_table.num_levels > AIE4_MAX_DPM_LEVEL_COUNT ||
-	    resp.npuhclk_table.num_levels > AIE4_MAX_DPM_LEVEL_COUNT) {
-		XDNA_ERR(xdna, "invalid dpm levels, aieclk: %u, npuhclk: %u",
-			 resp.aieclk_table.num_levels, resp.npuhclk_table.num_levels);
-		return -EINVAL;
-	}
-
-	for (i = 0; i < resp.aieclk_table.num_levels; i++)
-		ndev->dpm_clk_tbl[i].npuclk = resp.aieclk_table.values[i];
-	for (i = 0; i < resp.npuhclk_table.num_levels; i++)
-		ndev->dpm_clk_tbl[i].hclk = resp.npuhclk_table.values[i];
-
-	/* store the highest valid DPM level index (num_levels - 1) */
-	ndev->max_dpm_level =
-		max_t(u32, resp.aieclk_table.num_levels, resp.npuhclk_table.num_levels);
-	if (ndev->max_dpm_level)
-		ndev->max_dpm_level--;
 
 	return 0;
 }
