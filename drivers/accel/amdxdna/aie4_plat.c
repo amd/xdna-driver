@@ -22,6 +22,8 @@
 #include "aie4_plat.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_drv.h"
+#include "amdxdna_mailbox.h"
+#include "amdxdna_mailbox_plat.h"
 
 /*
  * Transport hooks (mirror the aie4_pci.c definitions).  The shared aie4_ctx.c
@@ -42,7 +44,9 @@ int aie4_doorbell_setup(struct amdxdna_hwctx *hwctx,
 
 void aie4_doorbell_ring(struct amdxdna_hwctx *hwctx)
 {
-	/* TODO: platform shmem-ring doorbell kick. */
+	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
+
+	amdxdna_mailbox_plat_ring_doorbell(ndev->mbox, hwctx->priv->hw_ctx_id);
 }
 
 /*
@@ -95,7 +99,17 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 	xdna->dev_handle = ndev;
 
 	/*
-	 * TODO: create the platform mgmt mailbox and run the shared aie4
+	 * The platform mailbox is the shmem+IPI implementation of struct mailbox
+	 * (amdxdna_mailbox_plat.c); it derives its regions/IPI from device tree,
+	 * so the PCI-oriented xdna_mailbox_res is unused and passed as NULL.  It
+	 * is drm-managed, so aie4_plat_fini() needs no explicit teardown.
+	 */
+	ndev->mbox = xdnam_mailbox_create(&xdna->ddev, NULL);
+	if (!ndev->mbox)
+		return -ENODEV;
+
+	/*
+	 * TODO: alloc/start the mgmt mailbox_channel and run the shared aie4
 	 * bring-up (aie4_query_fw/aie4_setup_aie plus the common DRM/context
 	 * init), mirroring aie4_classic_init().
 	 */
@@ -104,7 +118,7 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 
 static void aie4_plat_fini(struct amdxdna_dev *xdna)
 {
-	/* TODO: aie4_partition_fini() + tear down the platform mgmt mailbox. */
+	/* TODO: aie4_partition_fini(). The mailbox is drm-managed (auto-freed). */
 }
 
 static int aie4_plat_suspend(struct amdxdna_dev *xdna)
