@@ -114,6 +114,47 @@ int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+/*
+ * Platform copy of the DPM freq table query.  Unlike the PCI transport there is
+ * no host-side default table (ndev->priv is NULL and its layout is PCI-only), so
+ * the table is seeded purely from the firmware response; levels the firmware does
+ * not report stay zero.
+ */
+int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_dpm_freq_table, AIE4_MSG_OP_GET_DPM_FREQ_TABLE);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	u32 i;
+	int ret;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_WARN(xdna, "Get DPM freq table failed, ret %d status 0x%x",
+			  ret, resp.status);
+		return ret;
+	}
+
+	if (resp.aieclk_table.num_levels > AIE4_MAX_DPM_LEVEL_COUNT ||
+	    resp.npuhclk_table.num_levels > AIE4_MAX_DPM_LEVEL_COUNT) {
+		XDNA_ERR(xdna, "invalid dpm levels, aieclk: %u, npuhclk: %u",
+			 resp.aieclk_table.num_levels, resp.npuhclk_table.num_levels);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < resp.aieclk_table.num_levels; i++)
+		ndev->dpm_clk_tbl[i].npuclk = resp.aieclk_table.values[i];
+	for (i = 0; i < resp.npuhclk_table.num_levels; i++)
+		ndev->dpm_clk_tbl[i].hclk = resp.npuhclk_table.values[i];
+
+	/* store the highest valid DPM level index (num_levels - 1) */
+	ndev->max_dpm_level =
+		max_t(u32, resp.aieclk_table.num_levels, resp.npuhclk_table.num_levels);
+	if (ndev->max_dpm_level)
+		ndev->max_dpm_level--;
+
+	return 0;
+}
+
 int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
