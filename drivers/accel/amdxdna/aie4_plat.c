@@ -111,4 +111,5 @@ const struct amdxdna_dev_ops aie4_plat_ops = {
 	.cmd_wait		= aie4_cmd_wait,
 	.get_aie_info		= aie4_get_info,
 	.set_aie_state		= aie4_set_state,
+	.get_array		= aie4_get_array,
 };
