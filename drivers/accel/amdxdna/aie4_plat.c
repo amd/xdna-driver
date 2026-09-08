@@ -145,4 +145,6 @@ const struct amdxdna_dev_ops aie4_plat_ops = {
 	.suspend		= aie4_plat_suspend,
 	.runtime_resume		= aie4_plat_resume,
 	.runtime_suspend	= aie4_plat_suspend,
+	.register_async_event	= aie4_async_event_register,
+	.handle_dev_async_event	= aie4_handle_dev_event,
 };
