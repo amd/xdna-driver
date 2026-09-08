@@ -101,6 +101,35 @@ static void aie4_plat_fini(struct amdxdna_dev *xdna)
 	/* TODO: aie4_partition_fini() + tear down the platform mgmt mailbox. */
 }
 
+static int aie4_plat_suspend(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	/* Unlike aie4_classic_suspend, there is no hw_stop: the mailbox stays up. */
+	aie4_hwctx_suspend_all(ndev, false);
+
+	return 0;
+}
+
+static int aie4_plat_resume(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	/* Unlike aie4_classic_resume, there is no hw_start: the mailbox stayed up. */
+	ret = aie4_hwctx_resume_all(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "hwctx resume failed, %d", ret);
+		aie4_hwctx_suspend_all(ndev, true);
+	}
+
+	return ret;
+}
+
 const struct amdxdna_dev_ops aie4_plat_ops = {
 	.init			= aie4_plat_init,
 	.fini			= aie4_plat_fini,
@@ -112,4 +141,8 @@ const struct amdxdna_dev_ops aie4_plat_ops = {
 	.get_aie_info		= aie4_get_info,
 	.set_aie_state		= aie4_set_state,
 	.get_array		= aie4_get_array,
+	.resume			= aie4_plat_resume,
+	.suspend		= aie4_plat_suspend,
+	.runtime_resume		= aie4_plat_resume,
+	.runtime_suspend	= aie4_plat_suspend,
 };
