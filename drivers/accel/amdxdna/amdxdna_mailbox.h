@@ -6,6 +6,7 @@
 #ifndef _AIE_MAILBOX_H_
 #define _AIE_MAILBOX_H_
 
+struct drm_device;
 struct mailbox;
 struct mailbox_channel;
 
