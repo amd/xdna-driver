@@ -133,17 +133,15 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 			    xdna->dev_info->dev_heap_max_size);
 	mutex_init(&client->mm_lock);
 	INIT_LIST_HEAD(&client->bo_invalid_list);
+	filp->driver_priv = client;
+	client->filp = filp;
+	spin_lock_init(&client->io_stats.lock);
 
 	mutex_lock(&xdna->client_lock);
 	mutex_lock(&xdna->dev_lock);
 	list_add_tail(&client->node, &xdna->client_list);
 	mutex_unlock(&xdna->dev_lock);
 	mutex_unlock(&xdna->client_lock);
-
-	filp->driver_priv = client;
-	client->filp = filp;
-
-	spin_lock_init(&client->io_stats.lock);
 
 	XDNA_DBG(xdna, "pid %d opened", client->pid);
 	return 0;
