@@ -18,8 +18,7 @@ std::string
 drv::
 get_dev_node(const std::string& sysfs_name) const
 {
-  const std::string sysfs_root{"/sys/bus/pci/devices/"};
-  const std::string dev_path_dir = sysfs_root + sysfs_name + "/" + sysfs_dev_node_dir();
+  const std::string dev_path_dir = dev_sysfs_root(sysfs_name) + "/" + sysfs_dev_node_dir();
   const auto prefix = dev_node_prefix();
 
   auto dp = opendir(dev_path_dir.c_str());

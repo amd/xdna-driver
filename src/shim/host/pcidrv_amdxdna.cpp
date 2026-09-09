@@ -14,8 +14,7 @@ namespace {
 int
 get_dev_type(const std::string& sysfs)
 {
-  const std::string sysfs_root{"/sys/bus/pci/devices/"};
-  const std::string dev_type_path = sysfs_root + sysfs + "/device_type";
+  const std::string dev_type_path = shim_xdna::dev_sysfs_root(sysfs) + "/device_type";
 
   std::ifstream ifs(dev_type_path);
   if (!ifs.is_open())
