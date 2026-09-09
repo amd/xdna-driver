@@ -2306,7 +2306,7 @@ struct sub_device_path
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    return boost::str(boost::format("/sys/bus/pci/devices/%s") % pci_dev_impl.m_sysfs_name);
+    return shim_xdna::dev_sysfs_root(pci_dev_impl.m_sysfs_name);
   }
 };
 
