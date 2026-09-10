@@ -14,3 +14,4 @@ SRC_URI:append = " file://0002-aie-handshake-avoid-dmam_alloc_coherent-per-colum
 SRC_URI:append = " file://0010-xilinx-ai-engine-user-event1-irq-latency-fix.patch"
 SRC_URI:append = " file://0008-xilinx-dma-tile-offset.patch"
 SRC_URI:append = " file://0001-media-platform-xilinx-preprocess.patch"
+SRC_URI:append = " file://0001-xilinx-ai-engine-Add-USER_EVENT1-initialization-support.patch"
