@@ -1,0 +1,139 @@
+From: Saifuddin Kaijar <saifuddi@xilinx.com>
+Date: Wed, 10 Sep 2026 00:00:00 +0000
+Subject: [PATCH] xilinx-ai-engine: Add USER_EVENT1 initialization support
+
+Add new initialization option AIE_PART_INIT_OPT_USER_EVENT1_INIT to
+support USER_EVENT1 configuration for columns 0 and 1. This separates
+the USER_EVENT1 initialization logic from the general shim error
+handling initialization.
+
+Split aie2ps_error_handling_init_shim() into two functions:
+- aie2ps_error_handling_init_shim(): Original functionality unchanged
+- aie2ps_error_handling_init_user_event1_col0_1(): New function for
+  USER_EVENT1 initialization in columns 0 and 1
+
+The new initialization option can be used independently to configure
+USER_EVENT1 without enabling the full error handling subsystem.
+
+Signed-off-by: Saifuddin Kaijar <saifuddi@xilinx.com>
+---
+ .../misc/xilinx-ai-engine/ai-engine-internal.h     |  1 +
+ .../misc/xilinx-ai-engine/ai-engine-interrupt.c    | 44 ++++++++++++++++++++++
+ drivers/misc/xilinx-ai-engine/ai-engine-reset.c    |  7 ++++
+ include/uapi/linux/xlnx-ai-engine.h                |  1 +
+ 4 files changed, 53 insertions(+)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+index 1628128b8c7a..604d9e44f71e 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+@@ -1994,6 +1994,7 @@ int aie_part_maskpoll_register(struct aie_partition *apart, u32 offset, u32 data
+ int aie_partition_uc_zeroize_mem(struct device *dev, struct aie_location *loc, u32 regval);
+ int aie_config_error_halt_event(struct aie_partition *apart);
+ int aie2ps_error_handling_init_shim(struct aie_partition *apart);
++int aie2ps_error_handling_init_user_event1_col0_1(struct aie_partition *apart);
+ int aie2ps_error_handling_init_mem_aie(struct aie_partition *apart);
+
+ int aie2ps_part_write_handshake(struct aie_partition *apart,
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+index 92f373319cba..2f41ee620d42 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+@@ -2606,6 +2606,50 @@ static int aie_group_error_init_mem(struct aie_partition *apart,
+ }
+
+ int aie2ps_error_handling_init_shim(struct aie_partition *apart)
++{
++	u32 start_col = apart->range.start.col;
++	u32 end_col = start_col + apart->range.size.col;
++	struct aie_location loc = { .row = 0 };
++	u32 l2_enable;
++	int ret;
++
++	for (loc.col = start_col; loc.col < end_col; loc.col++) {
++		if (!aie_part_check_clk_enable_loc(apart, &loc))
++			continue;
++
++		ret = aie2ps_init_l1_ctrl(apart, loc);
++		if (ret)
++			return ret;
++
++		if (loc.col == (start_col + 1))
++			l2_enable = BIT(AIE_SHIM_USER_EVENT1_L1_IRQ_EVENT_ID);
++		else
++			l2_enable = BIT(AIE_ARRAY_TILE_ERROR_BC_ID);
++
++		aie_aperture_enable_l2_ctrl(apart->aperture, &loc, l2_enable);
++		if (loc.col == (start_col + 1)) {
++			ret = aie2ps_init_shim_tile_lead_col(apart, loc);
++			if (ret)
++				return ret;
++		} else if (loc.col == start_col) {
++			ret = aie2ps_init_shim_tile_col0(apart, loc);
++			if (ret)
++				return ret;
++		} else {
++			ret = aie2ps_init_shim_tile(apart, loc);
++			if (ret)
++				return ret;
++		}
++
++		ret = aie_group_error_init_shim(apart, loc);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++int aie2ps_error_handling_init_user_event1_col0_1(struct aie_partition *apart)
+ {
+ 	u32 start_col = apart->range.start.col;
+ 	u32 end_col = start_col + apart->range.size.col;
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+index db43ed2c3e91..75c47e21b139 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+@@ -5,6 +5,7 @@
+  * Copyright (C) 2020 Xilinx, Inc.
+  */
+
++#include "linux/xlnx-ai-engine.h"
+ #include <linux/bitfield.h>
+ #include <linux/firmware/xlnx-zynqmp.h>
+ #include <linux/io.h>
+@@ -871,6 +872,7 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 				   AIE_PART_INIT_OPT_ERR_SHIM_INIT |
+ 				   AIE_PART_INIT_OPT_ERR_MEM_AIE_INIT;
+ 		args->init_opts &= ~AIE_PART_INIT_ERROR_HANDLING;
++		args->init_opts &= ~AIE_PART_INIT_OPT_USER_EVENT1_INIT;
+ 	}
+
+ 	if ((args->init_opts & AIE_PART_INIT_OPT_COLUMN_RST) ||
+@@ -1047,6 +1049,12 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 		if (ret)
+ 			goto out;
+ 	}
++	if (args->init_opts & AIE_PART_INIT_OPT_USER_EVENT1_INIT) {
++		opts |= AIE_PART_INIT_OPT_USER_EVENT1_INIT;
++		ret = aie2ps_error_handling_init_user_event1_col0_1(apart);
++		if (ret)
++			goto out;
++	}
+
+ 	if (opts != args->init_opts)
+ 		dev_warn(&apart->dev, "Invalid init_opts: 0x%x", opts ^ args->init_opts);
+diff --git a/include/uapi/linux/xlnx-ai-engine.h b/include/uapi/linux/xlnx-ai-engine.h
+index e971705680de..3aa75895f5b6 100644
+--- a/include/uapi/linux/xlnx-ai-engine.h
++++ b/include/uapi/linux/xlnx-ai-engine.h
+@@ -334,6 +334,7 @@ struct aie_partition_init_args {
+ #define AIE_PART_INIT_OPT_ERR_HALT_EVENT	BIT(23)
+ #define AIE_PART_INIT_OPT_ERR_SHIM_INIT		BIT(24)
+ #define AIE_PART_INIT_OPT_ERR_MEM_AIE_INIT	BIT(25)
++#define AIE_PART_INIT_OPT_USER_EVENT1_INIT	BIT(26)
+
+ #define AIE_PART_INIT_OPT_DEFAULT	(AIE_PART_INIT_OPT_COLUMN_RST		|	\
+ 					 AIE_PART_INIT_OPT_SHIM_RST		|	\
+--
+2.34.1
