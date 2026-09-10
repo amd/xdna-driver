@@ -707,12 +707,12 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
+	amdxdna_hmm_unregister(abo, NULL, 0, 0);
+	flush_workqueue(xdna->notifier_wq);
+
 	down_write(&xdna->notifier_lock);
 	list_del_init(&abo->node);
 	up_write(&xdna->notifier_lock);
-
-	amdxdna_hmm_unregister(abo, NULL, 0, 0);
-	flush_workqueue(xdna->notifier_wq);
 
 	if (abo->pinned)
 		amdxdna_gem_unpin(abo);
