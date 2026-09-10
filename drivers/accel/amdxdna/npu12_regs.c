@@ -8,6 +8,7 @@
 #include "aie4.h"
 #include "aie4_msg_priv.h"
 #include "aie4_plat.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_plat_drv.h"
 
 /*
@@ -22,10 +23,27 @@
  * device. The PCI-only fields (bars) are left unset; the platform driver drives
  * this device through aie4_plat_ops.
  */
+
+/*
+ * Firmware/CERT protocol version negotiation: advertise only the base
+ * major/minimum-minor npu12 speaks. No optional feature bits are claimed.
+ */
+static const struct amdxdna_fw_feature_tbl npu12_fw_feature_table[] = {
+	{ .major = 6, .min_minor = 0 },
+	{ 0 }
+};
+
+static const struct amdxdna_fw_feature_tbl npu12_cert_feature_table[] = {
+	{ .major = 1, .min_minor = 6 },
+	{ 0 }
+};
+
 const struct amdxdna_dev_info dev_npu12_info = {
 	.default_vbnv	= "RyzenAI-npu12-aie2ps",
 	.device_type	= AMDXDNA_DEV_TYPE_UMQ,
 	.ops		= &aie4_plat_ops,
+	.fw_feature_tbl	= npu12_fw_feature_table,
+	.cert_feature_tbl = npu12_cert_feature_table,
 	.luts			= &aie4_error_luts,
 	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
