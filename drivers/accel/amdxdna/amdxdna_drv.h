@@ -230,6 +230,7 @@ struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
 	char				name[TASK_COMM_LEN];
+	kuid_t				euid;
 	/*
 	 * Guards hwctx lifetime against this client's own blocking submit/wait.
 	 * A lookup only ever returns this client's own hwctx (per-client xa), so a
@@ -294,7 +295,7 @@ static inline bool amdxdna_pasid_on(struct amdxdna_client *client)
 static inline bool amdxdna_client_visible(struct amdxdna_client *client)
 {
 	return capable(CAP_SYS_ADMIN) ||
-	       uid_eq(current_euid(), client->filp->filp->f_cred->euid);
+	       uid_eq(current_euid(), client->euid);
 }
 
 #endif /* _AMDXDNA_DRV_H_ */
