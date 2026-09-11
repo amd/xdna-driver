@@ -93,22 +93,21 @@ struct bdf
 
 };
 
+// Telluride/VE2 identity used by XRT smi.cpp ({0xb052,0x01} -> aie2ps)
+// and shim_test npu_ve2_device_id. Do not read PCI sysfs: AIE is AUX,
+// and endpoint SKUs have no host bridge at the dummy edge BDF.
+static constexpr uint16_t ve2_pci_device_id = 0xb052;
+static constexpr uint8_t  ve2_pci_revision  = 0x01;
+static constexpr uint16_t ve2_pci_vendor_id = 0x10ee;
+
 struct pcie_id
 {
   using result_type = query::pcie_id::result_type;
 
   static result_type
-  get(const xrt_core::device* device, key_type key)
+  get(const xrt_core::device* /*device*/, key_type /*key*/)
   {
-    auto [domain, bus, dev, func] = bdf::get(device, key);
-    std::string bdf_str = boost::str(boost::format("%04x:%02x:%02x.%x") % domain % bus % dev % func);
-    const std::string base = "/sys/bus/pci/devices/" + bdf_str;
-    std::ifstream dev_f(base + "/device");
-    std::ifstream rev_f(base + "/revision");
-    unsigned int dev_val = 0, rev_val = 0;
-    if (!(dev_f >> std::hex >> dev_val) || !(rev_f >> std::hex >> rev_val))
-      throw xrt_core::query::sysfs_error("Failed to read device/revision from " + base + "/{device,revision}");
-    return { static_cast<uint16_t>(dev_val), static_cast<uint8_t>(rev_val) };
+    return { ve2_pci_device_id, ve2_pci_revision };
   }
 };
 
@@ -128,16 +127,9 @@ struct pcie_vendor
   using result_type = query::pcie_vendor::result_type;
 
   static result_type
-  get(const xrt_core::device* device, key_type key)
+  get(const xrt_core::device* /*device*/, key_type /*key*/)
   {
-    auto [domain, bus, dev, func] = bdf::get(device, key);
-    std::string bdf_str = boost::str(boost::format("%04x:%02x:%02x.%x") % domain % bus % dev % func);
-    const std::string base = "/sys/bus/pci/devices/" + bdf_str;
-    std::ifstream vendor_f(base + "/vendor");
-    unsigned int vendor_val = 0;
-    if (!(vendor_f >> std::hex >> vendor_val))
-      throw xrt_core::query::sysfs_error("Failed to read vendor from " + base + "/vendor");
-    return static_cast<result_type>(vendor_val);
+    return ve2_pci_vendor_id;
   }
 };
 
