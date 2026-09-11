@@ -242,10 +242,10 @@ int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *ar
 
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
-		ret = amdxdna_get_aie_status(&ndev->aie, client, args);
+		ret = amdxdna_get_aie_status(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
-		ret = amdxdna_get_metadata(&ndev->aie, client, args);
+		ret = amdxdna_get_metadata(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_VERSION:
 		ret = amdxdna_get_aie_version(client, args, &ndev->aie.version);
@@ -269,10 +269,10 @@ int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *ar
 		ret = aie4_query_resource_info(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
-		ret = amdxdna_get_hwctx_status(&ndev->aie, client, args);
+		ret = amdxdna_get_hwctx_status(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_TELEMETRY:
-		ret = amdxdna_get_telemetry(&ndev->aie, client, args);
+		ret = amdxdna_get_telemetry(client, args);
 		break;
 	case DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE:
 		ret = amdxdna_get_force_preempt_state(&ndev->aie, args);
@@ -385,16 +385,16 @@ int aie4_get_array(struct amdxdna_client *client,
 
 	switch (args->param) {
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
-		ret = amdxdna_query_ctx_status_array(&ndev->aie, client, args);
+		ret = amdxdna_query_ctx_status_array(client, args);
 		break;
 	case DRM_AMDXDNA_HW_CONTEXT_BY_ID:
-		ret = amdxdna_query_ctx_status_by_id(&ndev->aie, client, args);
+		ret = amdxdna_query_ctx_status_by_id(client, args);
 		break;
 	case DRM_AMDXDNA_AIE_COREDUMP:
-		ret = amdxdna_get_coredump(&ndev->aie, client, args);
+		ret = amdxdna_get_coredump(client, args);
 		break;
 	case DRM_AMDXDNA_AIE_TILE_READ:
-		ret = amdxdna_aie_tile_read(&ndev->aie, client, args);
+		ret = amdxdna_aie_tile_read(client, args);
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
 		ret = aie4_get_array_async_error(ndev, args);
@@ -644,7 +644,7 @@ int aie4_set_state(struct amdxdna_client *client,
 		ret = aie4_set_force_preempt_state(client, args);
 		break;
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
-		ret = amdxdna_aie_tile_write(&ndev->aie, client, args);
+		ret = amdxdna_aie_tile_write(client, args);
 		break;
 	case DRM_AMDXDNA_SET_FW_LOG_STATE:
 		ret = amdxdna_set_fw_log_state(&ndev->aie, args);
