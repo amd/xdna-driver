@@ -2,6 +2,7 @@
 // Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "io.h"
+#include "dev_filter.h"
 #include "io_config.h"
 #include "core/common/aiebu/src/cpp/include/aiebu/aiebu_assembler.h"
 #include "xrt/detail/xrt_error_code.h"
@@ -617,8 +618,7 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type*
   , m_total_fine_preemption_checkpoints(0)
 {
   const char* tag_c = tag.empty() ? nullptr : tag.c_str();
-  auto device_id = aie4_binary_device_id(device_query<query::pcie_device>(dev));
-  m_is_aie4 = (device_id == npu3_device_id || device_id == npu3a_device_id);
+  m_is_aie4 = dev_filter_is_aie4(0, dev);
 
   if (m_is_full_elf) {
     m_elf = xrt::elf(get_binary_path(dev, tag_c, m_flow));
@@ -714,8 +714,8 @@ elf_io_negative_test_bo_set(device* dev, const std::string& tag)
       static_cast<uint32_t>(std::stoul(info.extra.at("exp_ctx_error_type"), nullptr, 0));
   }
 
-  auto device_id = aie4_binary_device_id(device_query<query::pcie_device>(dev));
-  m_is_aie4 = (device_id == npu3_device_id || device_id == npu3a_device_id);
+  m_is_aie4 = dev_filter_is_aie4(0, dev);
+  m_is_full_elf = m_is_aie4;
 
   // Expected code for the driver-synthesized AIE async error on an aie4 fault.
   uint64_t err_num = XRT_ERROR_NUM_KDS_EXEC;
@@ -725,7 +725,7 @@ elf_io_negative_test_bo_set(device* dev, const std::string& tag)
   uint64_t err_class = XRT_ERROR_CLASS_AIE;
   m_expect_err_code = XRT_ERROR_CODE_BUILD(err_num, err_drv, err_severity, err_module, err_class);
 
-  if (info.flow == FULL_ELF) {
+  if (m_is_full_elf) {
     m_is_full_elf = true;
     m_elf = xrt::elf(get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), nullptr));
     auto kernel_name = get_kernel_name(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
@@ -776,19 +776,20 @@ elf_io_gemm_test_bo_set::
 elf_io_gemm_test_bo_set(device* dev, const std::string& tag)
   : io_test_bo_set_base(dev, tag, nullptr)
 {
-  const auto& info = get_binary_info(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+  const char* tag_c = tag.empty() ? nullptr : tag.c_str();
+  // npu3/npu3a: full-ELF gemm.elf; npu4: xclbin + sidecar gemm_int8.elf
+  m_is_full_elf = dev_filter_is_aie4(0, dev);
   std::string elf_path;
-  if (info.extra.count("elf_name")) {
-    elf_path = m_local_data_path + info.extra.at("elf_name");
-    m_is_full_elf = false;
+  if (m_is_full_elf) {
+    elf_path = get_binary_path(dev, tag_c, nullptr);
   } else {
-    elf_path = get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
-    m_is_full_elf = true;
+    const auto& info = get_binary_info(dev, tag_c, nullptr);
+    elf_path = m_local_data_path + info.extra.at("elf_name");
   }
   m_elf = xrt::elf(elf_path);
 
   try {
-    auto kernel_name = get_kernel_name(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+    auto kernel_name = get_kernel_name(dev, tag_c, nullptr);
     m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
   } catch (const std::exception&) {
     m_kernel_index = elf_int::no_ctrl_code_id;
