@@ -843,9 +843,15 @@ TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sde
 {
   auto dev = sdev.get();
   const int64_t pid = static_cast<int64_t>(::getpid());
-  /* npu4 (AIE2): preemptible partial-ELF; npu3 (AIE4): preemptible full-ELF. */
-  const flow_type flow = dev_filter_is_aie4(id, dev) ?
-    PREEMPT_FULL_ELF : PREEMPT_PARTIAL_ELF;
+  static const flow_type flow_preempt_partial = PREEMPT_PARTIAL_ELF;
+  static const flow_type flow_full = PREEMPT_FULL_ELF;
+  const flow_type flow = [&]() -> flow_type {
+    try {
+      return get_binary_info(dev, "good", &flow_preempt_partial).flow;
+    } catch (const std::runtime_error&) {
+      return get_binary_info(dev, "good", &flow_full).flow;
+    }
+  }();
 
   io_test_parameter_init(IO_TEST_NO_PERF, IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT);
 
@@ -1349,9 +1355,16 @@ TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, ar
   bo_set.run();
 
   std::vector<uint64_t> params = {IO_TEST_NORMAL_RUN, 1};
-  /* NPU4-class (AIE2): partial-ELF; NPU3 (AIE4): FULL_ELF */
-  const flow_type good_flow = dev_filter_is_aie4(id, sdev.get()) ?
-    FULL_ELF : PARTIAL_ELF;
+  /* Prefer partial-ELF when the catalog has it; else FULL_ELF. */
+  static const flow_type flow_partial = PARTIAL_ELF;
+  static const flow_type flow_full = FULL_ELF;
+  const flow_type good_flow = [&]() -> flow_type {
+    try {
+      return get_binary_info(sdev.get(), "good", &flow_partial).flow;
+    } catch (const std::runtime_error&) {
+      return get_binary_info(sdev.get(), "good", &flow_full).flow;
+    }
+  }();
   elf_io(id, sdev, params, "good", &good_flow);
 }
 
@@ -1369,9 +1382,17 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   device* dev = sdev.get();
   const char *good_tag = "good";
 
-  /* NPU4-class: partial-ELF; NPU3: FULL_ELF */
-  const flow_type good_flow = dev_filter_is_aie4(id, dev) ?
-    FULL_ELF : PARTIAL_ELF;
+  /* Prefer partial-ELF when the catalog has it; else FULL_ELF. */
+  static const flow_type flow_partial = PARTIAL_ELF;
+  static const flow_type flow_full = FULL_ELF;
+  const binary_info& good_info = [&]() -> const binary_info& {
+    try {
+      return get_binary_info(dev, good_tag, &flow_partial);
+    } catch (const std::runtime_error&) {
+      return get_binary_info(dev, good_tag, &flow_full);
+    }
+  }();
+  flow_type good_flow = good_info.flow;
 
   // Two good ones
   auto good_bo_set1 = create_bo_set_for_device(dev, false, good_tag, &good_flow);
