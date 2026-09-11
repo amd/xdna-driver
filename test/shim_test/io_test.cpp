@@ -6,6 +6,7 @@
 #include "multi_threads.h"
 #include "speed.h"
 #include "dev_info.h"
+#include "dev_filter.h"
 #include "io_param.h"
 
 #include "core/common/device.h"
@@ -843,15 +844,8 @@ TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sde
   auto dev = sdev.get();
   const int64_t pid = static_cast<int64_t>(::getpid());
   /* npu4 (AIE2): preemptible partial-ELF; npu3 (AIE4): preemptible full-ELF. */
-  static const flow_type flow_preempt_partial = PREEMPT_PARTIAL_ELF;
-  static const flow_type flow_full = PREEMPT_FULL_ELF;
-  const flow_type flow = [&]() -> flow_type {
-    try {
-      return get_binary_info(dev, "good", &flow_preempt_partial).flow;
-    } catch (const std::runtime_error&) {
-      return get_binary_info(dev, "good", &flow_full).flow;
-    }
-  }();
+  const flow_type flow = dev_filter_is_aie4(id, dev) ?
+    PREEMPT_FULL_ELF : PREEMPT_PARTIAL_ELF;
 
   io_test_parameter_init(IO_TEST_NO_PERF, IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT);
 
@@ -1283,8 +1277,7 @@ TEST_aie4_pf_flr(device::id_type id, std::shared_ptr<device>& sdev,
   for (device::id_type i = 0; i < nuser; i++) {
     std::shared_ptr<device> vf = (i == id) ? sdev : get_userpf_device(i);
     try {
-      auto devid = device_query<query::pcie_device>(vf.get());
-      if (devid != npu3_device_id1 && devid != npu3a_device_id1)
+      if (!dev_filter_is_npu3vf(i, vf.get()))
         continue;
     } catch (const std::exception&) {
       continue;
@@ -1356,16 +1349,9 @@ TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, ar
   bo_set.run();
 
   std::vector<uint64_t> params = {IO_TEST_NORMAL_RUN, 1};
-  /* NPU4-class (AIE2): prefer partial-ELF, NPU3 (AIE4): FULL_ELF */
-  static const flow_type flow_partial = PARTIAL_ELF;
-  static const flow_type flow_full = FULL_ELF;
-  const flow_type good_flow = [&]() -> flow_type {
-    try {
-      return get_binary_info(sdev.get(), "good", &flow_partial).flow;
-    } catch (const std::runtime_error&) {
-      return get_binary_info(sdev.get(), "good", &flow_full).flow;
-    }
-  }();
+  /* NPU4-class (AIE2): partial-ELF; NPU3 (AIE4): FULL_ELF */
+  const flow_type good_flow = dev_filter_is_aie4(id, sdev.get()) ?
+    FULL_ELF : PARTIAL_ELF;
   elf_io(id, sdev, params, "good", &good_flow);
 }
 
@@ -1383,17 +1369,9 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   device* dev = sdev.get();
   const char *good_tag = "good";
 
-  /* NPU4-class: prefer partial-ELF, NPU3: FULL_ELF */
-  static const flow_type flow_partial = PARTIAL_ELF;
-  static const flow_type flow_full = FULL_ELF;
-  const binary_info& good_info = [&]() -> const binary_info& {
-    try {
-      return get_binary_info(dev, good_tag, &flow_partial);
-    } catch (const std::runtime_error&) {
-      return get_binary_info(dev, good_tag, &flow_full);
-    }
-  }();
-  flow_type good_flow = good_info.flow;
+  /* NPU4-class: partial-ELF; NPU3: FULL_ELF */
+  const flow_type good_flow = dev_filter_is_aie4(id, dev) ?
+    FULL_ELF : PARTIAL_ELF;
 
   // Two good ones
   auto good_bo_set1 = create_bo_set_for_device(dev, false, good_tag, &good_flow);
@@ -1425,7 +1403,7 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   // When runlist cmd fails (non-timeout), the index returned from FW is accurate (1).
   // For a timeout firmware leaves the runlist read index at 0, so error_index
   // is not asserted and bad_index only locates the command packet.
-  const bool is_npu4 = (good_info.device == npu4_device_id);
+  const bool is_npu4 = dev_filter_is_npu4(id, dev);
   const uint32_t bad_index = is_timeout ? (is_npu4 ? 0 : 1) : 1;
   const uint32_t bad_state = is_timeout ? ERT_CMD_STATE_TIMEOUT : ERT_CMD_STATE_ERROR;
   io_test_bo_set_base *bad = is_timeout ? &timeout_bo_set : error_bo_set.get();
