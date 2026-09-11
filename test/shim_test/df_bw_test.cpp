@@ -3,7 +3,6 @@
 
 #include "io.h"
 #include "dev_info.h"
-#include "dev_filter.h"
 #include "exec_buf.h"
 
 #include "core/common/device.h"
@@ -157,14 +156,14 @@ void
 TEST_df_bw(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
-  const bool is_aie4 = dev_filter_is_aie4(id, dev);
-  const flow_type flow = is_aie4 ? FULL_ELF : PARTIAL_ELF;
+
+  const auto& info = get_binary_info(dev, df_bw_tag, nullptr);
 
   std::unique_ptr<io_test_bo_set_base> bo_set;
-  if (is_aie4)
-    bo_set = std::make_unique<df_bw_elf_io_test_bo_set>(dev);
-  else
+  if (info.flow == PARTIAL_ELF)
     bo_set = std::make_unique<df_bw_io_test_bo_set>(dev);
+  else
+    bo_set = std::make_unique<df_bw_elf_io_test_bo_set>(dev);
 
   auto& bos   = bo_set->get_bos();
   auto* in_p  = reinterpret_cast<uint32_t*>(bos[IO_TEST_BO_INPUT].tbo->map());
@@ -176,7 +175,7 @@ TEST_df_bw(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 
   constexpr int iterations = 10;
   /* Run loop — create hwctx and iterate iterations times */
-  hw_ctx hwctx{dev, df_bw_tag, &flow};
+  hw_ctx hwctx{dev, df_bw_tag, &info.flow};
   auto hwq = hwctx.get()->get_hw_queue();
   auto cbo = bos[IO_TEST_BO_CMD].tbo.get();
 
