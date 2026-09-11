@@ -4,6 +4,7 @@
  */
 
 #include "drm/amdxdna_accel.h"
+#include <linux/bits.h>
 
 #include "aie4.h"
 #include "aie4_msg_priv.h"
@@ -25,16 +26,26 @@
  */
 
 /*
- * Firmware/CERT protocol version negotiation: advertise only the base
- * major/minimum-minor npu12 speaks. No optional feature bits are claimed.
+ * Firmware protocol version negotiation: advertise the base major/minimum-minor
+ * the NPU firmware speaks.
  */
 static const struct amdxdna_fw_feature_tbl npu12_fw_feature_table[] = {
-	{ .major = 6, .min_minor = 0 },
+	{ .major = 1, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_GET_COREDUMP), .major = 1, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_RW_ACCESS), .major = 1, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_FW_LOG), .major = 1, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_FW_TRACE), .major = 1, .min_minor = 0 },
 	{ 0 }
 };
 
+/*
+ * CERT protocol negotiation: advertise the expected HSA host-queue protocol
+ * version 1.0, the same as the PCI npu3 CERT, with AIE4_HSA_COMMAND at that
+ * version.
+ */
 static const struct amdxdna_fw_feature_tbl npu12_cert_feature_table[] = {
-	{ .major = 1, .min_minor = 6 },
+	{ .major = 1, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_HSA_COMMAND), .major = 1, .min_minor = 0 },
 	{ 0 }
 };
 
