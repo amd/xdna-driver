@@ -371,6 +371,15 @@ get_cmd_id() const
   return m_cmd_id;
 }
 
+void*
+xdna_bo::
+vaddr() const
+{
+  if (m_uptr)
+    return m_uptr;
+  return m_ptr;
+}
+
 void
 xdna_bo::
 get_drm_bo_info(uint32_t boh)

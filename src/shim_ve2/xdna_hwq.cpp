@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
+#include "core/include/ert.h"
 #include "shim_debug.h"
 #include "xdna_bo.h"
 #include "xdna_hwq.h"
@@ -113,6 +114,38 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
   shim_debug("Command submitted: hwctx=%u, seq=%ld", hwctx_id, id);
 }
 
+static int
+cmd_bo_complete(shim_xdna_edge::xdna_bo *boh, uint32_t *state_out)
+{
+  auto cmdpkt = reinterpret_cast<volatile ert_packet *>(boh->vaddr());
+
+  if (!cmdpkt)
+    return 0;
+
+  uint32_t state = cmdpkt->state;
+  if (state_out)
+    *state_out = state;
+  return state >= ERT_CMD_STATE_COMPLETED;
+}
+
+int
+xdna_hwq::
+poll_command(xrt_core::buffer_handle *cmd_bo) const
+{
+  if (!cmd_bo)
+    shim_err(EINVAL, "poll_command: cmd_bo is NULL");
+
+  auto boh = static_cast<shim_xdna_edge::xdna_bo*>(cmd_bo);
+  uint32_t state = 0;
+
+  if (!cmd_bo_complete(boh, &state))
+    return 0;
+
+  shim_debug("poll path: command complete seq=%ld state=%u",
+             boh->get_cmd_id(), state);
+  return 1;
+}
+
 int
 xdna_hwq::
 wait_command(xrt_core::buffer_handle *cmd_bo, uint32_t timeout_ms) const
@@ -130,8 +163,13 @@ wait_command(xrt_core::buffer_handle *cmd_bo, uint32_t timeout_ms) const
 
   auto hwctx_id = m_hwctx->get_slotidx();
 
-  shim_debug("Waiting for command: hwctx=%u, seq=%ld, timeout_ms=%u",
+  shim_debug("wait path: hwctx=%u seq=%ld timeout_ms=%u",
              hwctx_id, id, timeout_ms);
+
+  if (cmd_bo_complete(boh, nullptr)) {
+    shim_debug("wait path: already complete, skip WAIT_CMD seq=%ld", id);
+    return 1;
+  }
 
   amdxdna_drm_wait_cmd wcmd = {
     .hwctx = hwctx_id,

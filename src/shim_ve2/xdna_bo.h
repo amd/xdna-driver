@@ -140,6 +140,10 @@ public:
   uint64_t
   get_cmd_id() const;
 
+  // Host mapping of this BO, or nullptr if map() has not been called.
+  void*
+  vaddr() const;
+
   const xrt_core::device *m_core_device;
   std::shared_ptr<xdna_edgedev> m_edev;
   void* m_ptr = nullptr;
