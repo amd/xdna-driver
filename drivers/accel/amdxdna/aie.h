@@ -28,15 +28,13 @@ struct aie_msg_ops {
 		      u8 row, u8 col, u32 aie_addr,
 		      dma_addr_t dram_addr, u32 size);
 
-	int (*query_status)(struct aie_device *aie,
-			    struct amdxdna_msg_buf_hdl *buf_hdl,
+	int (*query_status)(struct amdxdna_msg_buf_hdl *buf_hdl,
 			    u32 *cols_filled, u32 *resp_size);
 
 	int (*query_telemetry)(struct aie_device *aie, char __user *buf, u32 size,
 			       struct amdxdna_drm_query_telemetry_header *header);
 	/* Optional per-arch FW health hook; leave NULL when unsupported. */
-	int (*fill_hwctx_health)(struct aie_device *aie,
-				 struct amdxdna_hwctx *hwctx,
+	int (*fill_hwctx_health)(struct amdxdna_hwctx *hwctx,
 				 struct amdxdna_drm_hwctx_entry *entry);
 
 	int  (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u32 level);
@@ -167,19 +165,15 @@ int aie_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg)
 int aie_check_protocol(struct aie_device *aie, u32 fw_major, u32 fw_minor);
 int aie_check_cert_protocol(struct aie_device *aie, u32 cert_major, u32 cert_minor);
 void amdxdna_vbnv_init(struct amdxdna_dev *xdna);
-int amdxdna_get_metadata(struct aie_device *aie, struct amdxdna_client *client,
-			 struct amdxdna_drm_get_info *args);
+int amdxdna_get_metadata(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 int amdxdna_get_aie_version(struct amdxdna_client *client,
 			    struct amdxdna_drm_get_info *args,
 			    struct amdxdna_drm_query_aie_version *version);
 int amdxdna_get_firmware_version(struct amdxdna_client *client,
 				 struct amdxdna_drm_get_info *args,
 				 struct amdxdna_drm_query_firmware_version *version);
-int amdxdna_get_aie_status(struct aie_device *aie,
-			   struct amdxdna_client *client,
-			   struct amdxdna_drm_get_info *args);
-int amdxdna_get_telemetry(struct aie_device *aie, struct amdxdna_client *client,
-			  struct amdxdna_drm_get_info *args);
+int amdxdna_get_aie_status(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
+int amdxdna_get_telemetry(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 int amdxdna_get_force_preempt_state(struct aie_device *aie, struct amdxdna_drm_get_info *args);
 int amdxdna_get_frame_boundary_preempt_state(struct aie_device *aie,
 					     struct amdxdna_drm_get_info *args);
