@@ -36,6 +36,8 @@ struct aie_msg_ops {
 	/* Optional per-arch FW health hook; leave NULL when unsupported. */
 	int (*fill_hwctx_health)(struct amdxdna_hwctx *hwctx,
 				 struct amdxdna_drm_hwctx_entry *entry);
+	/* Optional arm firmware auto coredump. Leave NULL when unused. */
+	int (*configure_auto_coredump)(struct aie_device *aie, u32 enabled);
 
 	int  (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u32 level);
 	int  (*fw_log_config)(struct amdxdna_dev *xdna, u32 level);
