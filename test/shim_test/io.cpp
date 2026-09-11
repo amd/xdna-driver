@@ -715,7 +715,7 @@ elf_io_negative_test_bo_set(device* dev, const std::string& tag)
   }
 
   m_is_aie4 = dev_filter_is_aie4(0, dev);
-  m_is_full_elf = m_is_aie4;
+  m_is_full_elf = (info.flow == FULL_ELF);
 
   // Expected code for the driver-synthesized AIE async error on an aie4 fault.
   uint64_t err_num = XRT_ERROR_NUM_KDS_EXEC;
@@ -726,7 +726,6 @@ elf_io_negative_test_bo_set(device* dev, const std::string& tag)
   m_expect_err_code = XRT_ERROR_CODE_BUILD(err_num, err_drv, err_severity, err_module, err_class);
 
   if (m_is_full_elf) {
-    m_is_full_elf = true;
     m_elf = xrt::elf(get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), nullptr));
     auto kernel_name = get_kernel_name(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
     try {
@@ -777,15 +776,14 @@ elf_io_gemm_test_bo_set(device* dev, const std::string& tag)
   : io_test_bo_set_base(dev, tag, nullptr)
 {
   const char* tag_c = tag.empty() ? nullptr : tag.c_str();
-  // npu3/npu3a: full-ELF gemm.elf; npu4: xclbin + sidecar gemm_int8.elf
-  m_is_full_elf = dev_filter_is_aie4(0, dev);
+  const auto& info = get_binary_info(dev, tag_c, nullptr);
+  m_is_full_elf = (info.flow == FULL_ELF);
+  m_is_aie4 = dev_filter_is_aie4(0, dev);
   std::string elf_path;
-  if (m_is_full_elf) {
+  if (m_is_full_elf)
     elf_path = get_binary_path(dev, tag_c, nullptr);
-  } else {
-    const auto& info = get_binary_info(dev, tag_c, nullptr);
+  else
     elf_path = m_local_data_path + info.extra.at("elf_name");
-  }
   m_elf = xrt::elf(elf_path);
 
   try {
@@ -1078,16 +1076,16 @@ init_cmd(hw_ctx& hwctx, bool dump)
       elf_patcher::buf_type::ctrltext, m_elf, patch_id);
   }
 
-  // Get a debug BO (full-ELF: uc_debug with fixed layout; else legacy size)
-  const size_t dbo_size = m_is_full_elf ? m_gemm_uc_debug_size : 4096;
+  // Get a debug BO (AIE4: uc_debug with fixed layout; else legacy size)
+  const size_t dbo_size = m_is_aie4 ? m_gemm_uc_debug_size : 4096;
   auto boflags = XRT_BO_FLAGS_CACHEABLE;
-  auto ext_boflags = m_is_full_elf ? (XRT_BO_USE_UC_DEBUG << 4) : (XRT_BO_USE_DEBUG << 4);
+  auto ext_boflags = m_is_aie4 ? (XRT_BO_USE_UC_DEBUG << 4) : (XRT_BO_USE_DEBUG << 4);
   m_dbo = hwctx.get()->alloc_bo(dbo_size, get_bo_flags(boflags, ext_boflags));
   auto dbo_p = static_cast<int32_t *>(m_dbo->map(buffer_handle::map_type::write));
   std::memset(dbo_p, 0xff, dbo_size);
   m_dbo->sync(buffer_handle::direction::host2device, dbo_size, 0);
 
-  if (m_is_full_elf) {
+  if (m_is_aie4) {
     std::map<uint32_t, size_t> buf_map{{0, m_gemm_uc_debug_size}};
     m_dbo->config(hwctx.get(), buf_map);
   }
@@ -1228,7 +1226,7 @@ verify_result()
   m_dbo.get()->sync(buffer_handle::direction::device2host, m_dbo->get_properties().size, 0);
   auto dbo_p = static_cast<int32_t *>(m_dbo->map(buffer_handle::map_type::write));
 
-  if (m_is_full_elf) {
+  if (m_is_aie4) {
     const uint32_t* words = reinterpret_cast<const uint32_t*>(dbo_p);
 
     // The debug BO holds one (core_idx, cycle_count) pair per SAVE_REGISTER in
@@ -1347,7 +1345,7 @@ void
 elf_io_gemm_test_bo_set::
 teardown(hw_ctx& hwctx)
 {
-  if (m_is_full_elf && m_dbo)
+  if (m_is_aie4 && m_dbo)
     m_dbo->unconfig(hwctx.get());
 }
 

@@ -254,6 +254,7 @@ private:
 
   std::unique_ptr<xrt_core::buffer_handle> m_dbo;
   bool m_is_full_elf = false;
+  bool m_is_aie4 = false;
 };
 
 class elf_io_aie_debug_test_bo_set : public io_test_bo_set_base
