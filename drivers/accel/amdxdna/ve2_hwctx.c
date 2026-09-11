@@ -65,6 +65,8 @@ MODULE_PARM_DESC(enable_debug_queue, "Enable debug queue (must be set before hwc
 #define CTX_TIMER		(msecs_to_jiffies(1))	/* 1ms */
 #define VE2_RETRY_TIMEOUT_MS	5000	/* max wait for a free host-queue slot */
 
+static void ve2_completion_work(struct work_struct *work);
+
 /*
  * struct ve2_dpu_data - payload interpretation for ERT_START_DPU.
  * @dtrace_buffer:		dtrace buffer address
@@ -135,8 +137,10 @@ static int ve2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_j
 static struct amdxdna_sched_job *ve2_hwctx_get_job(struct amdxdna_hwctx *hwctx, u64 seq)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct amdxdna_sched_job *job;
 
-	return vp->pending[get_job_idx(seq)];
+	job = vp->pending[get_job_idx(seq)];
+	return job && job->seq == seq ? job : NULL;
 }
 
 static void ve2_hwctx_job_release(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
@@ -151,12 +155,21 @@ static void ve2_hwctx_job_release(struct amdxdna_hwctx *hwctx, struct amdxdna_sc
 			cmd_cnt = cmd_chain->command_count;
 	}
 
-	guard(mutex)(&vp->privctx_lock);
-	vp->completed += cmd_cnt;
-	if (vp->completed == vp->submitted)
-		vp->state = AMDXDNA_HWCTX_STATE_IDLE;
-	vp->pending[get_job_idx(job->seq)] = NULL;
+	mutex_lock(&vp->privctx_lock);
+	if (vp->pending[get_job_idx(job->seq)] == job) {
+		vp->completed += cmd_cnt;
+		if (vp->completed == vp->submitted)
+			vp->state = AMDXDNA_HWCTX_STATE_IDLE;
+		vp->pending[get_job_idx(job->seq)] = NULL;
+	}
+	mutex_unlock(&vp->privctx_lock);
+
 	ve2_job_put(job);
+	/*
+	 * The completion IRQ wakes queue-full submitters before completion_work
+	 * clears pending[]. Wake them again after the slot is actually reusable.
+	 */
+	wake_up_interruptible_all(&vp->waitq);
 }
 
 static struct host_queue_packet *
@@ -991,6 +1004,7 @@ static void ve2_hwctx_poll_timer(struct timer_list *t)
 	struct amdxdna_ctx_priv *vp = timer_container_of(vp, t, event_timer);
 
 	wake_up_interruptible_all(&vp->waitq);
+	ve2_hwctx_queue_completion(vp->hwctx);
 	mod_timer(&vp->event_timer, jiffies + CTX_TIMER);
 }
 
@@ -1029,11 +1043,14 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	hwctx->priv = priv;
 	priv->hw_priv = vp;
+	vp->hwctx = hwctx;
 
 	init_waitqueue_head(&priv->job_free_wq);
 	mutex_init(&vp->privctx_lock);
 	mutex_init(&vp->coredump_cache.lock);
 	init_waitqueue_head(&vp->waitq);
+	INIT_WORK(&vp->completion_work, ve2_completion_work);
+	atomic_set(&vp->nwaiters, 0);
 
 	/* VE2: num_tiles is the number of AIE columns (not a 2D tile count). */
 	if (!hwctx->num_tiles) {
@@ -1174,7 +1191,11 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		vp->hs_buf_size = 0;
 	}
 
+	if (enable_polling && vp)
+		timer_delete_sync(&vp->event_timer);
 	ve2_mgmt_destroy_partition(hwctx);
+	if (vp)
+		cancel_work_sync(&vp->completion_work);
 	ve2_free_hsa_queue(hwctx);
 
 	if (enable_debug_queue && vp && vp->dbg_queue.dbg_queue_p) {
@@ -1186,8 +1207,6 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		u32 submitted = vp->submitted;
 		u32 completed = vp->completed;
 
-		if (enable_polling)
-			timer_delete_sync(&vp->event_timer);
 		kfree(vp->hwctx_config);
 		vp->hwctx_config = NULL;
 		vfree(vp->coredump_cache.buf);
@@ -1471,6 +1490,128 @@ static void ve2_process_hqc_completion(struct amdxdna_hwctx *hwctx, struct amdxd
 }
 
 /*
+ * Publish firmware completions into command BOs and release their driver-side
+ * jobs independently of WAIT_CMD. Firmware writes the HQC slots and advances
+ * read_index; this worker is the bridge from that queue state to the
+ * userspace-visible ERT state for every job that no thread waits on.
+ *
+ * hq_lock serializes this path with ve2_cmd_wait(), making pending[] a
+ * single-reaper ownership check. A waiter that arrives after this worker sees
+ * no job and returns success without touching the command BO.
+ */
+static void ve2_completion_work(struct work_struct *work)
+{
+	struct amdxdna_ctx_priv *vp =
+		container_of(work, struct amdxdna_ctx_priv, completion_work);
+	struct amdxdna_hwctx *hwctx = vp->hwctx;
+	struct ve2_hsa_queue *queue = &vp->hsa_queue;
+	u64 read_index;
+	int i;
+
+	if (!hwctx || !queue->hsa_queue_p)
+		return;
+
+	mutex_lock(&queue->hq_lock);
+	hsa_queue_sync_read_index_for_read(queue);
+	read_index = queue->hsa_queue_p->hq_header.read_index;
+
+	for (i = 0; i < HWCTX_MAX_CMDS; i++) {
+		struct amdxdna_sched_job *job;
+
+		mutex_lock(&vp->privctx_lock);
+		job = vp->pending[i];
+		if (job && job->seq < read_index)
+			kref_get(&job->refcnt);
+		else
+			job = NULL;
+		mutex_unlock(&vp->privctx_lock);
+
+		if (!job)
+			continue;
+
+		ve2_process_hqc_completion(hwctx, job, job->seq);
+		trace_amdxdna_debug_point(hwctx->name, job->seq, "job complete");
+		trace_xdna_cmd_complete(hwctx->name, hwctx->id, job->seq,
+					amdxdna_cmd_get_state(job->cmd_bo));
+		ve2_hwctx_job_release(hwctx, job);
+		ve2_job_put(job);
+	}
+	mutex_unlock(&queue->hq_lock);
+}
+
+/*
+ * Queue the completion worker from the completion IRQ or the poll timer.
+ *
+ * The worker only has to exist for jobs whose result nobody blocks on. A thread
+ * inside ve2_cmd_wait() is woken by the same event and reaps its own job, so
+ * when every outstanding job can already have a waiter the worker would add a
+ * kworker wakeup and hq_lock traffic to the WAIT_CMD path without doing any
+ * work. Skip it in that case; a waiter that leaves a completed job behind hands
+ * it over through ve2_queue_completion_if_unreaped() before it returns.
+ *
+ * pending[] and nwaiters are sampled without privctx_lock because this is only
+ * a scheduling hint: over-scheduling costs an empty worker pass, and
+ * under-scheduling is corrected by the waiter or by the next completion.
+ */
+void ve2_hwctx_queue_completion(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	u32 pending = 0, waiters;
+	int i;
+
+	if (!vp)
+		return;
+
+	for (i = 0; i < HWCTX_MAX_CMDS; i++) {
+		if (READ_ONCE(vp->pending[i]))
+			pending++;
+	}
+
+	/* No job in flight: nothing for the worker to publish (idle poll timer). */
+	if (!pending)
+		return;
+
+	waiters = (u32)atomic_read(&vp->nwaiters);
+	if (waiters && waiters >= pending)
+		return;
+
+	schedule_work(&vp->completion_work);
+}
+
+/*
+ * Hand over any completed-but-unreaped job to the worker. Called by a waiter
+ * that still holds hq_lock, because ve2_hwctx_queue_completion() may have
+ * skipped the completion IRQ for a job this thread is not waiting on.
+ */
+static void ve2_queue_completion_if_unreaped(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_hsa_queue *queue = &vp->hsa_queue;
+	bool unreaped = false;
+	u64 read_index;
+	int i;
+
+	lockdep_assert_held(&queue->hq_lock);
+
+	if (!queue->hsa_queue_p)
+		return;
+
+	hsa_queue_sync_read_index_for_read(queue);
+	read_index = queue->hsa_queue_p->hq_header.read_index;
+
+	mutex_lock(&vp->privctx_lock);
+	for (i = 0; i < HWCTX_MAX_CMDS && !unreaped; i++) {
+		struct amdxdna_sched_job *job = vp->pending[i];
+
+		unreaped = job && job->seq < read_index;
+	}
+	mutex_unlock(&vp->privctx_lock);
+
+	if (unreaped)
+		schedule_work(&vp->completion_work);
+}
+
+/*
  * Capture CERT firmware health telemetry for each column of the context and
  * write it into the timed-out command BO payload, so XRT can surface per-uC
  * state (idle/misc status, FW state, fault PC/EAR/ESR, ...) via the timed-out
@@ -1610,6 +1751,11 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 
 	trace_xdna_cmd_wait_start(hwctx->name, hwctx->id, seq);
 
+	/*
+	 * Publishing this thread as a waiter lets the completion IRQ skip the
+	 * completion worker: this thread reaps its own job below.
+	 */
+	atomic_inc(&vp->nwaiters);
 	if (wait_jifs)
 		ret = wait_event_interruptible_timeout(vp->waitq,
 						       check_read_index(hwctx, seq),
@@ -1617,9 +1763,15 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 	else
 		ret = wait_event_interruptible(vp->waitq,
 					       check_read_index(hwctx, seq));
+	atomic_dec(&vp->nwaiters);
 
 	/* Interrupted by a signal; the command stays in flight for retry. */
 	if (ret < 0) {
+		/*
+		 * This thread reaps nothing, so let the worker cover the
+		 * completions the IRQ skipped while it was blocked.
+		 */
+		schedule_work(&vp->completion_work);
 		trace_xdna_cmd_wait_done(hwctx->name, hwctx->id, seq, ret);
 		return ret;
 	}
@@ -1635,12 +1787,21 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 		kref_get(&job->refcnt);
 	mutex_unlock(&vp->privctx_lock);
 
-	/* Already completed and released by another waiter. */
+	/* Already completed and released by another waiter or by the worker. */
 	if (!job) {
+		ve2_queue_completion_if_unreaped(hwctx);
 		mutex_unlock(&vp->hsa_queue.hq_lock);
 		trace_xdna_cmd_wait_done(hwctx->name, hwctx->id, seq, 0);
 		return 0;
 	}
+
+	/*
+	 * The timeout result can become stale before hq_lock is acquired. Re-read
+	 * read_index while serialized with completion_work so a real completion is
+	 * never overwritten with TIMEOUT.
+	 */
+	if (timed_out && check_read_index(hwctx, seq))
+		timed_out = false;
 
 	/*
 	 * Treat as a timeout when the timed wait expired, or when a MISC
@@ -1664,6 +1825,7 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 	ve2_hwctx_job_release(hwctx, job);
 	ve2_job_put(job);
 
+	ve2_queue_completion_if_unreaped(hwctx);
 	mutex_unlock(&vp->hsa_queue.hq_lock);
 
 	trace_xdna_cmd_wait_done(hwctx->name, hwctx->id, seq, 0);

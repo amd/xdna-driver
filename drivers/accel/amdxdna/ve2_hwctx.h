@@ -10,11 +10,13 @@
 #ifndef _VE2_HWCTX_H_
 #define _VE2_HWCTX_H_
 
+#include <linux/atomic.h>
 #include <linux/ktime.h>
 #include <linux/mutex.h>
 #include <linux/timer.h>
 #include <linux/types.h>
 #include <linux/wait.h>
+#include <linux/workqueue.h>
 
 #include "amdxdna_ctx.h"
 #include "ve2_host_queue.h"
@@ -70,6 +72,7 @@ struct ve2_coredump_cache {
 
 /* VE2-specific per-hwctx state. Lives at hwctx->priv->hw_priv. */
 struct amdxdna_ctx_priv {
+	struct amdxdna_hwctx		*hwctx;
 	struct mutex			privctx_lock;	/* protect VE2 hwctx state */
 	u32				state;
 	u32				submitted;
@@ -93,6 +96,8 @@ struct amdxdna_ctx_priv {
 	wait_queue_head_t		dbg_q_waitq;
 	wait_queue_head_t		waitq;
 	struct timer_list		event_timer;
+	struct work_struct		completion_work;
+	atomic_t			nwaiters;	/* threads inside ve2_cmd_wait() */
 
 	/* AIE partition management context backend. */
 	struct amdxdna_mgmtctx		*mgmtctx;
@@ -129,6 +134,7 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx);
 int ve2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms);
+void ve2_hwctx_queue_completion(struct amdxdna_hwctx *hwctx);
 
 /* verbosity >= this level enables extra VE2 debug dumps (packets, FW state). */
 #define VERBOSITY_LEVEL_DBG	2

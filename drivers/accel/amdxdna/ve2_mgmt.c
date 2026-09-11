@@ -857,8 +857,10 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	pop_from_ctx_command_fifo_till(mgmtctx, active_ctx, read_index);
 
 	vp = ve2_hw_priv(active_ctx);
-	if (vp)
+	if (vp) {
 		wake_up_interruptible_all(&vp->waitq);
+		ve2_hwctx_queue_completion(active_ctx);
+	}
 
 	get_ctx_write_index(active_ctx, &write_index);
 	trace_xdna_irq_exit(active_ctx->name, mgmtctx->partition_id, active_ctx->id,
