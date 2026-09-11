@@ -235,14 +235,40 @@ static bool amdxdna_saved_coredump_filter(struct amdxdna_hwctx *hwctx, void *arg
 	return !!hwctx->coredump;
 }
 
+static int amdxdna_set_auto_coredump_state(struct amdxdna_client *client, u32 enabled)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_client *tmp_client;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (enabled > 1)
+		return -EINVAL;
+
+	XDNA_DBG(xdna, "Setting auto coredump to %u", enabled);
+
+	xdna->auto_coredump = enabled;
+
+	/* auto core dump is disabled, clean up all saved cores. */
+	if (!enabled) {
+		amdxdna_for_each_client(xdna, tmp_client) {
+			amdxdna_hwctx_walk(tmp_client, NULL, amdxdna_saved_coredump_filter,
+					   amdxdna_free_saved_coredump_cb);
+		}
+	}
+
+	return 0;
+}
+
 int
 amdxdna_set_auto_coredump_mode(struct amdxdna_client *client,
 			       struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_drm_attribute_state state = {};
 	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_client *tmp_client;
+	struct aie_device *aie = to_aie_dev(xdna);
 	u32 buf_sz;
+	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
@@ -256,19 +282,13 @@ amdxdna_set_auto_coredump_mode(struct amdxdna_client *client,
 	if (XDNA_MBZ_DBG(client->xdna, state.pad, sizeof(state.pad)))
 		return -EINVAL;
 
-	XDNA_DBG(xdna, "Setting auto coredump to %d", state.state);
-
-	xdna->auto_coredump = state.state;
-
-	/* auto core dump is disabled, clean up all saved cores. */
-	if (!state.state) {
-		amdxdna_for_each_client(xdna, tmp_client) {
-			amdxdna_hwctx_walk(tmp_client, NULL, amdxdna_saved_coredump_filter,
-					   amdxdna_free_saved_coredump_cb);
-		}
+	if (aie->msg_ops.configure_auto_coredump) {
+		ret = aie->msg_ops.configure_auto_coredump(aie, state.state);
+		if (ret)
+			return ret;
 	}
 
-	return 0;
+	return amdxdna_set_auto_coredump_state(client, state.state);
 }
 
 int
