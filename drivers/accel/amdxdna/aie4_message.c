@@ -345,6 +345,13 @@ int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 	/* Management channel buffer in the default domain: no PASID. */
 	req.pasid = 0;
 
+	/*
+	 * Unlike aie_send_mgmt_msg_wait(), this sends directly, so explicitly
+	 * reject a channel torn down by a prior mailbox timeout.
+	 */
+	if (!ndev->aie.mgmt_chann)
+		return -ENODEV;
+
 	XDNA_DBG(ndev->aie.xdna, "Register addr 0x%llx size 0x%x", addr, size);
 	return xdna_mailbox_send_msg(ndev->aie.mgmt_chann, &msg, TX_TIMEOUT);
 }
@@ -359,13 +366,18 @@ int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 	int ret;
 
 	req.context_id = hwctx->fw_ctx_id;
-	req.pasid = aie4_msg_pasid(hwctx->client);
+
+	req.pasid = 0;
 	req.num_buffers = num_bufs;
 	req.buffer_list_addr = to_dma_addr(list_hdl, 0);
 
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
-		XDNA_ERR(xdna, "Get coredump got status 0x%x", resp.status);
+		XDNA_ERR(xdna,
+			 "Get coredump ctx %u num_bufs %u failed, status 0x%x, detail 0x%x 0x%x 0x%x 0x%x",
+			 req.context_id, num_bufs, resp.status,
+			 resp.error_detail[0], resp.error_detail[1],
+			 resp.error_detail[2], resp.error_detail[3]);
 
 	return ret;
 }
@@ -532,6 +544,51 @@ int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us)
 		XDNA_DBG(ndev->aie.xdna, "Context switch hysteresis set to %u us", timeout_us);
 
 	return ret;
+}
+
+int aie4_configure_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u8 mode)
+{
+	struct aie4_msg_runtime_config_hws_debug_mode cfg = {
+		.mode = mode,
+		.ctx_id = 0,
+	};
+	int ret;
+
+	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_HWS_DEBUG_MODE,
+				   &cfg, sizeof(cfg));
+	if (ret)
+		XDNA_ERR(ndev->aie.xdna, "Failed to set HWS debug mode %u: %d",
+			 mode, ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "HWS debug mode=%u", mode);
+
+	return ret;
+}
+
+/*
+ * Auto coredump on AIE4 is firmware HWS debug mode ARM_ON_ERROR, not a
+ * driver-side timeout hook. Firmware ignores ctx_id for DISABLE and
+ * ARM_ON_ERROR.
+ */
+static int aie4_configure_auto_coredump(struct aie_device *aie, u32 enabled)
+{
+	struct amdxdna_dev_hdl *ndev = container_of(aie, struct amdxdna_dev_hdl, aie);
+	u8 mode = enabled ? AIE4_HWS_DEBUG_MODE_ARM_ON_ERROR
+			  : AIE4_HWS_DEBUG_MODE_DISABLE;
+
+	return aie4_configure_hws_debug_mode(ndev, mode);
+}
+
+void aie4_restore_hws_debug_mode(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+
+	if (!xdna->auto_coredump)
+		return;
+
+	if (aie4_configure_hws_debug_mode(ndev, AIE4_HWS_DEBUG_MODE_ARM_ON_ERROR))
+		XDNA_WARN(xdna,
+			  "Failed to restore HWS debug mode; auto coredump remains enabled");
 }
 
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
@@ -751,6 +808,7 @@ void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 	ndev->aie.msg_ops.query_status = aie4_query_status;
 	ndev->aie.msg_ops.query_telemetry = aie4_query_telemetry;
 	ndev->aie.msg_ops.fill_hwctx_health = aie4_fill_hwctx_health;
+	ndev->aie.msg_ops.configure_auto_coredump = aie4_configure_auto_coredump;
 	/*
 	 * A non-zero limit makes amdxdna_get_telemetry() emit a
 	 * firmware-context-id to driver-context-id map at the head of the

@@ -198,6 +198,7 @@ int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
+int aie4_configure_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u8 mode);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
 int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 				       u32 hw_context_id, u32 property,
@@ -251,6 +252,7 @@ int aie4_partition_init(struct amdxdna_dev_hdl *ndev);
 void aie4_partition_fini(struct amdxdna_dev_hdl *ndev);
 void aie4_restore_power_mode(struct amdxdna_dev_hdl *ndev);
 void aie4_restore_force_preemption(struct amdxdna_dev_hdl *ndev);
+void aie4_restore_hws_debug_mode(struct amdxdna_dev_hdl *ndev);
 int aie4_query_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_setup_aie(struct amdxdna_dev_hdl *ndev);
 int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
