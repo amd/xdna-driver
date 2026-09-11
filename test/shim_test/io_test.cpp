@@ -1290,7 +1290,7 @@ TEST_aie4_pf_flr(device::id_type id, std::shared_ptr<device>& sdev,
       continue;
     }
     std::cout << "starting in-flight VF workload on userpf[" << i << "]" << std::endl;
-    loads.push_back(prepare_flr_workload(vf));
+    loads.push_back(prepare_flr_workload(std::move(vf)));
   }
   for (auto& w : loads)
     submit_flr_workload(w);
