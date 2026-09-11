@@ -1458,9 +1458,10 @@ TEST_io_coredump(device::id_type id, std::shared_ptr<device>& sdev, arg_type& ar
   constexpr uint32_t CORE_IS_STALL_MASK = 0x1E; // Reset | MemStall_S | MemStall_W | MemStall_N
 
   auto dev = sdev.get();
-  // Use a dedicated timing-out ELF so the AIE MEM/REG read-write tests can keep
-  // using the original (completing) aie_debug ELF.
-  static const char* tag = "aie_debug_coredump";
+  const bool is_aie4 = dev_filter_is_aie4(id, dev);
+  // npu4 uses a dedicated timing-out aie_debug xclbin so the MEM/REG tests can
+  // keep the completing ELF. npu3 has no equivalent xclbin; reuse bad_timeout.
+  const char* tag = is_aie4 ? "bad_timeout" : "aie_debug_coredump";
 
   // Best-effort disable of auto coredump. This must never throw so it can be
   // safely called from the exception cleanup path without masking the original
@@ -1488,14 +1489,19 @@ TEST_io_coredump(device::id_type id, std::shared_ptr<device>& sdev, arg_type& ar
     std::cout << "[coredump] auto coredump state after enable = "
       << device_query<query::auto_coredump>(dev) << std::endl;
 
-    std::cout << "[coredump] loading timing-out aie_debug ELF workload and creating hw context" << std::endl;
-    elf_io_aie_debug_test_bo_set boset{dev, tag};
+    std::cout << "[coredump] loading timing-out ELF workload (" << tag
+      << ") and creating hw context" << std::endl;
+    std::unique_ptr<io_test_bo_set_base> boset;
+    if (is_aie4)
+      boset = std::make_unique<async_error_aie4_io_test_bo_set>(dev, tag);
+    else
+      boset = std::make_unique<elf_io_aie_debug_test_bo_set>(dev, tag);
     hw_ctx hwctx{dev, tag};
 
-    boset.init_cmd(hwctx, false);
-    boset.sync_before_run();
+    boset->init_cmd(hwctx, false);
+    boset->sync_before_run();
     auto hwq = hwctx.get()->get_hw_queue();
-    auto cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo.get();
+    auto cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo.get();
     std::cout << "[coredump] submitting command (context slot "
       << hwctx.get()->get_slotidx() << ")" << std::endl;
     hwq->submit_command(cbo->get());
@@ -1511,7 +1517,7 @@ TEST_io_coredump(device::id_type id, std::shared_ptr<device>& sdev, arg_type& ar
     if (cpkt->state != ERT_CMD_STATE_TIMEOUT)
       throw std::runtime_error(std::string("Expected command to time out, got state=")
         + std::to_string(cpkt->state));
-    boset.sync_after_run();
+    boset->sync_after_run();
 
     // On timeout the driver should have auto-captured an AIE coredump. The main
     // pass criteria is that a well-formed coredump payload is now available.
@@ -1544,18 +1550,25 @@ TEST_io_coredump(device::id_type id, std::shared_ptr<device>& sdev, arg_type& ar
     // The specific core/memtile register values below are workload dependent.
     // With the timing-out ELF they will differ from the original stall test, so
     // print them for inspection rather than asserting on them.
-    uint32_t st = load_u32(base + (0 * num_rows + 2) * TILE_ADDRESS_SPACE + CORE_STATUS_REG_OFFSET);
-    uint32_t id_status = load_u32(base + (2 * num_rows + 2) * TILE_ADDRESS_SPACE + CORE_STATUS_REG_OFFSET);
-    std::cout << "[coredump] core (0,2) status = 0x" << std::hex << st
-      << ", core (2,2) status = 0x" << id_status << std::dec << std::endl;
-    std::cout << "[coredump] core (0,2) enabled=" << ((st & CORE_ENABLE) ? 1 : 0)
-      << " stalled=" << ((st & CORE_IS_STALL_MASK) ? 1 : 0)
-      << ", core (2,2) enabled=" << ((id_status & CORE_ENABLE) ? 1 : 0) << std::endl;
+    auto tile_in_dump = [&](uint32_t col, uint32_t row) {
+      return (static_cast<size_t>(col) * num_rows + row) < num_tiles;
+    };
+    if (tile_in_dump(0, 2) && tile_in_dump(2, 2)) {
+      uint32_t st = load_u32(base + (0 * num_rows + 2) * TILE_ADDRESS_SPACE + CORE_STATUS_REG_OFFSET);
+      uint32_t id_status = load_u32(base + (2 * num_rows + 2) * TILE_ADDRESS_SPACE + CORE_STATUS_REG_OFFSET);
+      std::cout << "[coredump] core (0,2) status = 0x" << std::hex << st
+        << ", core (2,2) status = 0x" << id_status << std::dec << std::endl;
+      std::cout << "[coredump] core (0,2) enabled=" << ((st & CORE_ENABLE) ? 1 : 0)
+        << " stalled=" << ((st & CORE_IS_STALL_MASK) ? 1 : 0)
+        << ", core (2,2) enabled=" << ((id_status & CORE_ENABLE) ? 1 : 0) << std::endl;
+    }
 
-    const size_t memtile0_offset = (0 * num_rows + 1) * TILE_ADDRESS_SPACE;
-    uint32_t memtile0_word1 = load_u32(base + memtile0_offset + 1 * sizeof(uint32_t));
-    std::cout << "[coredump] memtile (0,1) word[1] = 0x" << std::hex << memtile0_word1
-      << std::dec << std::endl;
+    if (tile_in_dump(0, 1)) {
+      const size_t memtile0_offset = (0 * num_rows + 1) * TILE_ADDRESS_SPACE;
+      uint32_t memtile0_word1 = load_u32(base + memtile0_offset + 1 * sizeof(uint32_t));
+      std::cout << "[coredump] memtile (0,1) word[1] = 0x" << std::hex << memtile0_word1
+        << std::dec << std::endl;
+    }
 
     std::cout << "[coredump] auto coredump captured successfully on timeout" << std::endl;
   }

@@ -1081,7 +1081,7 @@ static int aie2_set_state(struct amdxdna_client *client,
 		ret = amdxdna_set_fw_trace_state(&ndev->aie, args);
 		break;
 	case DRM_AMDXDNA_SET_AUTO_COREDUMP:
-		ret = amdxdna_set_auto_coredump_mode(client, args);
+		ret = amdxdna_set_auto_coredump_mode(&ndev->aie, client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

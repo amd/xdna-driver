@@ -19,6 +19,7 @@
 #include "aie.h"
 #include "aie4.h"
 #include "aie4_msg_priv.h"
+#include "amdxdna_coredump.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_error.h"
 #include "amdxdna_drv.h"
@@ -88,6 +89,24 @@ static void aie4_ctx_reset(struct aie_device *aie, u32 hw_ctx_id)
 
 	hwctx = hw_ctx_id2hwctx(aie, hw_ctx_id, &idx);
 	if (hwctx) {
+		/*
+		 * Firmware can only dump a context that still exists, so capture
+		 * before the destroy below invalidates fw_ctx_id. A single fault
+		 * raises this path more than once (device event plus one
+		 * notification per reporting uC), and only the first dump runs
+		 * before the context is torn down, so keep it rather than
+		 * replacing it with a later failure. GET_ARRAY consumes it.
+		 */
+		if (xdna->auto_coredump && !hwctx->coredump) {
+			char *dump = amdxdna_get_hwctx_coredump(aie, hwctx);
+
+			if (IS_ERR(dump))
+				XDNA_ERR(xdna, "Failed to get core dump on ctx error: %ld",
+					 PTR_ERR(dump));
+			else
+				hwctx->coredump = dump;
+		}
+
 		/*
 		 * TDR reset: ERROR destroys the fw context and marks it reset
 		 * (has_reset), so the job worker times out the faulting job and
@@ -349,6 +368,14 @@ static void aie4_async_note_worker(struct work_struct *work)
 		XDNA_ERR(xdna, "async notification %s, ctx_id=%u",
 			 aie4_async_note_str(ev->event_id), ev->ctx_id);
 		aie4_async_note_ctx_error_recover(aie, ev->ctx_id);
+		break;
+	case AIE4_ASYNC_NOTE_DEBUG_MODE_ACTIVATED:
+		/*
+		 * Firmware armed with ARM_ON_ERROR reports that it has entered
+		 * debug mode. A coredump is only meaningful once this arrives.
+		 */
+		XDNA_INFO(xdna, "async notification %s, ctx_id=%u",
+			  aie4_async_note_str(ev->event_id), ev->ctx_id);
 		break;
 	case AIE4_ASYNC_NOTE_REPORT_DROPPED:
 		/* Nothing to recover, but make the lost report visible. */
