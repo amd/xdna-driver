@@ -52,6 +52,9 @@
 #define to_xdna_dev(drm_dev) \
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
 
+#define to_aie_dev(xdna_dev) \
+	((struct aie_device *)(xdna_dev)->dev_handle)
+
 extern const struct drm_driver amdxdna_drm_drv;
 
 struct amdxdna_client;

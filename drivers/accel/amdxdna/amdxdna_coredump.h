@@ -7,7 +7,6 @@
 
 #include <linux/types.h>
 
-struct aie_device;
 struct amdxdna_client;
 struct amdxdna_hwctx;
 struct amdxdna_drm_get_array;
@@ -23,11 +22,8 @@ struct amdxdna_coredump_buf_entry {
 	u32				reserved;
 } __packed;
 
-int amdxdna_get_coredump(struct aie_device *aie,
-			 struct amdxdna_client *client,
-			 struct amdxdna_drm_get_array *args);
-char *amdxdna_get_hwctx_coredump(struct aie_device *aie,
-				 struct amdxdna_hwctx *hwctx);
+int amdxdna_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
+char *amdxdna_get_hwctx_coredump(struct amdxdna_hwctx *hwctx);
 int amdxdna_get_auto_coredump_mode(struct amdxdna_client *client,
 				   struct amdxdna_drm_get_info *args);
 int amdxdna_set_auto_coredump_mode(struct amdxdna_client *client,

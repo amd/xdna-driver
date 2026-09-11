@@ -527,14 +527,12 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	struct app_health_report *report;
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
-	struct aie_device *aie;
 	bool fw_dead = false;
 	bool fw_fatal = false;
 	int ret;
 
 	xdna = hwctx->client->xdna;
 	ndev = xdna->dev_handle;
-	aie = &ndev->aie;
 
 	guard(mutex)(&xdna->dev_lock);
 
@@ -565,7 +563,7 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 
 	if (xdna->auto_coredump) {
 		kvfree(hwctx->coredump);
-		hwctx->coredump = amdxdna_get_hwctx_coredump(aie, hwctx);
+		hwctx->coredump = amdxdna_get_hwctx_coredump(hwctx);
 		if (IS_ERR(hwctx->coredump)) {
 			XDNA_ERR(xdna, "Failed to get core dump on job timing out: %ld",
 				 PTR_ERR(hwctx->coredump));

@@ -121,12 +121,11 @@ static int amdxdna_aie_tile_read_cb(struct amdxdna_hwctx *hwctx, void *arg)
 	}
 }
 
-int amdxdna_aie_tile_read(struct aie_device *aie,
-			  struct amdxdna_client *client,
-			  struct amdxdna_drm_get_array *args)
+int amdxdna_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_drm_aie_tile_access access = {};
 	struct amdxdna_dev *xdna = client->xdna;
+	struct aie_device *aie = to_aie_dev(xdna);
 	struct amdxdna_tile_rw_walk_arg wa;
 	struct amdxdna_client *tmp_client;
 	int ret = -ENOENT;
@@ -301,12 +300,11 @@ static int amdxdna_aie_tile_write_cb(struct amdxdna_hwctx *hwctx, void *arg)
 	}
 }
 
-int amdxdna_aie_tile_write(struct aie_device *aie,
-			   struct amdxdna_client *client,
-			   struct amdxdna_drm_set_state *args)
+int amdxdna_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_drm_aie_tile_access access = {};
 	struct amdxdna_dev *xdna = client->xdna;
+	struct aie_device *aie = to_aie_dev(xdna);
 	struct amdxdna_tile_rw_walk_arg wa;
 	struct amdxdna_client *tmp_client;
 	int ret = -ENOENT;
