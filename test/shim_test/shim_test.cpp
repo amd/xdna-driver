@@ -1744,7 +1744,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_export_bo_then_close_device, {}
   },
   test_case{ "get AIE coredump and check registers", {},
-    TEST_POSITIVE, {npu4}, {amdxdna}, TEST_io_coredump, {}
+    TEST_POSITIVE, {npu4, npu3}, {amdxdna}, TEST_io_coredump, {}
   },
   test_case{ "AIE MEM read/write", {},
     TEST_POSITIVE, {npu4}, {amdxdna}, TEST_io_aie_mem, {}
