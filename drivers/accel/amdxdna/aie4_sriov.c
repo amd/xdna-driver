@@ -20,7 +20,7 @@ static int aie4_destroy_vfs(struct amdxdna_dev_hdl *ndev)
 	DECLARE_AIE_MSG(aie4_msg_destroy_vfs, AIE4_MSG_OP_DESTROY_VFS);
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_ERR(ndev->aie.xdna, "destroy vfs op failed: %d", ret);
 
@@ -33,7 +33,7 @@ int aie4_create_vfs(struct amdxdna_dev_hdl *ndev, int num_vfs)
 	int ret;
 
 	req.vf_cnt = num_vfs;
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_ERR(ndev->aie.xdna, "create vfs op failed: %d", ret);
 
