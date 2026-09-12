@@ -41,6 +41,11 @@ const uint16_t npu3_device_id1 = 0x17f3;
 const uint16_t npu3a_device_id = 0x1b0a;
 const uint16_t npu3a_pf_device_id = 0x1b0b;
 const uint16_t npu3a_device_id1 = 0x1b0c;
+// npu12: platform (non-PCI) aie2ps part. Its device id comes from the device-tree
+// compatible "amd,xdna-<hex-id>", which the shim parses. 0x1234 is the current
+// bring-up id and must match the deployed device tree's compatible; replace it
+// (here and in the DT) once a real aie2ps device id is allocated.
+const uint16_t npu12_device_id = 0x1234;
 const uint16_t npu_ve2_device_id = 0xb052;
 const uint16_t npu4_device_id = 0x17f0;
 const uint16_t npu_any_revision_id = 0xffff;

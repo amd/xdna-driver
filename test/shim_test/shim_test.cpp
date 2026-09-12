@@ -159,7 +159,7 @@ static void TEST_async_error_io_any(device::id_type id, std::shared_ptr<device>&
 {
   if (dev_filter_is_npu4(id, sdev.get()))
     TEST_async_error_io(id, sdev, arg);
-  else if (dev_filter_is_aie4(id, sdev.get()))
+  else if (dev_filter_is_aie4(id, sdev.get()) || dev_filter_is_npu12(id, sdev.get()))
     TEST_async_error_aie4_io(id, sdev, arg);
   else
     throw std::runtime_error("async error io test: device is neither NPU4 nor NPU3");
@@ -1558,7 +1558,7 @@ std::vector<test_case> test_list {
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test async error", {},
-    TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_async_error_io_any, {}
+    TEST_POSITIVE, {npu4, npu3, npu3vf, npu12}, {}, TEST_async_error_io_any, {}
   },
   test_case{ "io test TDR: faulting head times out, queued jobs abort", {},
     TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_tdr_timeout_and_abort, {}

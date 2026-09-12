@@ -240,6 +240,41 @@ binary_info binary_infos[] = {
     .path = "local_shim_test_data/npu_ve2/nop/nop.elf",
     .flow = FULL_ELF,
   },
+  // npu12 (platform aie2ps, UMQ with kernel submission; routed through the aie4
+  // async-error test): aie2ps ELFs under its own npu12/ data dir.  Only the
+  // binaries exercised by that test are listed; add more tags as coverage grows.
+  {
+    .tag = "good",
+    .device = npu12_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu12/vadd/vadd.elf",
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "nop",
+    .device = npu12_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu12/nop/nop.elf",
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "bad_timeout",
+    .device = npu12_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    // aie2ps ELF that maskpolls forever so CERT hits its context timeout.
+    .path = "local_shim_test_data/npu12/bad/bad_timeout.elf",
+    .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "5"} },
+    .flow = FULL_ELF,
+  },
   {
     .tag = "good",
     .device = npu4_device_id,
