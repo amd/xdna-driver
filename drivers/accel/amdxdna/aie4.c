@@ -37,7 +37,7 @@ int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 
 	req.partition_col_start = 0;
 	req.partition_col_count = AIE4_TOTAL_COLUMN;
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "partition init failed: %d", ret);
 		return ret;
@@ -54,7 +54,7 @@ void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 	int ret;
 
 	req.partition_id = ndev->partition_id;
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_ERR(xdna, "partition fini failed: %d", ret);
 }
@@ -128,7 +128,7 @@ int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev)
 	u32 i;
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_WARN(xdna, "Get DPM freq table failed, ret %d status 0x%x",
 			  ret, resp.status);
