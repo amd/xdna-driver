@@ -142,7 +142,7 @@ static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context
 
 	req.hw_context_id = hw_context_id;
 	req.graceful_flag = FIELD_PREP(AIE4_MSG_GRACEFUL_FLAG, graceful);
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		if (graceful && resp.status == AIE4_MSG_STATUS_NO_RESTORE) {
 			XDNA_DBG(xdna, "ctx id %d destroyed, nothing to restore",
@@ -203,7 +203,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	XDNA_DBG(xdna, "pasid 0x%x, num_tiles %d, hsa[0x%x 0x%x]",
 		 req.pasid, req.request_num_tiles, req.hsa_addr_high, req.hsa_addr_low);
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	/*
 	 * Clear the id and state even on failure: the reply does not say whether
 	 * firmware consumed the id, and a create with a consumed id is rejected.
