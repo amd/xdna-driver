@@ -26,6 +26,7 @@ enum hw_type {
   npu3,     // AIE4 classic, device_id 0x17f1 / 0x1b0a (classic only)
   npu3vf,   // AIE4 VF, device_id 0x17f3 / 0x1b0c (SRIOV VF only)
   ve2,      // VE2 edge, device_id 0xb052
+  npu12,    // UMQ (kernel submission) on platform aie2ps, device_id 0x1234 (from DT compatible)
 };
 
 enum drv_type {
@@ -83,6 +84,12 @@ dev_filter_is_ve2(device::id_type id, device* dev)
   return device_query<query::pcie_device>(dev) == npu_ve2_device_id;
 }
 
+inline bool
+dev_filter_is_npu12(device::id_type id, device* dev)
+{
+  return device_query<query::pcie_device>(dev) == npu12_device_id;
+}
+
 // hw_filter_table: non_npu is entry 0 with nullptr check (special case handled by
 // dev_filter_is_non_npu). All other entries have a dedicated check function.
 // When adding a new hw_type, add it here and dev_filter_is_non_npu auto-updates.
@@ -93,6 +100,7 @@ inline const hw_filter_entry hw_filter_table[] = {
   { npu3,    dev_filter_is_npu3   },
   { npu3vf,  dev_filter_is_npu3vf},
   { ve2,     dev_filter_is_ve2    },
+  { npu12,   dev_filter_is_npu12  },
 };
 
 // driver checker
