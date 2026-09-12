@@ -96,6 +96,8 @@ struct aie_hw_ops {
 
 #define DECLARE_AIE_MSG(name, op) \
 	DECLARE_XDNA_MSG_COMMON(name, op, -1)
+#define aie_send_mgmt_msg_wait(aie, msg) \
+	aie_send_mgmt_msg_wait_quiet(aie, msg, 0)
 #define AIE_FEATURE_ON(aie, feature) test_bit(feature, &(aie)->feature_mask)
 
 #define PSP_REG_BAR(ndev, idx) ((ndev)->priv->psp_regs_off[(idx)].bar_idx)
@@ -163,7 +165,8 @@ struct amdxdna_rev_vbnv {
 /* aie.c */
 void aie_dump_mgmt_chann_debug(struct aie_device *aie);
 void aie_destroy_chann(struct aie_device *aie, struct mailbox_channel **chann);
-int aie_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg);
+int aie_send_mgmt_msg_wait_quiet(struct aie_device *aie, struct xdna_mailbox_msg *msg,
+				 u32 quiet_status);
 int aie_check_protocol(struct aie_device *aie, u32 fw_major, u32 fw_minor);
 int aie_check_cert_protocol(struct aie_device *aie, u32 cert_major, u32 cert_minor);
 void amdxdna_vbnv_init(struct amdxdna_dev *xdna);

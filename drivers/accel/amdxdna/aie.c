@@ -52,7 +52,12 @@ void aie_destroy_chann(struct aie_device *aie, struct mailbox_channel **chann)
 	*chann = NULL;
 }
 
-int aie_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg)
+/*
+ * @quiet_status: a reply status the caller handles itself. It still fails the
+ * call, it is just not logged here as a firmware error.
+ */
+int aie_send_mgmt_msg_wait_quiet(struct aie_device *aie, struct xdna_mailbox_msg *msg,
+				 u32 quiet_status)
 {
 	struct amdxdna_dev *xdna = aie->xdna;
 	struct xdna_notify *hdl = msg->handle;
@@ -68,8 +73,9 @@ int aie_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg)
 		aie_destroy_chann(aie, &aie->mgmt_chann);
 
 	if (!ret && *hdl->status) {
-		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
-			 msg->opcode, *hdl->data);
+		if (*hdl->status != quiet_status)
+			XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
+				 msg->opcode, *hdl->data);
 		ret = -EINVAL;
 	}
 

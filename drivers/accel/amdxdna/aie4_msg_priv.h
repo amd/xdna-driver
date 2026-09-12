@@ -47,6 +47,9 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
 	AIE4_MSG_OP_GET_DPM_FREQ_TABLE               = 0x30012,
 	AIE4_MSG_OP_GET_CURRENT_DPM_LEVEL            = 0x30013,
+	AIE4_MSG_OP_GET_CTX_RESTORE_POOL_SIZE        = 0x30014,
+	AIE4_MSG_OP_GET_CTX_RESTORE_POOL             = 0x30015,
+	AIE4_MSG_OP_SET_CTX_RESTORE_POOL             = 0x30016,
 
 	/* System control */
 	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x40001,
@@ -67,7 +70,9 @@ enum aie4_msg_status {
 	AIE4_MSG_STATUS_SUCCESS = 0x0,
 	AIE4_MSG_STATUS_ERROR = 0x1,
 	AIE4_MSG_STATUS_NOTSUPP = 0x2,
-	MAX_AIE4_MSG_STATUS_CODE = 0x4,
+	AIE4_MSG_STATUS_ASYNC_EVENT_MSGS_FULL = 0x3,
+	AIE4_MSG_STATUS_NO_RESTORE = 0x4,
+	MAX_AIE4_MSG_STATUS_CODE = 0x5,
 };
 
 enum aie4_msg_context_priority_band {
@@ -188,6 +193,35 @@ struct aie4_msg_destroy_hw_context_resp {
 	enum aie4_msg_status status;
 	__u16 restore_id;
 	__u16 resvd;
+} __packed;
+
+struct aie4_msg_get_ctx_restore_pool_size_req {
+	__u32 resvd;
+} __packed;
+
+struct aie4_msg_get_ctx_restore_pool_size_resp {
+	enum aie4_msg_status status;
+	__u32 buff_size;
+} __packed;
+
+struct aie4_msg_get_ctx_restore_pool_req {
+	__u64 buff_addr;
+	__u32 buff_size;
+	__u32 pasid;
+} __packed;
+
+struct aie4_msg_get_ctx_restore_pool_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+struct aie4_msg_set_ctx_restore_pool_req {
+	__u64 buff_addr;
+	__u32 buff_size;
+	__u32 pasid;
+} __packed;
+
+struct aie4_msg_set_ctx_restore_pool_resp {
+	enum aie4_msg_status status;
 } __packed;
 
 enum aie4_msg_configure_hw_context_property {
