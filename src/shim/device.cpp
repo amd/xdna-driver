@@ -21,6 +21,7 @@
 #include <climits>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -183,6 +184,46 @@ struct sysfs_fcn<std::string>
       throw xrt_core::query::sysfs_error(err);
   }
 };
+
+// A non-PCI amdxdna part carries its device id in the device-tree compatible,
+// as "amd,xdna-<hex-id>" (exposed at <dev>/of_node/compatible); this is the
+// device's own id, not an XRT invention.  Parse and return it, or 0 if no such
+// compatible is present.  The sysfs node is a NUL-separated list, so the id
+// token ends at the following NUL.
+static uint16_t
+platform_device_id(const std::shared_ptr<xrt_core::pci::dev>& pdev)
+{
+  std::string compat;
+  try {
+    compat = sysfs_fcn<std::string>::get(pdev, "", "of_node/compatible");
+  }
+  catch (const xrt_core::query::sysfs_error&) {
+    return 0;
+  }
+
+  static const std::string prefix = "amd,xdna-";
+  auto pos = compat.find(prefix);
+  if (pos == std::string::npos)
+    return 0;
+
+  return static_cast<uint16_t>(
+    std::strtoul(compat.c_str() + pos + prefix.size(), nullptr, 16));
+}
+
+// Device-aware is_aie4: a PCI part is matched by its device id; a platform
+// (non-PCI) part has no "device" sysfs node, so identify it by its device-tree
+// compatible instead.  Every amdxdna part on the platform bus is an aie4 part.
+static bool
+is_aie4(const xrt_core::device* device)
+{
+  const auto pdev = get_pcidev(device);
+  try {
+    return is_aie4(sysfs_fcn<uint16_t>::get(pdev, "", "device"));
+  }
+  catch (const xrt_core::query::sysfs_error&) {
+    return platform_device_id(pdev) != 0;
+  }
+}
 
 struct aie_info
 {
@@ -414,7 +455,7 @@ struct partition_info
     // rather than failing the whole query.
     std::optional<bool> is_aie4_dev;
     try {
-      is_aie4_dev = is_aie4(xrt_core::device_query<query::pcie_id>(device).device_id);
+      is_aie4_dev = is_aie4(device);
     }
     catch (const std::exception& e) {
       shim_debug("preemption enrichment skipped, device generation unknown: %s", e.what());
@@ -810,10 +851,35 @@ struct pcie_id
 
     const auto pdev = get_pcidev(device);
 
-    pcie_id.device_id = sysfs_fcn<uint16_t>::get(pdev, "", "device");
-    pcie_id.revision_id = sysfs_fcn<uint8_t>::get(pdev, "", "revision");
+    try {
+      pcie_id.device_id = sysfs_fcn<uint16_t>::get(pdev, "", "device");
+      pcie_id.revision_id = sysfs_fcn<uint8_t>::get(pdev, "", "revision");
+    }
+    catch (const xrt_core::query::sysfs_error&) {
+      // A platform (non-PCI) device has no "device"/"revision" sysfs nodes.
+      // Identify it by its device-tree compatible instead; re-throw otherwise.
+      auto id = platform_device_id(pdev);
+      if (!id)
+        throw;
+      pcie_id.device_id = id;
+      pcie_id.revision_id = 0;
+    }
 
     return pcie_id;
+  }
+};
+
+// query::pcie_device is the raw PCI device id.  Route it through pcie_id so the
+// platform npu12 (which lacks the "device" sysfs node) resolves via its
+// device-tree compatible instead of throwing.
+struct pcie_device
+{
+  using result_type = query::pcie_device::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    return pcie_id::get(device, key).device_id;
   }
 };
 
@@ -1713,10 +1779,10 @@ struct telemetry
     }
   };
 
-  static std::unique_ptr<telemetry_handler> create_telemetry_handler(uint16_t device_id) {
-    if (is_aie4(device_id))
+  static std::unique_ptr<telemetry_handler> create_telemetry_handler(const xrt_core::device* device) {
+    if (is_aie4(device))
       return std::make_unique<aie4_telemetry_handler>();
-    if (device_id != NPU4_DEVICE_ID)
+    if (xrt_core::device_query<xrt_core::query::pcie_id>(device).device_id != NPU4_DEVICE_ID)
       return std::make_unique<npu1_telemetry_handler>();
     return std::make_unique<telemetry_handler>();
   }
@@ -1726,8 +1792,7 @@ struct telemetry
   static result_type
   get(const xrt_core::device* device, key_type key)
   {
-    auto pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
-    auto telemetry = create_telemetry_handler(pcie_id.device_id);
+    auto telemetry = create_telemetry_handler(device);
     auto& pci_dev_impl = get_pcidev_impl(device);
 
     switch (key) {
@@ -2067,8 +2132,7 @@ struct cert_firmware_version
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    auto device_id = xrt_core::device_query<query::pcie_id>(device).device_id;
-    if (!is_aie4(device_id))
+    if (!is_aie4(device))
       return {};
 
     amdxdna_drm_query_firmware_version fw_version{};
@@ -2492,8 +2556,8 @@ initialize_query_table()
   emplace_func0_request<query::logic_uuids,                    default_value>();
   emplace_func0_request<query::pcie_bdf,                       bdf>();
   emplace_func0_request<query::pcie_id,                        pcie_id>();
+  emplace_func0_request<query::pcie_device,                    pcie_device>();
   emplace_func0_request<query::total_cols,                     total_cols>();
-  emplace_sysfs_get<query::pcie_device>                        ("", "device");
   emplace_sysfs_get<query::pcie_express_lane_width>            ("", "link_width");
   emplace_sysfs_get<query::pcie_express_lane_width_max>        ("", "link_width_max");
   emplace_sysfs_get<query::pcie_link_speed>                    ("", "link_speed");
