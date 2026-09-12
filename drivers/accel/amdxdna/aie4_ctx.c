@@ -124,7 +124,7 @@ static void aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_contex
 	int ret;
 
 	req.hw_context_id = hw_context_id;
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		XDNA_WARN(xdna, "destroy ctx id %d failed %d", hw_context_id, ret);
 }
@@ -173,7 +173,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	XDNA_DBG(xdna, "pasid 0x%x, num_tiles %d, hsa[0x%x 0x%x]",
 		 req.pasid, req.request_num_tiles, req.hsa_addr_high, req.hsa_addr_low);
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret) {
 		XDNA_ERR(xdna, "create ctx failed: %d", ret);
 		return ret;
