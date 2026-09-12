@@ -80,7 +80,6 @@ static int aie2_tdr_stop_hwctx(struct amdxdna_hwctx *hwctx, void *arg)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct app_health_report *report = NULL;
-	struct aie_device *aie = &ndev->aie;
 	struct drm_gpu_scheduler *sched;
 	struct drm_sched_job *s_job;
 	int ret;
@@ -96,7 +95,7 @@ static int aie2_tdr_stop_hwctx(struct amdxdna_hwctx *hwctx, void *arg)
 
 	if (xdna->auto_coredump) {
 		kvfree(hwctx->coredump);
-		hwctx->coredump = amdxdna_get_hwctx_coredump(aie, hwctx);
+		hwctx->coredump = amdxdna_get_hwctx_coredump(hwctx);
 		if (IS_ERR(hwctx->coredump)) {
 			XDNA_ERR(xdna, "Failed to get core dump on hwctx timing out: %ld",
 				 PTR_ERR(hwctx->coredump));

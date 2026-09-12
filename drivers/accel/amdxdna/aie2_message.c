@@ -472,11 +472,11 @@ static int amdxdna_hwctx_col_map(struct amdxdna_hwctx *hwctx, void *arg)
 	return 0;
 }
 
-int aie2_query_status(struct aie_device *aie, struct amdxdna_msg_buf_hdl *buf_hdl,
-		      u32 *cols_filled, u32 *resp_size)
+int aie2_query_status(struct amdxdna_msg_buf_hdl *buf_hdl, u32 *cols_filled, u32 *resp_size)
 {
 	DECLARE_AIE_MSG(aie_column_info, MSG_OP_QUERY_COL_STATUS);
-	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dev *xdna = buf_hdl->xdna;
+	struct aie_device *aie = to_aie_dev(xdna);
 	struct amdxdna_client *client;
 	u32 aie_bitmap = 0;
 	int ret;

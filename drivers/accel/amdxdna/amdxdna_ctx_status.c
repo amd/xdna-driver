@@ -19,7 +19,6 @@
 struct amdxdna_hwctx_status_ctx {
 	struct amdxdna_hwctx_key	key;
 
-	struct aie_device		*aie;
 	struct amdxdna_drm_get_array	*array_args;
 };
 
@@ -27,10 +26,10 @@ struct amdxdna_hwctx_status_ctx {
 static_assert(offsetof(struct amdxdna_hwctx_status_ctx, key) == 0,
 	      "key must be the first member for amdxdna_hwctx_match()");
 
-static int amdxdna_fill_hwctx_status_entry(struct aie_device *aie,
-					   struct amdxdna_hwctx *hwctx,
+static int amdxdna_fill_hwctx_status_entry(struct amdxdna_hwctx *hwctx,
 					   struct amdxdna_drm_get_array *array_args)
 {
+	struct aie_device *aie = to_aie_dev(hwctx->client->xdna);
 	struct amdxdna_drm_hwctx_entry *tmp __free(kfree) = NULL;
 	struct amdxdna_drm_hwctx_entry __user *buf;
 	u32 size;
@@ -66,7 +65,7 @@ static int amdxdna_fill_hwctx_status_entry(struct aie_device *aie,
 
 	/* Optional FW health is best-effort; ignore errors. */
 	if (aie->msg_ops.fill_hwctx_health)
-		aie->msg_ops.fill_hwctx_health(aie, hwctx, tmp);
+		aie->msg_ops.fill_hwctx_health(hwctx, tmp);
 
 	buf = u64_to_user_ptr(array_args->buffer);
 	size = min(sizeof(*tmp), array_args->element_size);
@@ -93,15 +92,13 @@ static int amdxdna_hwctx_status_cb(struct amdxdna_hwctx *hwctx, void *arg)
 	if (!amdxdna_client_visible(hwctx->client))
 		return 0;
 
-	return amdxdna_fill_hwctx_status_entry(ctx->aie, hwctx, ctx->array_args);
+	return amdxdna_fill_hwctx_status_entry(hwctx, ctx->array_args);
 }
 
-int amdxdna_get_hwctx_status(struct aie_device *aie,
-			     struct amdxdna_client *client,
-			     struct amdxdna_drm_get_info *args)
+int amdxdna_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_get_array array_args = {};
-	struct amdxdna_hwctx_status_ctx ctx = { .aie = aie };
+	struct amdxdna_hwctx_status_ctx ctx = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_client *tmp_client;
 	int ret = 0;
@@ -131,12 +128,11 @@ int amdxdna_get_hwctx_status(struct aie_device *aie,
 	return 0;
 }
 
-int amdxdna_query_ctx_status_array(struct aie_device *aie,
-				   struct amdxdna_client *client,
+int amdxdna_query_ctx_status_array(struct amdxdna_client *client,
 				   struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_drm_get_array array_args = {};
-	struct amdxdna_hwctx_status_ctx ctx = { .aie = aie };
+	struct amdxdna_hwctx_status_ctx ctx = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_client *tmp_client;
 	int ret = 0;
@@ -178,13 +174,12 @@ int amdxdna_query_ctx_status_array(struct aie_device *aie,
 	return 0;
 }
 
-int amdxdna_query_ctx_status_by_id(struct aie_device *aie,
-				   struct amdxdna_client *client,
+int amdxdna_query_ctx_status_by_id(struct amdxdna_client *client,
 				   struct amdxdna_drm_get_array *args)
 {
-	struct amdxdna_drm_hwctx_entry input = {};
 	struct amdxdna_drm_get_array array_args = {};
-	struct amdxdna_hwctx_status_ctx ctx = { .aie = aie };
+	struct amdxdna_drm_hwctx_entry input = {};
+	struct amdxdna_hwctx_status_ctx ctx = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_client *tmp_client;
 	int ret = -ENOENT;

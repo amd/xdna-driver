@@ -207,10 +207,9 @@ int amdxdna_get_firmware_version(struct amdxdna_client *client,
 	return ret;
 }
 
-int amdxdna_get_metadata(struct aie_device *aie,
-			 struct amdxdna_client *client,
-			 struct amdxdna_drm_get_info *args)
+int amdxdna_get_metadata(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
+	struct aie_device *aie = to_aie_dev(client->xdna);
 	int ret = 0;
 	u32 buf_sz;
 
@@ -221,12 +220,11 @@ int amdxdna_get_metadata(struct aie_device *aie,
 	return ret;
 }
 
-int amdxdna_get_aie_status(struct aie_device *aie,
-			   struct amdxdna_client *client,
-			   struct amdxdna_drm_get_info *args)
+int amdxdna_get_aie_status(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_aie_status status = {};
 	struct amdxdna_dev *xdna = client->xdna;
+	struct aie_device *aie = to_aie_dev(xdna);
 	struct amdxdna_msg_buf_hdl *buf_hdl;
 	u32 cols_filled = 0;
 	u32 resp_size = 0;
@@ -254,7 +252,7 @@ int amdxdna_get_aie_status(struct aie_device *aie,
 	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
 	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 
-	ret = aie->msg_ops.query_status(aie, buf_hdl, &cols_filled, &resp_size);
+	ret = aie->msg_ops.query_status(buf_hdl, &cols_filled, &resp_size);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get AIE status info, ret %d", ret);
 		goto out_free;
@@ -340,13 +338,12 @@ static int amdxdna_fill_hwctx_map(struct aie_device *aie, u32 *map)
 	return 0;
 }
 
-int amdxdna_get_telemetry(struct aie_device *aie,
-			  struct amdxdna_client *client,
-			  struct amdxdna_drm_get_info *args)
+int amdxdna_get_telemetry(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_telemetry_header *header __free(kfree) = NULL;
 	u32 telemetry_data_sz, header_sz, elem_num;
 	struct amdxdna_dev *xdna = client->xdna;
+	struct aie_device *aie = to_aie_dev(xdna);
 	u64 payload;
 	int ret;
 

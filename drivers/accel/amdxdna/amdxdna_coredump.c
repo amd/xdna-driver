@@ -21,7 +21,6 @@ static const size_t coredump_data_chunk_size = SZ_1M;
 struct amdxdna_coredump_walk_arg {
 	struct amdxdna_hwctx_key	key;
 
-	struct aie_device		*aie;
 	struct amdxdna_drm_get_array	*args;
 	u8 __user			*buf;
 	size_t				buf_size;
@@ -31,20 +30,22 @@ struct amdxdna_coredump_walk_arg {
 static_assert(offsetof(struct amdxdna_coredump_walk_arg, key) == 0,
 	      "key must be the first member for amdxdna_hwctx_match()");
 
-static size_t amdxdna_coredump_total_buf_size(struct aie_device *aie, struct amdxdna_hwctx *hwctx)
+static size_t amdxdna_coredump_total_buf_size(struct amdxdna_hwctx *hwctx)
 {
+	struct aie_device *aie = to_aie_dev(hwctx->client->xdna);
 	u32 orig_col = hwctx->num_col - hwctx->num_unused_col;
 	u32 num_bufs = aie->metadata.rows * orig_col;
 
 	return num_bufs * coredump_data_chunk_size;
 }
 
-char *amdxdna_get_hwctx_coredump(struct aie_device *aie, struct amdxdna_hwctx *hwctx)
+char *amdxdna_get_hwctx_coredump(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_msg_buf_hdl **data_hdls = NULL;
 	struct amdxdna_msg_buf_hdl *list_hdl = NULL;
 	struct amdxdna_coredump_buf_entry *buf_list;
+	struct aie_device *aie = to_aie_dev(xdna);
 	size_t total_size;
 	size_t offset;
 	u32 num_bufs;
@@ -55,7 +56,7 @@ char *amdxdna_get_hwctx_coredump(struct aie_device *aie, struct amdxdna_hwctx *h
 	if (!aie->msg_ops.get_coredump)
 		return ERR_PTR(-EOPNOTSUPP);
 
-	total_size = amdxdna_coredump_total_buf_size(aie, hwctx);
+	total_size = amdxdna_coredump_total_buf_size(hwctx);
 	buf = kvmalloc(total_size, GFP_KERNEL);
 	if (!buf)
 		return ERR_PTR(-ENOMEM);
@@ -132,7 +133,7 @@ static int amdxdna_get_coredump_cb(struct amdxdna_hwctx *hwctx, void *arg)
 		return -EPERM;
 	}
 
-	total_size = amdxdna_coredump_total_buf_size(wa->aie, hwctx);
+	total_size = amdxdna_coredump_total_buf_size(hwctx);
 	if (wa->buf_size < total_size) {
 		XDNA_DBG(xdna, "Insufficient buffer size %zu, need %zu",
 			 wa->buf_size, total_size);
@@ -144,7 +145,7 @@ static int amdxdna_get_coredump_cb(struct amdxdna_hwctx *hwctx, void *arg)
 		buf = hwctx->coredump;
 		hwctx->coredump = NULL;
 	} else {
-		buf = amdxdna_get_hwctx_coredump(wa->aie, hwctx);
+		buf = amdxdna_get_hwctx_coredump(hwctx);
 	}
 	if (IS_ERR(buf))
 		return PTR_ERR(buf);
@@ -156,12 +157,11 @@ static int amdxdna_get_coredump_cb(struct amdxdna_hwctx *hwctx, void *arg)
 	return 0;
 }
 
-int amdxdna_get_coredump(struct aie_device *aie,
-			 struct amdxdna_client *client,
-			 struct amdxdna_drm_get_array *args)
+int amdxdna_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_drm_aie_coredump config = {};
 	struct amdxdna_dev *xdna = client->xdna;
+	struct aie_device *aie = to_aie_dev(xdna);
 	struct amdxdna_coredump_walk_arg wa;
 	struct amdxdna_client *tmp_client;
 	int ret = -ENOENT;
@@ -208,7 +208,6 @@ int amdxdna_get_coredump(struct aie_device *aie,
 	wa.key.pid = config.pid;
 	wa.buf_size = buf_size;
 	wa.args = args;
-	wa.aie = aie;
 	wa.buf = buf;
 
 	amdxdna_for_each_client(xdna, tmp_client) {

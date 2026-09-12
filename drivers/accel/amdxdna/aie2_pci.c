@@ -768,10 +768,9 @@ static int aie2_get_clock_metadata(struct amdxdna_client *client,
 	return ret;
 }
 
-int aie2_fill_hwctx_health(struct aie_device *aie, struct amdxdna_hwctx *hwctx,
-			   struct amdxdna_drm_hwctx_entry *entry)
+int aie2_fill_hwctx_health(struct amdxdna_hwctx *hwctx, struct amdxdna_drm_hwctx_entry *entry)
 {
-	struct amdxdna_dev_hdl *ndev = container_of(aie, struct amdxdna_dev_hdl, aie);
+	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
 	struct app_health_report report;
 	int ret;
 
@@ -831,10 +830,10 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
-		ret = amdxdna_get_aie_status(&ndev->aie, client, args);
+		ret = amdxdna_get_aie_status(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
-		ret = amdxdna_get_metadata(&ndev->aie, client, args);
+		ret = amdxdna_get_metadata(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_VERSION:
 		ret = amdxdna_get_aie_version(client, args, &ndev->aie.version);
@@ -846,7 +845,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = amdxdna_query_sensors(args, ndev->total_col);
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
-		ret = amdxdna_get_hwctx_status(&ndev->aie, client, args);
+		ret = amdxdna_get_hwctx_status(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_FIRMWARE_VERSION:
 		ret = amdxdna_get_firmware_version(client, args, &xdna->fw_ver);
@@ -855,7 +854,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = aie2_get_power_mode(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_TELEMETRY:
-		ret = amdxdna_get_telemetry(&ndev->aie, client, args);
+		ret = amdxdna_get_telemetry(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_RESOURCE_INFO:
 		ret = aie2_query_resource_info(client, args);
@@ -919,22 +918,22 @@ static int aie2_get_array(struct amdxdna_client *client,
 
 	switch (args->param) {
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
-		ret = amdxdna_query_ctx_status_array(&ndev->aie, client, args);
+		ret = amdxdna_query_ctx_status_array(client, args);
 		break;
 	case DRM_AMDXDNA_HW_CONTEXT_BY_ID:
-		ret = amdxdna_query_ctx_status_by_id(&ndev->aie, client, args);
+		ret = amdxdna_query_ctx_status_by_id(client, args);
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
 		ret = aie2_get_array_async_error(xdna->dev_handle, args);
 		break;
 	case DRM_AMDXDNA_AIE_COREDUMP:
-		ret = amdxdna_get_coredump(&ndev->aie, client, args);
+		ret = amdxdna_get_coredump(client, args);
 		break;
 	case DRM_AMDXDNA_BO_USAGE:
 		ret = amdxdna_drm_get_bo_usage(&xdna->ddev, args);
 		break;
 	case DRM_AMDXDNA_AIE_TILE_READ:
-		ret = amdxdna_aie_tile_read(&ndev->aie, client, args);
+		ret = amdxdna_aie_tile_read(client, args);
 		break;
 	case DRM_AMDXDNA_FW_LOG:
 		ret = amdxdna_get_fw_log(&ndev->aie, args);
@@ -1072,7 +1071,7 @@ static int aie2_set_state(struct amdxdna_client *client,
 		ret = aie2_set_frame_boundary_preempt(client, args);
 		break;
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
-		ret = amdxdna_aie_tile_write(&ndev->aie, client, args);
+		ret = amdxdna_aie_tile_write(client, args);
 		break;
 	case DRM_AMDXDNA_SET_FW_LOG_STATE:
 		ret = amdxdna_set_fw_log_state(&ndev->aie, args);

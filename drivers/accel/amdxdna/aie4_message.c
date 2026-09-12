@@ -614,12 +614,11 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-static int aie4_query_status(struct aie_device *aie,
-			     struct amdxdna_msg_buf_hdl *buf_hdl,
-			     u32 *cols_filled, u32 *resp_size)
+static int aie4_query_status(struct amdxdna_msg_buf_hdl *buf_hdl, u32 *cols_filled, u32 *resp_size)
 {
 	DECLARE_AIE_MSG(aie4_msg_aie_column_info, AIE4_MSG_OP_AIE_COLUMN_INFO);
-	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dev *xdna = buf_hdl->xdna;
+	struct aie_device *aie = to_aie_dev(xdna);
 	u32 aie_bitmap;
 	int ret;
 
@@ -709,10 +708,9 @@ free_buf:
 	return ret;
 }
 
-int aie4_fill_hwctx_health(struct aie_device *aie, struct amdxdna_hwctx *hwctx,
-			   struct amdxdna_drm_hwctx_entry *entry)
+int aie4_fill_hwctx_health(struct amdxdna_hwctx *hwctx, struct amdxdna_drm_hwctx_entry *entry)
 {
-	struct amdxdna_dev_hdl *ndev = container_of(aie, struct amdxdna_dev_hdl, aie);
+	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
 	struct aie4_msg_app_health_report report;
 	u32 num_uc;
 	int ret;
