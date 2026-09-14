@@ -179,6 +179,15 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 	mutex_init(&ndev->cert_comp_lock);
 
 	/*
+	 * Kernel-mode submission: the driver fills the HSA queue and rings the
+	 * doorbell (amdxdna_mailbox_plat_ring_doorbell), so the platform has no
+	 * user-mmap'able doorbell.  Without this, user-mode submission hands a
+	 * doorbell offset to the shim, whose mmap fails with -EOPNOTSUPP.
+	 */
+	ndev->kernel_submit = true;
+	ndev->ctx_switch_hysteresis_us = AIE4_CTX_HYSTERESIS_US;
+
+	/*
 	 * Bring the device up the same way aie4_classic_hw_start() does, minus the
 	 * PCI-only firmware load: the RPU self-boots its CERT firmware, so there is
 	 * no aie_smu/aie_psp step.  Create the mailbox + management channel, then run
