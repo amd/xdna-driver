@@ -236,12 +236,9 @@ struct amdxdna_drv_cmd {
 	struct kref		refcnt;
 };
 
-struct app_health_report;
-
 union amdxdna_job_priv {
 	/* aie2 kernel submission */
 	struct {
-		struct app_health_report *health;
 		/* The fence to signal DRM scheduler that job is done */
 		struct dma_fence	*fence;
 		/* user can wait on this fence */
@@ -269,7 +266,6 @@ struct amdxdna_sched_job {
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
 };
 
-#define aie2_job_health    priv.aie2.health
 #define aie2_job_fence     priv.aie2.fence
 #define aie2_job_out_fence priv.aie2.out_fence
 #define aie4_job_list      priv.aie4.list
