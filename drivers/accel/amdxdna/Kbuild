@@ -21,13 +21,12 @@ ccflags-y += -g -Werror
 ccflags-${UMQ_HELLO_TEST} += -DUMQ_HELLO_TEST
 
 obj-m	+= amdxdna.o
-# Bus-agnostic core objects (always built for both PCI and AUX attachment).
+# Bus-agnostic core objects (PCI, AUX, and platform attachment).
 amdxdna-y := \
 	amdxdna_drm.o \
 	amdxdna_ctx.o \
 	amdxdna_gem.o \
 	amdxdna_iommu.o \
-	amdxdna_mailbox.o \
 	amdxdna_mailbox_helper.o \
 	amdxdna_pm.o \
 	amdxdna_sysfs.o \
@@ -39,8 +38,13 @@ amdxdna-y := \
 	amdxdna_solver.o
 
 # PCI attachment (NPU) - selected by XDNA_BUS_TYPE=pci
+# The aie2 PCI driver uses the DRM GPU scheduler; the platform (aie4) build
+# targets non-PCI parts whose kernels may be built without DRM_SCHED, so the
+# aie2 driver, its PSP/SMU layer and its PCI register tables are not compiled
+# there. (aie.o is the shared mgmt-mailbox layer for PCI and platform.)
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	amdxdna_pci_drv.o \
+	amdxdna_mailbox.o \
 	aie.o \
 	aie_psp.o \
 	aie_smu.o \
@@ -66,11 +70,40 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	npu5_regs.o \
 	npu6_regs.o
 
+# SR-IOV is PCI-only (to_pci_dev()/pci_enable_sriov()/PCI config space).
+ifeq ($(OFT_CONFIG_AMDXDNA_PCI),y)
 amdxdna-$(CONFIG_PCI_IOV) += \
 	aie4_sriov.o
+endif
+
+# Transport select: the platform build compiles the transport-independent aie4
+# core, the shmem+IPI mailbox and the platform driver, and drops the PCI
+# transport, the PCI ringbuf+MSI-X mailbox and the PCI module entry; the default
+# PCI build keeps the PCI side. amdxdna_mailbox.o and amdxdna_mailbox_plat.o both
+# provide struct mailbox and the amdxdna_mailbox.h API, and each side provides
+# the same aie4 symbols and the single module entry point, so only one is built.
+amdxdna-$(CONFIG_DRM_ACCEL_AMDXDNA_PLAT) += \
+	aie.o \
+	aie4.o \
+	aie4_ctx.o \
+	aie4_error.o \
+	aie4_message.o \
+	aie4_debugfs.o \
+	aie4_dpt.o \
+	aie4_plat.o \
+	amdxdna_dpt.o \
+	amdxdna_dpt_plat.o \
+	amdxdna_error.o \
+	amdxdna_coredump.o \
+	amdxdna_ctx_status.o \
+	amdxdna_tile_read_write.o \
+	amdxdna_mailbox_plat.o \
+	amdxdna_plat_drv.o \
+	npu12_regs.o
 
 # Auxiliary-bus attachment (VE2/Versal SoC) - selected by XDNA_BUS_TYPE=aux
 amdxdna-$(OFT_CONFIG_AMDXDNA_AUX) += \
+	amdxdna_mailbox.o \
 	amdxdna_aux_drv.o \
 	ve2_mgmt.o \
 	ve2_aux.o \
