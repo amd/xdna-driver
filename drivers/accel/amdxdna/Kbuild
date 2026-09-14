@@ -27,9 +27,7 @@ amdxdna-y := \
 	amdxdna_drm.o \
 	amdxdna_gem.o \
 	amdxdna_iommu.o \
-	amdxdna_mailbox.o \
 	amdxdna_mailbox_helper.o \
-	amdxdna_pci_drv.o \
 	amdxdna_pm.o \
 	amdxdna_sysfs.o \
 	amdxdna_ubuf.o \
@@ -40,6 +38,21 @@ amdxdna-y := \
 
 amdxdna-y += \
 	aie.o \
+	aie4_ctx.o \
+	aie4_error.o \
+	aie4_message.o \
+	amdxdna_dpt.o \
+	amdxdna_error.o \
+	amdxdna_coredump.o \
+	amdxdna_ctx_status.o \
+	amdxdna_tile_read_write.o
+
+# The aie2 PCI driver uses the DRM GPU scheduler; the platform (aie4) build
+# targets non-PCI parts whose kernels may be built without DRM_SCHED, so the
+# aie2 driver, its PSP/SMU layer and its PCI register tables are not compiled
+# there. (aie.o is the shared mgmt-mailbox layer and stays in both builds.)
+ifeq ($(CONFIG_DRM_ACCEL_AMDXDNA_PLAT),)
+amdxdna-y += \
 	aie_psp.o \
 	aie_smu.o \
 	aie2_ctx.o \
@@ -49,24 +62,42 @@ amdxdna-y += \
 	aie2_pm.o \
 	aie2_solver.o \
 	aie2_tdr.o \
-	aie4_ctx.o \
-	aie4_error.o \
-	aie4_message.o \
-	aie4_pci.o \
-	amdxdna_dpt.o \
-	amdxdna_dpt_pci.o \
-	amdxdna_error.o \
-	amdxdna_coredump.o \
-	amdxdna_ctx_status.o \
-	amdxdna_tile_read_write.o \
 	npu1_regs.o \
-	npu3_regs.o \
 	npu4_regs.o \
 	npu5_regs.o \
 	npu6_regs.o
+endif
 
+# Transport select: the platform build compiles the transport-independent aie4
+# core, the shmem+IPI mailbox and the platform driver, and drops the PCI
+# transport, the PCI ringbuf+MSI-X mailbox and the PCI module entry; the default
+# build keeps the PCI side. amdxdna_mailbox.o and amdxdna_mailbox_plat.o both
+# provide struct mailbox and the amdxdna_mailbox.h API, and each side provides
+# the same aie4 symbols and the single module entry point, so only one is built.
+amdxdna-$(CONFIG_DRM_ACCEL_AMDXDNA_PLAT) += \
+	aie4.o \
+	aie4_debugfs.o \
+	aie4_dpt.o \
+	aie4_plat.o \
+	amdxdna_dpt_plat.o \
+	amdxdna_mailbox_plat.o \
+	amdxdna_plat_drv.o \
+	npu12_regs.o
+
+ifeq ($(CONFIG_DRM_ACCEL_AMDXDNA_PLAT),)
+amdxdna-y += \
+	aie4_pci.o \
+	amdxdna_dpt_pci.o \
+	amdxdna_mailbox.o \
+	amdxdna_pci_drv.o \
+	npu3_regs.o
+
+# SR-IOV is PCI-only (to_pci_dev()/pci_enable_sriov()/PCI config space), so keep
+# it in the PCI-only branch: the platform module must not pull it in even when
+# CONFIG_PCI_IOV is set.
 amdxdna-$(CONFIG_PCI_IOV) += \
 	aie4_sriov.o
+endif
 
 amdxdna-$(CONFIG_DEBUG_FS) += \
 	amdxdna_debugfs.o
