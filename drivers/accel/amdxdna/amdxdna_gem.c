@@ -1785,8 +1785,16 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx\n",
 		 args->handle, args->offset, args->size);
 
-	if (args->direction == SYNC_DIRECT_FROM_DEVICE)
+	/*
+	 * A FROM_DEVICE sync also refreshes a debug BO where the device supports
+	 * it. Devices without debug BO sync (e.g. aie4) report -EOPNOTSUPP; that
+	 * must not fail the cache-sync the caller actually asked for.
+	 */
+	if (args->direction == SYNC_DIRECT_FROM_DEVICE) {
 		ret = amdxdna_hwctx_sync_debug_bo(abo->client, args->handle);
+		if (ret == -EOPNOTSUPP)
+			ret = 0;
+	}
 
 put_obj:
 	drm_gem_object_put(gobj);
