@@ -1,6 +1,8 @@
 # AMD XDNA™️ Driver for Linux®️
 This repository is for the AMD XDNA™️ Driver (amdxdna.ko) for Linux®️ and XRT SHIM library development.
 
+<!-- Test-only change used to verify the ve2_accel Jenkins pipeline. -->
+
 ## Table of Contents
 - [Introduction](#introduction)
 - [System Requirements](#system-requirements)
