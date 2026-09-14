@@ -175,9 +175,11 @@ int amdxdna_dpt_reset_done(struct amdxdna_dev *xdna);
 
 /*
  * Transport completion notification. The common DPT code calls
- * amdxdna_dpt_notification_init/fini; the PCI backend (amdxdna_dpt_pci.c) wires
- * an MSI-X interrupt, using amdxdna_dpt_irq_name() to fetch the request_irq name
- * from the channel desc that is private to amdxdna_dpt.c.
+ * amdxdna_dpt_notification_init/fini; exactly one transport backend is linked.
+ * The PCI backend (amdxdna_dpt_pci.c) wires an MSI-X interrupt, using
+ * amdxdna_dpt_irq_name() to fetch the request_irq name from the channel desc
+ * that is private to amdxdna_dpt.c. The platform backend (amdxdna_dpt_plat.c)
+ * has no MSI-X and reports "no IRQ" so the common code polls on demand.
  */
 const char *amdxdna_dpt_irq_name(const struct amdxdna_dpt *dpt);
 int amdxdna_dpt_notification_init(struct amdxdna_dpt *dpt);
