@@ -101,6 +101,8 @@ struct amdxdna_hwctx_priv {
 	 * ioctl returned.
 	 */
 	struct amdxdna_gem_obj		**cu_bos;
+
+	struct app_health_report	*cached_health;
 };
 
 enum aie2_dev_status {

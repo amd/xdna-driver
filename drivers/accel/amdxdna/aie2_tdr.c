@@ -120,7 +120,7 @@ static int aie2_tdr_stop_hwctx(struct amdxdna_hwctx *hwctx, void *arg)
 
 		job = drm_job_to_xdna_job(s_job);
 		job->job_timeout = true;
-		job->aie2_job_health = report;
+		hwctx->priv->cached_health = report;
 		report = NULL;
 	}
 
