@@ -443,7 +443,7 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 		args.init_opts = (AIE_PART_INIT_OPT_COLUMN_RST | AIE_PART_INIT_OPT_SHIM_RST |
 				  AIE_PART_INIT_OPT_ISOLATE | AIE_PART_INIT_OPT_SET_L2_IRQ |
 				  AIE_PART_INIT_OPT_NMU_CONFIG | AIE_PART_INIT_OPT_DIS_TLAST_ERROR |
-				  AIE_PART_INIT_OPT_ERR_SHIM_INIT | AIE_PART_INIT_OPT_HANDSHAKE);
+				  AIE_PART_INIT_OPT_USER_EVENT1_INIT | AIE_PART_INIT_OPT_HANDSHAKE);
 
 	trace_xdna_partition_init_start(hwctx->name, hwctx->id, mgmtctx->start_col, num_col);
 	ret = aie_partition_initialize(mgmtctx->aie_dev, &args);
