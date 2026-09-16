@@ -185,8 +185,8 @@ u32 xrs_get_gops(struct aie_qos *rqos);
  * @cb_arg:	callback argument pointer
  * @action:	Action to perform
  *
- * PCI: pass @cb_arg (hwctx), @action NULL — runs load callback and DPM.
- * VE2: pass @action, @cb_arg NULL — column pick only (partition in ve2_aie).
+ * PCI: pass @cb_arg (hwctx) — runs load callback and DPM.
+ * VE2: uses @action for column allocation results; no backend callbacks.
  *
  * Return:	0 when successful.
  *		Or standard error number when failing
@@ -206,7 +206,8 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg,
  * @rid:	The Request ID to identify the requesting context
  * @action:	Action to perform
  *
- * PCI: runs unload callback. VE2: bitmap/node teardown only (@action unused).
+ * PCI: runs unload callback and updates DPM. VE2: reports whether the last
+ * partition sharer was released through @action.
  */
 int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action);
 

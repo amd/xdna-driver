@@ -12,7 +12,7 @@
 #include <linux/slab.h>
 
 #include "amdxdna_ctx.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_solver.h"
 
 static u32 calculate_gops(struct aie_qos *rqos)
@@ -20,7 +20,7 @@ static u32 calculate_gops(struct aie_qos *rqos)
 	u32 service_rate = 0;
 
 	if (rqos->latency)
-		service_rate = (1000 / rqos->latency);
+		service_rate = max_t(u32, 1000 / rqos->latency, 1);
 
 	if (rqos->fps > service_rate)
 		return rqos->fps * rqos->gops;
@@ -90,35 +90,44 @@ u32 xrs_get_gops(struct aie_qos *rqos)
 
 static int set_dpm_level(struct solver_state *xrs, struct alloc_requests *req, u32 *dpm_level)
 {
+	u32 freq, max_dpm_level, level, dev_level;
 	struct solver_rgroup *rgp = &xrs->rgp;
 	struct cdo_parts *cdop = &req->cdo;
 	struct aie_qos *rqos = &req->rqos;
-	u32 freq, max_dpm_level, level;
 	struct solver_node *node;
 
 	max_dpm_level = xrs->cfg.clk_list.num_levels - 1;
-	/* If no QoS parameters are passed, set it to the max DPM level */
-	if (!is_valid_qos_dpm_params(rqos)) {
+	if (rqos->priority == AMDXDNA_QOS_LOW_PRIORITY) {
+		/*
+		 * Idle clients run at the lowest DPM level, ignoring the
+		 * gops/fps/latency hints.
+		 */
+		level = 0;
+	} else if (!is_valid_qos_dpm_params(rqos)) {
+		/* If no QoS parameters are passed, set it to the max DPM level. */
 		level = max_dpm_level;
-		goto set_dpm;
+	} else {
+		/* Find one CDO group that meets the GOPs requirement. */
+		for (level = 0; level < max_dpm_level; level++) {
+			freq = xrs->cfg.clk_list.cu_clk_list[level];
+			if (!qos_meet(xrs, rqos, cdop->qos_cap.opc * freq / 1000))
+				break;
+		}
 	}
 
-	/* Find one CDO group that meet the GOPs requirement. */
-	for (level = 0; level < max_dpm_level; level++) {
-		freq = xrs->cfg.clk_list.cu_clk_list[level];
-		if (!qos_meet(xrs, rqos, cdop->qos_cap.opc * freq / 1000))
-			break;
-	}
-
-	/* set the dpm level which fits all the sessions */
+	/* Device runs at the highest DPM level requested across active sessions. */
+	dev_level = level;
 	list_for_each_entry(node, &rgp->node_list, list) {
-		if (node->dpm_level > level)
-			level = node->dpm_level;
+		if (node->dpm_level > dev_level)
+			dev_level = node->dpm_level;
 	}
 
-set_dpm:
+	drm_dbg(xrs->cfg.ddev, "priority 0x%x level %u dev_level %u\n",
+		rqos->priority, level, dev_level);
+
+	/* Store this request's own level; program the aggregated device level. */
 	*dpm_level = level;
-	return xrs->cfg.actions->set_dft_dpm_level(xrs->cfg.ddev, level);
+	return xrs->cfg.actions->set_dft_dpm_level(xrs->cfg.ddev, dev_level);
 }
 
 static struct solver_node *rg_search_node(struct solver_rgroup *rgp, u64 rid)
@@ -313,6 +322,7 @@ static void fill_load_action(struct solver_node *snode,
 int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg,
 			  struct xrs_action_load *action)
 {
+	struct xrs_action_load local_action = { };
 	struct solver_state *xrs = hdl;
 	struct solver_node *snode;
 	u32 dpm_level;
@@ -340,6 +350,9 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg,
 	if (IS_ERR(snode))
 		return PTR_ERR(snode);
 
+	if (!action)
+		action = &local_action;
+
 	/* Both paths report the chosen columns through @action. */
 	fill_load_action(snode, action);
 
@@ -351,7 +364,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg,
 
 		ret = set_dpm_level(xrs, req, &dpm_level);
 		if (ret)
-			goto free_node;
+			goto unload;
 
 		snode->dpm_level = dpm_level;
 		snode->cb_arg = cb_arg;
@@ -362,6 +375,8 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg,
 
 	return 0;
 
+unload:
+	xrs->cfg.actions->unload(cb_arg);
 free_node:
 	remove_solver_node(&xrs->rgp, snode, NULL);
 
@@ -372,6 +387,7 @@ int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action)
 {
 	struct solver_state *xrs = hdl;
 	struct solver_node *node;
+	u32 level = 0;
 
 	if (!xrs)
 		return -EINVAL;
@@ -387,6 +403,16 @@ int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action)
 		xrs->cfg.actions->unload(node->cb_arg);
 
 	remove_solver_node(&xrs->rgp, node, action);
+
+	if (xrs->cfg.actions) {
+		/* Set the DPM level which fits all remaining sessions. */
+		list_for_each_entry(node, &xrs->rgp.node_list, list) {
+			if (node->dpm_level > level)
+				level = node->dpm_level;
+		}
+		xrs->cfg.actions->set_dft_dpm_level(xrs->cfg.ddev, level);
+	}
+
 	return 0;
 }
 
