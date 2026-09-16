@@ -17,12 +17,12 @@
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 #include "amdxdna_coredump.h"
-#include "aie2_solver.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_drv.h"
 #include "amdxdna_pm.h"
+#include "amdxdna_solver.h"
 
 static bool force_cmdlist = true;
 module_param(force_cmdlist, bool, 0600);
@@ -684,6 +684,7 @@ static int aie2_hwctx_col_list(struct amdxdna_hwctx *hwctx)
 static int aie2_alloc_resource(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct xrs_action_load load_act = { };
 	struct alloc_requests *xrs_req;
 	u32 temporal_only_col = 0;
 	int ret;
@@ -710,10 +711,11 @@ static int aie2_alloc_resource(struct amdxdna_hwctx *hwctx)
 	xrs_req->rqos.latency = hwctx->qos.latency;
 	xrs_req->rqos.exec_time = hwctx->qos.frame_exec_time;
 	xrs_req->rqos.priority = hwctx->qos.priority;
+	xrs_req->rqos.user_start_col = USER_START_COL_NOT_REQUESTED;
 
 	xrs_req->rid = (uintptr_t)hwctx;
 
-	ret = xrs_allocate_resource(xdna->xrs_hdl, xrs_req, hwctx);
+	ret = xrs_allocate_resource(xdna->xrs_hdl, xrs_req, hwctx, &load_act);
 	if (ret)
 		XDNA_ERR(xdna, "Allocate AIE resource failed, ret %d", ret);
 
@@ -726,7 +728,7 @@ static void aie2_release_resource(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int ret;
 
-	ret = xrs_release_resource(xdna->xrs_hdl, (uintptr_t)hwctx);
+	ret = xrs_release_resource(xdna->xrs_hdl, (uintptr_t)hwctx, NULL);
 	if (ret)
 		XDNA_ERR(xdna, "Release AIE resource failed, ret %d", ret);
 }

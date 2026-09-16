@@ -28,7 +28,7 @@
 #include "amdxdna_tile_read_write.h"
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
-#include "aie2_solver.h"
+#include "amdxdna_solver.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_dpt.h"
 #include "amdxdna_gem.h"
