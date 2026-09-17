@@ -1630,6 +1630,7 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 		down_read(&xdna->notifier_lock);
 	}
 	atomic64_inc(&hwctx->job_submit_cnt);
+	job->submitted = true;
 	up_read(&xdna->notifier_lock);
 
 	/*
