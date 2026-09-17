@@ -582,6 +582,7 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx,
 	struct config_cu_req req = { 0 };
 	struct xdna_mailbox_msg msg;
 	struct amdxdna_gem_obj *abo;
+	int ret;
 	int i;
 
 	if (!chann)
@@ -621,7 +622,11 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx,
 	msg.handle = hwctx;
 	msg.opcode = MSG_OP_CONFIG_CU;
 	msg.notify_cb = notify_cb;
-	return xdna_mailbox_send_msg(chann, &msg, 0);
+
+	mutex_lock(&hwctx->priv->io_lock);
+	ret = xdna_mailbox_send_msg(chann, &msg, 0);
+	mutex_unlock(&hwctx->priv->io_lock);
+	return ret;
 }
 
 static int aie2_init_exec_cu_req(struct amdxdna_gem_obj *cmd_bo, void *req,
