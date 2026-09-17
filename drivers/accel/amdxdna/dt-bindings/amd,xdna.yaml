@@ -54,21 +54,25 @@ properties:
 
   memory-region:
     minItems: 2
-    maxItems: 2
+    maxItems: 4
     description: |
       Phandles to reserved-memory regions, matched by name via
-      memory-region-names.  Required names are "mgmt", "doorbell".
-      "mgmt"/"doorbell" are predefined-layout transport regions accessed only
-      by the host CPU. The mgmt and doorbell rings share the same "tx"/"rx"
-      mailbox channels for notification only.
+      memory-region-names.  "mgmt"/"doorbell" are predefined-layout regions
+      accessed only by the CPU (ioremap).  "fw" and "aie" are reusable
+      shared-dma-pool regions the driver allocates cacheable, software-coherent
+      DMA buffers from with dma_alloc (see memory-region-names).
 
   memory-region-names:
     minItems: 2
-    maxItems: 2
+    maxItems: 4
     description: |
       Names of the memory-region phandles.  Required: "mgmt", "doorbell".
+      Optional DMA pools: "fw" (firmware-visible, driver-side buffers only;
+      place its reserved-memory below 4 GB, as the firmware processor reaches
+      only 32-bit) and "aie" (the AIE/CERT pool that backs create-BOs).  Both
+      pools are DMA-mapped through this device.
     items:
-      enum: [mgmt, doorbell]
+      enum: [mgmt, doorbell, fw, aie]
     allOf:
       - contains:
           const: mgmt
@@ -105,6 +109,20 @@ examples:
             no-map;
         };
 
+        /* firmware-visible pool, placed < 4 GB for the 32-bit RPU;
+         * cacheable, software-coherent (allocated with dma_alloc). */
+        rpu_cma: rpu-cma@70000000 {
+            compatible = "shared-dma-pool";
+            reg = <0x0 0x70000000 0x0 0x4000000>;
+            reusable;
+        };
+
+        /* AIE/CERT DMA pool (cacheable, software-coherent) */
+        aie_cma: aie-cma@800000000 {
+            compatible = "shared-dma-pool";
+            reg = <0x8 0x00000000 0x0 0x40000000>;
+            reusable;
+        };
     };
 
     /* amdxdna platform (shared-memory + IPI) transport node */
@@ -112,6 +130,6 @@ examples:
         compatible = "amd,xdna-1234";
         mboxes = <&ipi_aie 0>, <&ipi_aie 1>;
         mbox-names = "tx", "rx";
-        memory-region = <&mgmt_shmem>, <&doorbell_shmem>;
-        memory-region-names = "mgmt", "doorbell";
+        memory-region = <&mgmt_shmem>, <&doorbell_shmem>, <&rpu_cma>, <&aie_cma>;
+        memory-region-names = "mgmt", "doorbell", "fw", "aie";
     };
