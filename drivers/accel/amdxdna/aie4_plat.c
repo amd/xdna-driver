@@ -53,17 +53,26 @@ void aie4_doorbell_ring(struct amdxdna_hwctx *hwctx)
 }
 
 /*
- * Completion notification on the platform arrives on a shared RX path, not a
- * per-cert MSI-X vector, so there is no per-cert irq to request/free.
- * TODO: route platform completions to cert_comp->waitq.
+ * Completion notification on the platform arrives as a single IPI on a shared
+ * RX path rather than a per-cert MSI-X vector, so there is no per-cert irq to
+ * request or free.  What the transport does need is to know which completions
+ * are live: every completion IPI wakes all registered cert_comp waiters (see
+ * plat_mailbox_cert_notify()) and each re-checks its own condition.
+ *
+ * Unregistering here mirrors the free_irq() the PCI path does, and serves the
+ * same purpose -- cert_comp_release() calls this before kfree(), and the
+ * unregister cannot return while the IPI fan-out is still walking the entry.
  */
 int aie4_request_notification(struct cert_comp *comp)
 {
-	return 0;
+	return amdxdna_mailbox_plat_register_notify(comp->ndev->mbox,
+						    comp->msix_idx, comp);
 }
 
 void aie4_free_notification(struct cert_comp *comp)
 {
+	amdxdna_mailbox_plat_unregister_notify(comp->ndev->mbox,
+					       comp->msix_idx);
 }
 
 /* SR-IOV is PCI-only; a platform aie4 device is never a virtual function. */
