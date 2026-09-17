@@ -9,10 +9,10 @@
  * (aie4_plat_ops).  The transport-independent aie4 command/query/error core in
  * aie4.c/aie4_ctx.c is shared with the PCI path.
  *
- * NOTE: transport scaffolding.  The management mailbox channel, cert-completion
- * routing and the full bring-up/suspend/resume sequences are TODO; the hooks are
- * stubbed so aie4_ctx.c links and the device probes.  A platform mailbox and the
- * device-info register wiring land in follow-up changes.
+ * The management channel and the doorbell run over the shmem+IPI mailbox in
+ * amdxdna_mailbox_plat.c; cert completions arrive as a single shared IPI rather
+ * than per-cert MSI-X vectors, so every completion wakes all cert waiters.  DPM
+ * and performance counters have no platform backend yet (see below).
  */
 
 #include <drm/drm_managed.h>
@@ -35,9 +35,10 @@
  */
 
 /*
- * The platform doorbell has no per-ctx MMIO kick target, so there is nothing to
- * validate or store at setup time.  The transport-neutral connected sentinel is
- * owned by aie4_ctx.c.  TODO: platform shmem-ring kick keyed by hw_ctx_id.
+ * The platform doorbell has no per-ctx MMIO kick target: the kick is a shmem
+ * ring entry keyed by hw_ctx_id, which aie4_doorbell_ring() reads back from the
+ * hwctx, so there is nothing to validate or store at setup time.  The
+ * transport-neutral connected sentinel is owned by aie4_ctx.c.
  */
 int aie4_doorbell_setup(struct amdxdna_hwctx *hwctx,
 			const struct aie4_msg_create_hw_context_resp *resp)
@@ -48,8 +49,13 @@ int aie4_doorbell_setup(struct amdxdna_hwctx *hwctx,
 void aie4_doorbell_ring(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
+	int ret;
 
-	amdxdna_mailbox_plat_ring_doorbell(ndev->mbox, hwctx->priv->hw_ctx_id);
+	ret = amdxdna_mailbox_plat_ring_doorbell(ndev->mbox,
+						 hwctx->priv->hw_ctx_id);
+	if (ret)
+		XDNA_ERR(ndev->aie.xdna, "Ring doorbell for hw_ctx %d failed, ret %d",
+			 hwctx->priv->hw_ctx_id, ret);
 }
 
 /*
@@ -284,10 +290,6 @@ static void aie4_plat_fini(struct amdxdna_dev *xdna)
 	 * precede aie4_mailbox_fini()/aie4_free_work_buffer(). Otherwise the
 	 * self-booted CERT keeps the work-buffer DMA pointer and can access it after
 	 * the host has freed it during platform-device removal.
-	 *
-	 * TODO: platform stub -- the mgmt mailbox channel is still scaffolding (see
-	 * file header NOTE), so firmware may answer NOTSUPP and not actually release
-	 * the buffer yet. Best-effort until the platform suspend handshake lands.
 	 */
 	aie4_suspend_fw(ndev);
 
