@@ -176,80 +176,6 @@ EOF
 # Make sure you see expected behavior with the compilation.
 #
 
-# Test drm_sched_job_init() signature in 6.17+:
-# int drm_sched_job_init(struct drm_sched_job *job, struct drm_sched_entity *entity,
-#		         u32 credits, void *owner, u64 drm_client_id);
-try_compile HAVE_6_17_drm_sched_job_init << 'EOF'
-#include <drm/gpu_scheduler.h>
-int main(void)
-{
-	struct drm_sched_job *a = NULL;
-	struct drm_sched_entity *b = NULL;
-	u32 c = 0;
-	void *d = NULL;
-	u64 e = 0;
-
-	(void)drm_sched_job_init(a, b, c, d, e);
-	return 0;
-}
-EOF
-
-# Test drm_sched_init() signature in 6.15+:
-# int drm_sched_init(struct drm_gpu_scheduler *sched, const struct drm_sched_init_args *args)
-try_compile HAVE_6_15_drm_sched_init << 'EOF'
-#include <drm/gpu_scheduler.h>
-int main(void)
-{
-	struct drm_gpu_scheduler *a = NULL;
-	struct drm_sched_init_args *b = NULL;
-
-	(void)drm_sched_init(a, b);
-	return 0;
-}
-EOF
-
-# Test drm_sched_init() new signature in 7.1+:
-# num_reqs was removed from this kernel
-try_compile HAVE_drm_sched_init_args_num_rqs << 'EOF'
-#include <drm/gpu_scheduler.h>
-int main(void)
-{
-	struct drm_sched_init_args b = {
-		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
-	};
-
-	return 0;
-}
-EOF
-
-# Test iommu_dev_enable_feature()/iommu_dev_disable_feature() signature in 6.15-:
-# int iommu_dev_disable_feature(struct device *dev, enum iommu_dev_features f)
-# int iommu_dev_enable_feature(struct device *dev, enum iommu_dev_features f)
-try_compile HAVE_iommu_dev_enable_disable_feature << 'EOF'
-#include <linux/iommu.h>
-int main(void)
-{
-	struct device *a = NULL;
-	enum iommu_dev_features b = 0;
-
-	(void)iommu_dev_enable_feature(a, b);
-	(void)iommu_dev_disable_feature(a, b);
-	return 0;
-}
-EOF
-
-# Test device_iommu_mapped() signature in 6.13+:
-# static inline bool device_iommu_mapped(struct device *dev)
-try_compile HAVE_device_iommu_mapped << 'EOF'
-#include <linux/device.h>
-int main(void)
-{
-	struct device *a = NULL;
-
-	(void)device_iommu_mapped(a);
-	return 0;
-}
-EOF
 
 # Test system_percpu_wq in 6.17+:
 # struct workqueue_struct *system_percpu_wq
@@ -394,49 +320,6 @@ cat >> "$OUT" <<'EOF'
 #endif
 EOF
 
-# Test DRM_GPU_SCHED_STAT_NOMINAL name change 
-# DRM_GPU_SCHED_STAT_NOMINAL changed to RESET
-try_compile HAVE_drm_gpu_sched_stat_reset << 'EOF'
-#include <drm/gpu_scheduler.h>
-int main(void)
-{
-	int a = DRM_GPU_SCHED_STAT_RESET;
-	return 0;
-}
-EOF
-
-# Test DRM_GPU_SCHED_STAT_NO_HANG availability (kernel >= 6.17)
-# Allows timedout_job to report "not hung" without triggering recovery
-try_compile HAVE_6_17_drm_gpu_sched_stat_no_hang << 'EOF'
-#include <drm/gpu_scheduler.h>
-int main(void)
-{
-	int a = DRM_GPU_SCHED_STAT_NO_HANG;
-	return 0;
-}
-EOF
-
-# Test drm_sched_start() with int errno parameter (6.13+ or backports):
-# void drm_sched_start(struct drm_gpu_scheduler *sched, int errno);
-# Use __builtin_types_compatible_p to force a hard error on type mismatch,
-# even when the kernel build does not enable -Werror.
-try_compile HAVE_6_13_drm_sched_start_errno << 'EOF'
-#include <drm/gpu_scheduler.h>
-typedef void (*expected_t)(struct drm_gpu_scheduler *, int);
-_Static_assert(__builtin_types_compatible_p(typeof(&drm_sched_start), expected_t),
-	       "drm_sched_start does not match (sched, int) signature");
-int main(void) { return 0; }
-EOF
-
-# Test drm_sched_start() with bool full_recovery parameter (pre-6.12):
-# void drm_sched_start(struct drm_gpu_scheduler *sched, bool full_recovery);
-try_compile HAVE_6_10_drm_sched_start_full_recovery << 'EOF'
-#include <drm/gpu_scheduler.h>
-typedef void (*expected_t)(struct drm_gpu_scheduler *, _Bool);
-_Static_assert(__builtin_types_compatible_p(typeof(&drm_sched_start), expected_t),
-	       "drm_sched_start does not match (sched, bool) signature");
-int main(void) { return 0; }
-EOF
 
 # Test BIT_U64 exists
 try_compile HAVE_6_16_bit_u64 << 'EOF'
