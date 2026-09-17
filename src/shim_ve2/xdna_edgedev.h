@@ -14,8 +14,11 @@
 #include <regex>
 #include <sys/ioctl.h> // Include this header for ioctl
 #include <sys/mman.h>  // Include this header for munmap
+#include <sys/types.h>
+#include <unistd.h>
 #include <string>
 #include <sstream>
+#include <unordered_map>
 
 #include "core/common/device.h"
 #include "core/edge/user/device_linux.h"
@@ -94,14 +97,15 @@ public:
   get_edgedev();
 
 private:
-  std::mutex m_bo_ref_mtx;
-  std::unordered_map<uint32_t,int> m_bo_refcnt;
+  mutable std::mutex m_bo_ref_mtx;
+  mutable std::unordered_map<uint32_t,int> m_bo_refcnt;
   std::fstream
   sysfs_open(const std::string& entry, std::string& err,
 		  bool write = false, bool binary = false) const;
 
   mutable int m_dev_fd		= -1;
   mutable int m_dev_users	= 0;
+  mutable pid_t m_pid		= 0;
   //std::shared_ptr<const xdna_edgedrv> m_driver;
   std::string m_sysfs_name;
   std::string m_dev_name;
