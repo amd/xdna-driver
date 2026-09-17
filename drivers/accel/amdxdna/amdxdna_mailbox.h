@@ -92,6 +92,9 @@ struct mailbox_channel *xdna_mailbox_alloc_channel(struct mailbox *mb);
  * @i2x: firmware to host mailbox resources
  * @xdna_mailbox_intr_reg: register addr of MSI-X interrupt
  * @mb_irq: Linux IRQ number associated with mailbox MSI-X interrupt vector index
+ * @n_msg: number of messages to pre-allocate (0 = allocate on demand)
+ *         Pre-allocated messages are sized rb_size/n_msg each; the caller
+ *         must ensure at most n_msg messages are in flight at any time.
  *
  * Return: If success, return a handle of mailbox channel. Otherwise, return NULL.
  */
@@ -100,7 +103,7 @@ xdna_mailbox_start_channel(struct mailbox_channel *mb_chann,
 			   const struct xdna_mailbox_chann_res *x2i,
 			   const struct xdna_mailbox_chann_res *i2x,
 			   u32 xdna_mailbox_intr_reg,
-			   int mb_irq);
+			   int mb_irq, u32 n_msg);
 
 /*
  * xdna_mailbox_set_async_cb() -- register an async notification handler

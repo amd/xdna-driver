@@ -410,7 +410,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 					 &ndev->aie.mgmt_x2i,
 					 &ndev->aie.mgmt_i2x,
 					 xdna_mailbox_intr_reg,
-					 mgmt_mb_irq);
+					 mgmt_mb_irq, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to start management mailbox channel");
 		ret = -EINVAL;

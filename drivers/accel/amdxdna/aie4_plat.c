@@ -121,7 +121,7 @@ static int aie4_mailbox_init(struct amdxdna_dev_hdl *ndev)
 	xdna_mailbox_set_async_cb(ndev->aie.mgmt_chann, ndev,
 				  aie4_mgmt_async_event_handler);
 
-	ret = xdna_mailbox_start_channel(ndev->aie.mgmt_chann, NULL, NULL, 0, 0);
+	ret = xdna_mailbox_start_channel(ndev->aie.mgmt_chann, NULL, NULL, 0, 0, 0);
 	if (ret) {
 		xdna_mailbox_free_channel(ndev->aie.mgmt_chann);
 		ndev->aie.mgmt_chann = NULL;
