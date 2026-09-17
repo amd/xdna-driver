@@ -6,7 +6,6 @@
 #ifndef _AMDXDNA_CTX_H_
 #define _AMDXDNA_CTX_H_
 
-#include <drm/gpu_scheduler.h>
 #include <linux/bitfield.h>
 
 #include "amdxdna_gem.h"
@@ -220,9 +219,6 @@ amdxdna_hwctx_report_state(struct amdxdna_hwctx *hwctx,
 		AMDXDNA_HWCTX_STATE_IDLE : AMDXDNA_HWCTX_STATE_ACTIVE;
 }
 
-#define drm_job_to_xdna_job(j) \
-	container_of(j, struct amdxdna_sched_job, base)
-
 enum amdxdna_job_opcode {
 	DEFAULT_IO,
 	SYNC_DEBUG_BO,
@@ -239,10 +235,8 @@ struct amdxdna_drv_cmd {
 union amdxdna_job_priv {
 	/* aie2 kernel submission */
 	struct {
-		/* The fence to signal DRM scheduler that job is done */
 		struct dma_fence	*fence;
-		/* user can wait on this fence */
-		struct dma_fence	*out_fence;
+		struct list_head	paused_list;
 	} aie2;
 	/* aie4 kernel submission: queue linkage + job state */
 	struct {
@@ -252,12 +246,11 @@ union amdxdna_job_priv {
 };
 
 struct amdxdna_sched_job {
-	struct drm_sched_job	base;
 	struct kref		refcnt;
 	struct amdxdna_hwctx	*hwctx;
 	struct mm_struct	*mm;
-	bool			job_done;
-	bool			job_timeout;
+	/* set after job_submit_cnt is incremented; for validation only */
+	bool			submitted;
 	u64			seq;
 	struct amdxdna_drv_cmd	*drv_cmd;
 	struct amdxdna_gem_obj	*cmd_bo;
@@ -266,10 +259,10 @@ struct amdxdna_sched_job {
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
 };
 
-#define aie2_job_fence     priv.aie2.fence
-#define aie2_job_out_fence priv.aie2.out_fence
-#define aie4_job_list      priv.aie4.list
-#define aie4_job_state     priv.aie4.state
+#define aie2_job_fence       priv.aie2.fence
+#define aie2_job_paused_list priv.aie2.paused_list
+#define aie4_job_list        priv.aie4.list
+#define aie4_job_state       priv.aie4.state
 
 static inline u32
 amdxdna_cmd_get_op(struct amdxdna_gem_obj *abo)

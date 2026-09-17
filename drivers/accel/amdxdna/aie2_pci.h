@@ -8,7 +8,6 @@
 
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_device.h>
-#include <drm/gpu_scheduler.h>
 #include <linux/bits.h>
 #include <linux/limits.h>
 #include <linux/semaphore.h>
@@ -79,16 +78,12 @@ struct amdxdna_hwctx_priv {
 	struct amdxdna_gem_obj		*heap;
 	void				*mbox_chann;
 
-	struct drm_gpu_scheduler	sched;
-	struct drm_sched_entity		entity;
-
-	struct mutex			io_lock; /* protect seq and cmd order */
+	/* protect seq, cmd order, job_paused and paused_job_list */
+	struct mutex			io_lock;
+	struct list_head		paused_job_list;
+	bool				job_paused;
 	u64				seq;
 	struct semaphore		job_sem;
-	bool				job_done;
-
-	/* Completed job counter */
-	u64				completed;
 
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 	struct drm_syncobj		*syncobj;
@@ -132,12 +127,7 @@ enum aie2_tdr_status {
 struct aie2_tdr {
 	/* TDR progress tracker, used to detect if device is making progress */
 	enum aie2_tdr_status progress;
-#ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
 	struct delayed_work work;
-#else
-	/* jiffies of the last progress signal (job completion or submission) */
-	unsigned long last_signal;
-#endif
 };
 
 struct amdxdna_dev_hdl {
@@ -316,6 +306,9 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);
 void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx);
 int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 int aie2_hwctx_sync_debug_bo(struct amdxdna_hwctx *hwctx, u32 debug_bo_hdl);
+int aie2_hwctx_stop(struct amdxdna_hwctx *hwctx);
+void aie2_hwctx_job_pause(struct amdxdna_hwctx *hwctx);
+void aie2_hwctx_job_unpause(struct amdxdna_hwctx *hwctx);
 void aie2_hwctx_suspend(struct amdxdna_client *client);
 int aie2_hwctx_resume(struct amdxdna_client *client);
 #define AIE2_HW_RESET_MIN_INTERVAL_MS	60000
@@ -324,15 +317,9 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx, struct amdxdna_gem_obj *heap);
 
 /* TDR APIs */
-#ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
 extern uint tdr_timeout_ms;
-extern bool tdr_dump_only;
 
 void aie2_tdr_start(struct amdxdna_dev *xdna);
 void aie2_tdr_stop(struct amdxdna_dev *xdna);
-#else
-static inline void aie2_tdr_start(struct amdxdna_dev *xdna) {}
-static inline void aie2_tdr_stop(struct amdxdna_dev *xdna) {}
-#endif
 
 #endif /* _AIE2_PCI_H_ */

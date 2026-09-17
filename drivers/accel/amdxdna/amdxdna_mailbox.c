@@ -69,6 +69,12 @@ struct mailbox_channel {
 	/* Optional handler for firmware-initiated messages, sent with ID 0 */
 	void				*async_handle;
 	xdna_mailbox_async_cb_t		async_cb;
+
+	/* Pre-allocated message buffer pool (non-NULL when n_msg > 0) */
+	void				*msg_buf;
+	u32				msg_buf_num;
+	size_t				msg_buf_entry_size;
+	u32				msg_id_max; /* exclusive upper bound for chan_xa */
 };
 
 #define MSG_BODY_SZ		GENMASK(10, 0)
@@ -166,14 +172,22 @@ static inline int mailbox_validate_msgid(int msg_id)
 
 static int mailbox_acquire_msgid(struct mailbox_channel *mb_chann, struct mailbox_msg *mb_msg)
 {
+	u32 prev_next_msgid = mb_chann->next_msgid;
 	u32 msg_id;
 	int ret;
 
 	ret = xa_alloc_cyclic_irq(&mb_chann->chan_xa, &msg_id, mb_msg,
-				  XA_LIMIT(0, MAX_MSG_ID_ENTRIES - 1),
+				  XA_LIMIT(0, mb_chann->msg_id_max - 1),
 				  &mb_chann->next_msgid, GFP_NOWAIT);
 	if (ret < 0)
 		return ret;
+
+	/*
+	 * Caller serializes all sends, so next_msgid advances by exactly one
+	 * per send and the allocated id always equals prev_next_msgid % msg_buf_num.
+	 */
+	if (mb_chann->msg_buf)
+		WARN_ON(msg_id != prev_next_msgid % mb_chann->msg_buf_num);
 
 	/*
 	 * Add MAGIC_VAL to the higher bits.
@@ -182,10 +196,35 @@ static int mailbox_acquire_msgid(struct mailbox_channel *mb_chann, struct mailbo
 	return msg_id;
 }
 
-static void mailbox_release_msgid(struct mailbox_channel *mb_chann, int msg_id)
+static struct mailbox_msg *mailbox_alloc_msg(struct mailbox_channel *mb_chann, size_t msg_size)
 {
-	msg_id &= ~MAGIC_VAL_MASK;
-	xa_erase_irq(&mb_chann->chan_xa, msg_id);
+	if (mb_chann->msg_buf) {
+		u32 idx;
+
+		if (unlikely(msg_size > mb_chann->msg_buf_entry_size)) {
+			pr_err("amdxdna: message size larger than pool entry size\n");
+			return NULL;
+		}
+
+		/*
+		 * Caller serializes all sends. next_msgid here equals the id
+		 * that mailbox_acquire_msgid() will assign (xa_alloc_cyclic
+		 * returns next_msgid when it is free). Firmware completes
+		 * messages FIFO, so with at most msg_buf_num in flight,
+		 * next_msgid % msg_buf_num is always a free slot.
+		 */
+		idx = mb_chann->next_msgid % mb_chann->msg_buf_num;
+		return memset(mb_chann->msg_buf + idx * mb_chann->msg_buf_entry_size,
+			      0, msg_size);
+	}
+
+	return kzalloc(msg_size, GFP_KERNEL);
+}
+
+static void mailbox_free_msg(struct mailbox_channel *mb_chann, struct mailbox_msg *mb_msg)
+{
+	if (!mb_chann->msg_buf)
+		kfree(mb_msg);
 }
 
 static void mailbox_release_msg(struct mailbox_channel *mb_chann,
@@ -195,7 +234,7 @@ static void mailbox_release_msg(struct mailbox_channel *mb_chann,
 	       mb_msg->pkg.header.id, mb_msg->pkg.header.opcode);
 	if (mb_msg->notify_cb)
 		mb_msg->notify_cb(mb_msg->handle, NULL, 0);
-	kfree(mb_msg);
+	mailbox_free_msg(mb_chann, mb_msg);
 }
 
 static int
@@ -311,7 +350,7 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 			MB_ERR(mb_chann, "Message callback ret %d", ret);
 	}
 
-	kfree(mb_msg);
+	mailbox_free_msg(mb_chann, mb_msg);
 	return ret;
 }
 
@@ -485,7 +524,7 @@ int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 		return -EPIPE;
 	}
 
-	mb_msg = kzalloc(sizeof(*mb_msg) + pkg_size, GFP_KERNEL);
+	mb_msg = mailbox_alloc_msg(mb_chann, sizeof(*mb_msg) + pkg_size);
 	if (!mb_msg)
 		return -ENOMEM;
 
@@ -523,9 +562,12 @@ int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 	return 0;
 
 release_id:
-	mailbox_release_msgid(mb_chann, header->id);
+	xa_erase_irq(&mb_chann->chan_xa, header->id & ~MAGIC_VAL_MASK);
+	/* Reset next_msgid so the next allocation reuses the freed slot. */
+	if (mb_chann->msg_buf)
+		mb_chann->next_msgid = header->id & ~MAGIC_VAL_MASK;
 msg_id_failed:
-	kfree(mb_msg);
+	mailbox_free_msg(mb_chann, mb_msg);
 	return ret;
 }
 
@@ -567,6 +609,7 @@ void xdna_mailbox_free_channel(struct mailbox_channel *mb_chann)
 	if (!mb_chann)
 		return;
 
+	kfree(mb_chann->msg_buf);
 	destroy_workqueue(mb_chann->work_q);
 	kfree(mb_chann);
 }
@@ -576,8 +619,9 @@ xdna_mailbox_start_channel(struct mailbox_channel *mb_chann,
 			   const struct xdna_mailbox_chann_res *x2i,
 			   const struct xdna_mailbox_chann_res *i2x,
 			   u32 iohub_int_addr,
-			   int mb_irq)
+			   int mb_irq, u32 n_msg)
 {
+	size_t entry_size;
 	int ret;
 
 	if (!is_power_of_2(x2i->rb_size) || !is_power_of_2(i2x->rb_size)) {
@@ -590,6 +634,29 @@ xdna_mailbox_start_channel(struct mailbox_channel *mb_chann,
 	memcpy(&mb_chann->res[CHAN_RES_X2I], x2i, sizeof(*x2i));
 	memcpy(&mb_chann->res[CHAN_RES_I2X], i2x, sizeof(*i2x));
 
+	if (n_msg) {
+		/*
+		 * Each pool entry is sized to rb_size / n_msg, limiting the
+		 * maximum per-message payload to entry_size - sizeof(mailbox_msg).
+		 * Concurrency is bounded by count (n_msg) not bytes, so messages
+		 * larger than the entry size are rejected by mailbox_alloc_msg().
+		 * Callers must ensure their maximum message fits within this budget.
+		 */
+		entry_size = ALIGN(x2i->rb_size / n_msg, __alignof__(struct mailbox_msg));
+		if (entry_size < sizeof(struct mailbox_msg)) {
+			pr_err("amdxdna: mailbox ring buffer too small for %u messages\n", n_msg);
+			return -EINVAL;
+		}
+		mb_chann->msg_buf = kcalloc(n_msg, entry_size, GFP_KERNEL);
+		if (!mb_chann->msg_buf)
+			return -ENOMEM;
+		mb_chann->msg_buf_num = n_msg;
+		mb_chann->msg_buf_entry_size = entry_size;
+		mb_chann->msg_id_max = n_msg;
+	} else {
+		mb_chann->msg_id_max = MAX_MSG_ID_ENTRIES;
+	}
+
 	xa_init_flags(&mb_chann->chan_xa, XA_FLAGS_ALLOC | XA_FLAGS_LOCK_IRQ);
 	mb_chann->x2i_tail = mailbox_get_tailptr(mb_chann, CHAN_RES_X2I);
 	mb_chann->i2x_head = mailbox_get_headptr(mb_chann, CHAN_RES_I2X);
@@ -598,7 +665,7 @@ xdna_mailbox_start_channel(struct mailbox_channel *mb_chann,
 	ret = request_irq(mb_irq, mailbox_irq_handler, 0, MAILBOX_NAME, mb_chann);
 	if (ret) {
 		MB_ERR(mb_chann, "Failed to request irq %d ret %d", mb_irq, ret);
-		return ret;
+		goto free_pool;
 	}
 
 	mb_chann->bad_state = false;
@@ -606,6 +673,11 @@ xdna_mailbox_start_channel(struct mailbox_channel *mb_chann,
 
 	MB_DBG(mb_chann, "Mailbox channel started (irq: %d)", mb_chann->msix_irq);
 	return 0;
+
+free_pool:
+	kfree(mb_chann->msg_buf);
+	mb_chann->msg_buf = NULL;
+	return ret;
 }
 
 void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
@@ -625,8 +697,11 @@ void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 	/* We can clean up and release resources */
 	xa_for_each_start(&mb_chann->chan_xa, msg_id, mb_msg, mb_chann->next_msgid)
 		mailbox_release_msg(mb_chann, mb_msg);
-	xa_for_each_range(&mb_chann->chan_xa, msg_id, mb_msg, 0, mb_chann->next_msgid - 1)
-		mailbox_release_msg(mb_chann, mb_msg);
+	if (mb_chann->next_msgid) {
+		xa_for_each_range(&mb_chann->chan_xa, msg_id, mb_msg, 0,
+				  mb_chann->next_msgid - 1)
+			mailbox_release_msg(mb_chann, mb_msg);
+	}
 	xa_destroy(&mb_chann->chan_xa);
 
 	MB_DBG(mb_chann, "Mailbox channel stopped, irq: %d", mb_chann->msix_irq);

@@ -10,7 +10,6 @@
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_print.h>
-#include <drm/gpu_scheduler.h>
 #include <linux/xarray.h>
 
 #define CREATE_TRACE_POINTS
@@ -632,6 +631,7 @@ void amdxdna_job_cleanup(struct amdxdna_sched_job *job)
 	amdxdna_arg_bos_put(job);
 	amdxdna_gem_put_obj(job->cmd_bo);
 	mmdrop(job->mm);
+	WARN_ON(!job->submitted);
 	atomic64_inc(&job->hwctx->job_free_cnt);
 	wake_up(&job->hwctx->job_free_wq);
 }
@@ -654,6 +654,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 	if (!job)
 		return -ENOMEM;
 
+	INIT_LIST_HEAD(&job->aie2_job_paused_list);
 	job->drv_cmd = drv_cmd;
 
 	if (cmd_bo_hdl != AMDXDNA_INVALID_BO_HANDLE) {
@@ -714,11 +715,9 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 	/*
 	 * The amdxdna_hwctx_destroy_rcu() will release hwctx and associated
 	 * resource after synchronize_srcu(). The submitted jobs should be
-	 * handled by the queue, for example DRM scheduler, in device layer.
-	 * For here we can unlock SRCU.
+	 * handled by the device layer. For here we can unlock SRCU.
 	 */
 	srcu_read_unlock(&client->hwctx_srcu, idx);
-	trace_amdxdna_debug_point(hwctx->name, *seq, "job pushed");
 
 	return 0;
 
