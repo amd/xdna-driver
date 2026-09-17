@@ -33,6 +33,15 @@ target_compile_definitions(${XDNA_TARGET} PRIVATE
   $<$<CONFIG:Debug>:XDNA_SHIM_DEBUG>
   )
 
+# The aie2ps platform npu12 is a non-coherent DMA master; enable so the UMQ shim
+# reports non-coherent and does real cache maintenance instead of skipping it
+# (see src/shim/umq/pcidev.h).
+option(XDNA_UMQ_CACHE_NONCOHERENT
+  "Build the UMQ shim for a non-coherent DMA device (e.g. aie2ps platform npu12)" OFF)
+if(XDNA_UMQ_CACHE_NONCOHERENT)
+  target_compile_definitions(${XDNA_TARGET} PRIVATE XDNA_UMQ_CACHE_NONCOHERENT)
+endif()
+
 if(${UMQ_HELLO_TEST})
   add_definitions(-DUMQ_HELLO_TEST)
 endif()

@@ -124,6 +124,9 @@ public:
 protected:
   const pdev& m_pdev;
 
+public:
+  // Invalidate/flush through the driver (SYNC_BO ioctl) instead of userspace
+  // cache ops -- needed on aarch64, where EL0 cache maintenance may be disabled.
   void
   sync_by_driver(direction dir, size_t size, size_t offset);
 
