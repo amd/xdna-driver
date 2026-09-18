@@ -88,22 +88,16 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 		fs_reclaim_release(GFP_KERNEL);
 	}
 
-	ret = amdxdna_iommu_init(xdna);
-	if (ret)
-		return ret;
-
 	xdna->notifier_wq = drmm_alloc_ordered_workqueue(ddev, "notifier_wq", WQ_MEM_RECLAIM);
-	if (IS_ERR(xdna->notifier_wq)) {
-		ret = PTR_ERR(xdna->notifier_wq);
-		goto iommu_fini;
-	}
+	if (IS_ERR(xdna->notifier_wq))
+		return PTR_ERR(xdna->notifier_wq);
 
 	mutex_lock(&xdna->dev_lock);
 	ret = xdna->dev_info->ops->init(xdna);
 	mutex_unlock(&xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
-		goto iommu_fini;
+		return ret;
 	}
 
 	ret = amdxdna_sysfs_init(xdna);
@@ -128,8 +122,6 @@ failed_dev_fini:
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
-iommu_fini:
-	amdxdna_iommu_fini(xdna);
 	return ret;
 }
 
@@ -151,8 +143,6 @@ static void amdxdna_plat_remove(struct platform_device *pdev)
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
 	mutex_unlock(&xdna->client_lock);
-
-	amdxdna_iommu_fini(xdna);
 }
 
 static const struct dev_pm_ops amdxdna_plat_pm_ops = {
