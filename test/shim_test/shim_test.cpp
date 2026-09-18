@@ -648,10 +648,10 @@ TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device>&
   auto is_user = arg[0];
   auto devinfo = get_total_devices(is_user);
   for (device::id_type i = 0; i < devinfo.first; i++) {
-    auto info = get_bdf_info(i);
+    auto info = get_bdf_info(i, is_user);
     auto bdf = bdf_info2str(info);
     std::cout << "device[" << i << "]: " << bdf << std::endl;
-    auto dev = get_userpf_device(i);
+    auto dev = is_user ? get_userpf_device(i) : get_mgmtpf_device(i);
     try {
       auto devid = device_query<query::pcie_device>(dev);
       std::cout << "device[" << bdf << "]: 0x" << std::hex << devid << std::dec << std::endl;
@@ -1517,18 +1517,18 @@ std::vector<test_case> test_list {
   test_case{ "get_total_devices", {},
     TEST_POSITIVE, no_dev_filter, TEST_get_total_devices, {true}
   },
-  //test_case{ "get_total_devices(mgmtpf)", {},
-  //  TEST_POSITIVE, no_dev_filter, TEST_get_total_devices, {false}
-  //},
+  test_case{ "get_total_devices(mgmtpf)", {},
+    TEST_POSITIVE, no_dev_filter, TEST_get_total_devices, {false}
+  },
   test_case{ "get_bdf_info_and_get_device_id", {},
     TEST_POSITIVE, no_dev_filter, TEST_get_bdf_info_and_get_device_id, {true}
   },
-  //test_case{ "get_bdf_info_and_get_device_id(mgmtpf)", {},
-  //  TEST_POSITIVE, no_dev_filter, TEST_get_bdf_info_and_get_device_id, {false}
-  //},
-  //test_case{ "get_mgmtpf_device", {},
-  //  TEST_POSITIVE, no_dev_filter, TEST_get_mgmtpf_device, {}
-  //},
+  test_case{ "get_bdf_info_and_get_device_id(mgmtpf)", {},
+    TEST_POSITIVE, no_dev_filter, TEST_get_bdf_info_and_get_device_id, {false}
+  },
+  test_case{ "get_mgmtpf_device", {},
+    TEST_POSITIVE, no_dev_filter, TEST_get_mgmtpf_device, {}
+  },
   test_case{ "query(pcie_vendor)", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_query_userpf<query::pcie_vendor>, {}
   },
