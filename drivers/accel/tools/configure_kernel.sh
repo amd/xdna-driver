@@ -499,6 +499,31 @@ cat >> "$OUT" <<'EOF'
 #endif
 EOF
 
+#Test drm_gem_shmem_put_pages_locked exists
+try_compile HAVE_6_16_drm_gem_shmem_put_pages_locked << 'EOF'
+#include <drm/drm_gem_shmem_helper.h>
+int main(void)
+{
+	struct drm_gem_shmem_object *p = NULL;
+	drm_gem_shmem_put_pages_locked(p);
+}
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_6_16_drm_gem_shmem_put_pages_locked
+#define drm_gem_shmem_put_pages_locked drm_gem_shmem_put_pages
+#endif
+EOF
+
+#Test shmem->pages_use_count type
+try_compile HAVE_6_16_shmem_pages_use_count_refcnt << 'EOF'
+#include <drm/drm_gem_shmem_helper.h>
+int main(void)
+{
+	struct drm_gem_shmem_object shmem;
+	refcount_inc_not_zero(&shmem.pages_use_count);
+}
+EOF
+
 #Test drmm_alloc_ordered_workqueue exists
 try_compile HAVE_6_15_drmm_alloc_ordered_workqueue << 'EOF'
 #include <drm/drm_managed.h>
