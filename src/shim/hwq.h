@@ -47,6 +47,9 @@ public:
   virtual bo_id
   get_queue_bo() const = 0;
 
+  virtual void
+  dump() const {}
+
 protected:
   const pdev& m_pdev;
   const hwctx* m_ctx = nullptr;
