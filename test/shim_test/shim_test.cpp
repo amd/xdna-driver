@@ -1418,7 +1418,12 @@ TEST_query_memory_usage(device::id_type id, std::shared_ptr<device>& sdev, arg_t
 }
 
 constexpr uint32_t TELEMETRY_DATA_SIZE = 256 * 1024;
-constexpr uint32_t TELEMETRY_MAP_CAPACITY = 256;
+// Upper bound on the firmware-context-id to driver-context-id map the driver
+// places at the head of the telemetry buffer. AIE4 sizes this map to
+// MAX_NUM_HW_CTX (1024, one slot per possible firmware context id); AIE2p uses
+// a smaller map. Keep this at the largest supported map so the probe buffer is
+// big enough and the capacity check does not false-fail on AIE4.
+constexpr uint32_t TELEMETRY_MAP_CAPACITY = 1024;
 // aie4 selects a telemetry category via the type field; older NPUs require 0.
 constexpr uint32_t AIE4_TELEMETRY_PERF_COUNTER = 1;
 
