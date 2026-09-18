@@ -8,6 +8,7 @@
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
 #include <linux/bitfield.h>
+#include <linux/bits.h>
 #include <linux/ktime.h>
 #include <linux/mutex.h>
 
@@ -18,6 +19,104 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_drv.h"
+
+#define AIE4_OP_CLASSIC		BIT(0)
+#define AIE4_OP_PF		BIT(1)
+#define AIE4_OP_VF		BIT(2)
+#define AIE4_OP_ALL		(AIE4_OP_CLASSIC | AIE4_OP_PF | AIE4_OP_VF)
+#define AIE4_OP_CV		(AIE4_OP_CLASSIC | AIE4_OP_VF)
+#define AIE4_OP_CP		(AIE4_OP_CLASSIC | AIE4_OP_PF)
+
+struct aie4_opcode_allow {
+	u32 opcode;
+	u32 type;
+	u32 roles;
+};
+
+/*
+ * Mailbox opcodes the driver may send, by device role. Unknown opcodes and
+ * unlisted SET_RUNTIME_CONFIG types are denied (no firmware send).
+ */
+static const struct aie4_opcode_allow aie4_opcode_allow[] = {
+	/* 0x1xxxx */
+	{ AIE4_MSG_OP_IDENTIFY,                    AIE4_OP_NO_TYPE, AIE4_OP_ALL },
+	{ AIE4_MSG_OP_SUSPEND,                     AIE4_OP_NO_TYPE, AIE4_OP_ALL },
+	{ AIE4_MSG_OP_ASYNC_EVENT_REPORT,          AIE4_OP_NO_TYPE, AIE4_OP_ALL },
+	{ AIE4_MSG_OP_GET_TELEMETRY,               AIE4_OP_NO_TYPE, AIE4_OP_CP },
+	{ AIE4_MSG_OP_START_FW_TRACE,              AIE4_OP_NO_TYPE, AIE4_OP_CP },
+	{ AIE4_MSG_OP_STOP_FW_TRACE,               AIE4_OP_NO_TYPE, AIE4_OP_CP },
+	{ AIE4_MSG_OP_SET_FW_TRACE_CATEGORIES,     AIE4_OP_NO_TYPE, AIE4_OP_CP },
+	{ AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION, AIE4_OP_NO_TYPE, AIE4_OP_ALL },
+
+	{ AIE4_MSG_OP_SET_RUNTIME_CONFIG,
+	  AIE4_RUNTIME_CONFIG_FORCE_PREEMPTION,     AIE4_OP_CP },
+	{ AIE4_MSG_OP_SET_RUNTIME_CONFIG,
+	  AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL,         AIE4_OP_CP },
+	{ AIE4_MSG_OP_SET_RUNTIME_CONFIG,
+	  AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS, AIE4_OP_CP },
+
+	/* 0x2xxxx */
+	{ AIE4_MSG_OP_CREATE_VFS,  AIE4_OP_NO_TYPE, AIE4_OP_PF },
+	{ AIE4_MSG_OP_DESTROY_VFS, AIE4_OP_NO_TYPE, AIE4_OP_PF },
+
+	/* 0x3xxxx */
+	{ AIE4_MSG_OP_CREATE_PARTITION,      AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_DESTROY_PARTITION,     AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_CREATE_HW_CONTEXT,     AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_DESTROY_HW_CONTEXT,    AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_CONFIGURE_HW_CONTEXT,  AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_AIE_TILE_INFO,         AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_AIE_VERSION_INFO,      AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_AIE_COLUMN_INFO,       AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_POWER_OVERRIDE,        AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_AIE_RW_ACCESS,         AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_GET_APP_HEALTH_STATUS, AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_AIE_COREDUMP,          AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_GET_DPM_FREQ_TABLE,    AIE4_OP_NO_TYPE, AIE4_OP_CV },
+	{ AIE4_MSG_OP_GET_CURRENT_DPM_LEVEL, AIE4_OP_NO_TYPE, AIE4_OP_CV },
+
+	/* 0x4xxxx */
+	{ AIE4_MSG_OP_ATTACH_WORK_BUFFER,        AIE4_OP_NO_TYPE, AIE4_OP_CP },
+	{ AIE4_MSG_OP_START_FW_LOG,              AIE4_OP_NO_TYPE, AIE4_OP_CP },
+	{ AIE4_MSG_OP_STOP_FW_LOG,               AIE4_OP_NO_TYPE, AIE4_OP_CP },
+	{ AIE4_MSG_OP_CALIBRATE_CLOCK,           AIE4_OP_NO_TYPE, AIE4_OP_CP },
+	{ AIE4_MSG_OP_GET_AIE_ACTIVITY_COUNTERS, AIE4_OP_NO_TYPE, AIE4_OP_CP },
+};
+
+static bool aie4_opcode_allowed(struct aie_device *aie, u32 opcode, u32 type)
+{
+	struct amdxdna_dev_hdl *ndev = aie->xdna->dev_handle;
+	u32 role;
+	int i;
+
+	if (aie->xdna->dev_info->device_type == AMDXDNA_DEV_TYPE_PF)
+		role = AIE4_OP_PF;
+	else if (aie4_is_vf(ndev))
+		role = AIE4_OP_VF;
+	else
+		role = AIE4_OP_CLASSIC;
+
+	for (i = 0; i < ARRAY_SIZE(aie4_opcode_allow); i++) {
+		if (aie4_opcode_allow[i].opcode != opcode)
+			continue;
+		if (aie4_opcode_allow[i].type != type)
+			continue;
+		return aie4_opcode_allow[i].roles & role;
+	}
+	return false;
+}
+
+int aie4_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg,
+			    u32 type)
+{
+	if (!aie4_opcode_allowed(aie, msg->opcode, type)) {
+		XDNA_DBG(aie->xdna, "opcode 0x%x type 0x%x not allowed on this device",
+			 msg->opcode, type);
+		return -EOPNOTSUPP;
+	}
+
+	return aie_send_mgmt_msg_wait(aie, msg);
+}
 
 u32 aie4_msg_pasid(struct amdxdna_client *client)
 {
@@ -33,7 +132,7 @@ int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev)
 	DECLARE_AIE_MSG(aie4_msg_suspend, AIE4_MSG_OP_SUSPEND);
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		XDNA_ERR(ndev->aie.xdna, "Failed to suspend fw, ret %d", ret);
 
@@ -52,7 +151,7 @@ int aie4_calibrate_clock(struct amdxdna_dev_hdl *ndev)
 
 	req.time_base_ns = ktime_get_real_ns();
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret) {
 		XDNA_ERR(ndev->aie.xdna, "Calibrate clock failed, ret %d", ret);
 		return ret;
@@ -69,7 +168,7 @@ int aie4_get_aie_activity_counters(struct amdxdna_dev_hdl *ndev,
 	int ret;
 	u32 i;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		return ret;
 
@@ -88,7 +187,7 @@ int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev,
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		return ret;
 
@@ -107,7 +206,7 @@ int aie4_query_npu_firmware_version(struct amdxdna_dev_hdl *ndev,
 	DECLARE_AIE_MSG(aie4_msg_identify, AIE4_MSG_OP_IDENTIFY);
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		return ret;
 
@@ -126,7 +225,7 @@ int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 			AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION);
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		return ret;
 
@@ -153,7 +252,7 @@ int aie4_query_dpm_level(struct amdxdna_dev_hdl *ndev,
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		return ret;
 
@@ -179,7 +278,7 @@ int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev,
 	DECLARE_AIE_MSG(aie4_msg_aie4_tile_info, AIE4_MSG_OP_AIE_TILE_INFO);
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		return ret;
 
@@ -220,7 +319,7 @@ int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 s
 	req.buff_addr = addr;
 	req.buff_size = size;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		XDNA_ERR(xdna, "Failed to attach work buffer, ret %d", ret);
 	else
@@ -236,7 +335,7 @@ int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode)
 
 	req.power_mode = power_mode;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		XDNA_WARN(ndev->aie.xdna,
 			  "Failed to set power mode %u, ret %d", (u32)power_mode, ret);
@@ -259,7 +358,7 @@ int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable)
 
 	msg.send_size = sizeof(req);
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, type);
 	if (ret)
 		XDNA_WARN(ndev->aie.xdna,
 			  "Failed to set force preemption, ret %d", ret);
@@ -281,7 +380,7 @@ int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 	req.property = property;
 	req.cert_logging = *cl;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		XDNA_ERR(xdna, "CERT log configure failed, ctx %u property %u ret %d",
 			 hw_context_id, property, ret);
@@ -314,6 +413,10 @@ int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 		return -ENODEV;
 
 	XDNA_DBG(ndev->aie.xdna, "Register addr 0x%llx size 0x%x", addr, size);
+	if (!aie4_opcode_allowed(&ndev->aie, msg.opcode, AIE4_OP_NO_TYPE)) {
+		XDNA_DBG(ndev->aie.xdna, "opcode 0x%x not allowed", msg.opcode);
+		return -EOPNOTSUPP;
+	}
 	return xdna_mailbox_send_msg(ndev->aie.mgmt_chann, &msg, TX_TIMEOUT);
 }
 
@@ -332,7 +435,7 @@ int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 	req.num_buffers = num_bufs;
 	req.buffer_list_addr = to_dma_addr(list_hdl, 0);
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret)
 		XDNA_ERR(xdna,
 			 "Get coredump ctx %u num_bufs %u failed, status 0x%x, detail 0x%x 0x%x 0x%x 0x%x",
@@ -362,7 +465,7 @@ int aie4_rw_aie_reg(struct amdxdna_hwctx *hwctx, bool is_read,
 	if (!is_read)
 		req.reg_access.reg_wval = *value;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret) {
 		XDNA_ERR(xdna, "AIE reg %s failed, ret %d",
 			 is_read ? "read" : "write", ret);
@@ -397,7 +500,7 @@ int aie4_rw_aie_mem(struct amdxdna_hwctx *hwctx, bool is_read,
 	req.mem_access.mem_size = size;
 	req.mem_access.pasid = aie4_msg_pasid(hwctx->client);
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret) {
 		XDNA_ERR(xdna, "AIE mem %s failed, ret %d",
 			 is_read ? "read" : "write", ret);
@@ -434,7 +537,7 @@ static int aie4_query_telemetry(struct aie_device *aie, char __user *buf, u32 si
 	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
 	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 
-	ret = aie_send_mgmt_msg_wait(aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed, ret %d", ret);
 		goto free_buf;
@@ -482,7 +585,7 @@ int aie4_set_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type,
 	msg.send_data = buf;
 	msg.send_size = sizeof(req.type) + size;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, type);
 	if (ret)
 		XDNA_ERR(ndev->aie.xdna, "Failed to set runtime cfg %u: %d", type, ret);
 	return ret;
@@ -571,7 +674,7 @@ int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
 	req.buff_size = size;
 	req.log_level = level;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret) {
 		XDNA_ERR(xdna, "Start fw log failed, ret %d status 0x%x",
 			 ret, resp.status);
@@ -612,7 +715,7 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
 	req.buff_addr = addr;
 	req.buff_size = size;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret) {
 		XDNA_ERR(xdna, "Start FW trace failed, ret %d status 0x%x",
 			 ret, resp.status);
@@ -647,7 +750,7 @@ static int aie4_query_status(struct amdxdna_msg_buf_hdl *buf_hdl, u32 *cols_fill
 	req.pasid = 0;
 	req.aie4_col_bitmap = aie_bitmap;
 
-	ret = aie_send_mgmt_msg_wait(aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret) {
 		XDNA_ERR(xdna, "Error during NPU query, status %d", ret);
 		return ret;
@@ -685,7 +788,7 @@ int aie4_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 
 	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
 	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg, AIE4_OP_NO_TYPE);
 	if (ret || resp.app_health_status != AIE4_APP_HEALTH_CHECK_SUCCESS) {
 		if (!ret)
 			ret = -EIO;
