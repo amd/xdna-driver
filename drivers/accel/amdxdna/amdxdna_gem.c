@@ -666,7 +666,12 @@ static void amdxdna_gem_mixedmap_vm_open(struct vm_area_struct *vma)
 	 * mapping copy created by fork().  Mirrors drm_gem_shmem_vm_open().
 	 */
 	dma_resv_lock(gobj->resv, NULL);
+#ifdef HAVE_6_16_shmem_pages_use_count_refcnt
 	drm_WARN_ON_ONCE(gobj->dev, !refcount_inc_not_zero(&shmem->pages_use_count));
+#else
+	if (!drm_WARN_ON_ONCE(gobj->dev, !shmem->pages_use_count))
+		shmem->pages_use_count++;
+#endif
 	dma_resv_unlock(gobj->resv);
 
 	drm_gem_vm_open(vma);
