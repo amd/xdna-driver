@@ -7,6 +7,7 @@
 #define _AMDXDNA_GEM_H_
 
 #include <drm/drm_gem_shmem_helper.h>
+#include <linux/dma-direction.h>
 #include <linux/hmm.h>
 #include <linux/iova.h>
 #include "amdxdna_drv.h"
@@ -130,6 +131,10 @@ struct amdxdna_gem_obj *
 amdxdna_gem_create_obj(struct drm_device *dev, size_t size);
 void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo);
 struct sg_table *amdxdna_gem_get_sgt(struct amdxdna_gem_obj *abo);
+int amdxdna_gem_dma_sync_range(struct amdxdna_gem_obj *abo, u64 offset, u64 size,
+			       enum dma_data_direction dir);
+void amdxdna_dma_sync_sgt(struct device *dev, struct sg_table *sgt, u64 offset,
+			  u64 size, enum dma_data_direction dir);
 
 int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo);
 int amdxdna_gem_pin(struct amdxdna_gem_obj *abo);

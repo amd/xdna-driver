@@ -6,7 +6,6 @@
  */
 
 #include "drm/amdxdna_accel.h"
-#include <drm/drm_cache.h>
 #include <drm/drm_drv.h>
 #include <linux/pm_runtime.h>
 #include <linux/rcupdate.h>
@@ -355,7 +354,7 @@ void aie4_zero_work_buffer(struct amdxdna_dev_hdl *ndev)
 	vaddr = to_cpu_addr(ndev->work_buf_hdl, 0);
 	size = to_buf_size(ndev->work_buf_hdl);
 	memset(vaddr, 0, size);
-	drm_clflush_virt_range(vaddr, size);
+	amdxdna_msg_buff_sync_for_device(ndev->work_buf_hdl);
 }
 
 int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)

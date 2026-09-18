@@ -85,6 +85,13 @@ struct amdxdna_hwctx_priv {
 	struct host_indirect_packet_data *umq_indirect_pkts;
 	u64                             umq_indirect_pkts_dev_addr;
 	/*
+	 * Stable device-mapped sgt of umq_bo, resolved once under dma_resv in
+	 * aie4_hwctx_umq_init() (only on a non-coherent device); the hot-path queue
+	 * cache-syncs walk it lock-free -- the BO is pinned by its vmap for the ctx
+	 * lifetime.  NULL (and unused) on the cache-coherent aie4 PCI part.
+	 */
+	struct sg_table                 *umq_sgt;
+	/*
 	 * Transport-private doorbell kick target.  On PCI this is doorbell_base +
 	 * doorbell_off + firmware offset, set by aie4_doorbell_setup() and
 	 * dereferenced only by aie4_doorbell_ring() in aie4_pci.c.  Never touched

@@ -7,6 +7,7 @@
 #include <drm/drm_cache.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_print.h>
+#include <linux/dma-map-ops.h>
 #include <linux/errno.h>
 #include <linux/limits.h>
 #include <linux/sizes.h>
@@ -250,7 +251,7 @@ int amdxdna_get_aie_status(struct amdxdna_client *client, struct amdxdna_drm_get
 		return PTR_ERR(buf_hdl);
 
 	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	amdxdna_msg_buff_sync_for_device(buf_hdl);
 
 	ret = aie->msg_ops.query_status(buf_hdl, &cols_filled, &resp_size);
 	if (ret) {
@@ -266,7 +267,7 @@ int amdxdna_get_aie_status(struct amdxdna_client *client, struct amdxdna_drm_get
 	}
 
 	/* Invalidate stale cache lines before reading FW-written data. */
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	amdxdna_msg_buff_sync_for_cpu(buf_hdl);
 
 	resp_size = min(status.buffer_size, resp_size);
 	if (copy_to_user(u64_to_user_ptr(status.buffer),
@@ -477,5 +478,58 @@ void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl)
 	}
 
 	kfree(hdl);
+}
+
+/*
+ * Cache-sync [offset, offset+size) of a message buffer so the firmware (or CERT
+ * shim DMA) and the CPU agree.  @dir is DMA_TO_DEVICE to publish CPU writes
+ * before arming firmware, or DMA_FROM_DEVICE to drop stale lines before reading
+ * device-written data.  The buffer is WB-cached memory from
+ * dma_alloc_noncoherent() / __get_free_pages().  On x86 the streaming
+ * dma_sync_*() helpers no-op because the NPU is reported dma-coherent, so flush
+ * with drm_clflush -- which only exists on x86 anyway.  On non-x86, where
+ * drm_clflush warns and no-ops, use dma_sync_single_for_*(), which no-ops on the
+ * coherent aie4 platform.
+ */
+static void amdxdna_msg_buff_sync(struct amdxdna_msg_buf_hdl *hdl, u64 offset,
+				  u64 size, enum dma_data_direction dir)
+{
+	/*
+	 * A force_iova message buffer's dma_addr is a private IOVA (installed with
+	 * iommu_map(), not a DMA-API mapping), so it must not be handed to the
+	 * DMA-API sync helpers -- a contract violation flagged by DMA_API_DEBUG.
+	 * That path is only used on a dma-coherent device, so nothing needs
+	 * syncing; the x86 branch below uses the CPU address and is unaffected.
+	 */
+	if (!IS_ENABLED(CONFIG_X86) && amdxdna_iova_on(hdl->xdna)) {
+		WARN_ON_ONCE(!dev_is_dma_coherent(hdl->xdna->ddev.dev));
+		return;
+	}
+
+	if (IS_ENABLED(CONFIG_X86))
+		drm_clflush_virt_range(to_cpu_addr(hdl, offset), size);
+	else if (dir == DMA_FROM_DEVICE)
+		dma_sync_single_for_cpu(hdl->xdna->ddev.dev, to_dma_addr(hdl, offset),
+					size, dir);
+	else
+		dma_sync_single_for_device(hdl->xdna->ddev.dev, to_dma_addr(hdl, offset),
+					   size, dir);
+}
+
+void amdxdna_msg_buff_sync_for_device(struct amdxdna_msg_buf_hdl *hdl)
+{
+	amdxdna_msg_buff_sync(hdl, 0, to_buf_size(hdl), DMA_TO_DEVICE);
+}
+
+void amdxdna_msg_buff_sync_for_cpu(struct amdxdna_msg_buf_hdl *hdl)
+{
+	amdxdna_msg_buff_sync(hdl, 0, to_buf_size(hdl), DMA_FROM_DEVICE);
+}
+
+/* Invalidate a sub-range before a CPU read; used for partial DPT log fetches. */
+void amdxdna_msg_buff_sync_for_cpu_range(struct amdxdna_msg_buf_hdl *hdl, u64 offset,
+					 u64 size)
+{
+	amdxdna_msg_buff_sync(hdl, offset, size, DMA_FROM_DEVICE);
 }
 
