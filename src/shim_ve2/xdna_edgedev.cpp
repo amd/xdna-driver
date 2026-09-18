@@ -236,6 +236,25 @@ open() const
   int fd = -1;
   const std::lock_guard<std::mutex> lock(m_lock);
 
+  // The edgedev is a process-wide singleton. After fork() the child inherits
+  // the parent's fd, user count, and GEM handle map, but those refer to the
+  // parent's DRM client. Drop the inherited fd (close only affects this
+  // process's fd table) and reopen so the child gets its own client.
+  if (m_pid != 0 && m_pid != getpid()) {
+    int inherited = m_dev_fd;
+    m_dev_fd = -1;
+    m_dev_users = 0;
+    {
+      std::lock_guard<std::mutex> lk(m_bo_ref_mtx);
+      m_bo_refcnt.clear();
+    }
+    if (inherited >= 0)
+      ::close(inherited);
+    shim_debug("Reset inherited device state after fork (old pid=%d, new pid=%d)",
+               m_pid, getpid());
+  }
+  m_pid = getpid();
+
   shim_debug("Opening device: %s (current users=%d)", m_dev_name.c_str(), m_dev_users);
 
   if (m_dev_users == 0) {
