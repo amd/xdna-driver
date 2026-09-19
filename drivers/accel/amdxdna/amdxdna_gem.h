@@ -61,6 +61,8 @@ struct amdxdna_gem_obj {
 	u32				assigned_hwctx;
 	struct dma_buf			*dma_buf;
 	struct dma_buf_attachment	*attach;
+	/* dma_alloc_coherent() cookie for the CMA backing (amdxdna_cma_buf.c). */
+	dma_addr_t			cma_dma_addr;
 
 	/* True, if BO is managed by XRT, not application */
 	bool				internal;

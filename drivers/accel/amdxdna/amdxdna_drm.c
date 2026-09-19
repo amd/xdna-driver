@@ -24,6 +24,7 @@
 
 #include "aie.h"
 #include "amdxdna_cbuf.h"
+#include "amdxdna_cma_buf.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_drv.h"
@@ -111,12 +112,17 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	client->mm = current->mm;
 
 #ifndef AMDXDNA_NPU3A
-	if (!amdxdna_iova_on(xdna)) {
+	/*
+	 * The platform's CMA backing is PA/DMA-addressed and never uses SVA, so do
+	 * not attempt a PASID bind there. Carveout differs: it is a debugfs opt-in PA
+	 * fallback, used only when SVA is unavailable, so it stays a fallback below.
+	 */
+	if (!amdxdna_iova_on(xdna) && !amdxdna_use_cma(xdna)) {
 		/* No need to fail open since user may use pa + carveout later. */
 		if (amdxdna_sva_init(client)) {
 			XDNA_WARN(xdna, "PASID not available for pid %d", client->pid);
 			if (!amdxdna_use_carveout(xdna)) {
-				XDNA_ERR(xdna, "PASID unavailable and carveout not configured");
+				XDNA_ERR(xdna, "PASID unavailable and no BO backing configured");
 				cleanup_srcu_struct(&client->hwctx_srcu);
 				kfree(client);
 				return -EINVAL;
