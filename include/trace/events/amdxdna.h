@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
 #if !defined(_AMDXDNA_TRACE_EVENTS_H_) || defined(TRACE_HEADER_MULTI_READ)
@@ -9,8 +9,6 @@
 #include <linux/stringify.h>
 #include <linux/tracepoint.h>
 #include <linux/version.h>
-
-#include <drm/gpu_scheduler.h>
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM amdxdna
@@ -34,27 +32,21 @@ TRACE_EVENT(amdxdna_debug_point,
 );
 
 TRACE_EVENT(xdna_job,
-	    TP_PROTO(struct drm_sched_job *sched_job, const char *name,
-		     const char *str, u64 seq, u32 op),
+	    TP_PROTO(const char *name, const char *str, u64 seq, u32 op),
 
-	    TP_ARGS(sched_job, name, str, seq, op),
+	    TP_ARGS(name, str, seq, op),
 
 	    TP_STRUCT__entry(__string(name, name)
 			     __string(str, str)
-			     __field(u64, fence_context)
-			     __field(u64, fence_seqno)
 			     __field(u64, seq)
 			     __field(u32, op)),
 
 	    TP_fast_assign(__assign_str(name);
 			   __assign_str(str);
-			   __entry->fence_context = sched_job->s_fence->finished.context;
-			   __entry->fence_seqno = sched_job->s_fence->finished.seqno;
 			   __entry->seq = seq;
 			   __entry->op = op;),
 
-	    TP_printk("fence=(context:%llu, seqno:%llu), %s seq#:%llu %s, op=%u",
-		      __entry->fence_context, __entry->fence_seqno,
+	    TP_printk("%s seq#:%llu %s, op=%u",
 		      __get_str(name), __entry->seq,
 		      __get_str(str),
 		      __entry->op)

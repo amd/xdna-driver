@@ -4,16 +4,12 @@
  */
 
 /*
- * AIE2 TDR (Timeout Detection and Recovery for legacy kernels)
+ * AIE2 TDR (Timeout Detection and Recovery)
  *
- * This file provides TDR detection logic for older linux kernels.
- * A standalone TDR timer is used for AIE2 devices.
- *
- * Standalone TDR timer for older kernels:
- *    The DRM scheduler timeout is set to MAX_SCHEDULE_TIMEOUT (effectively
- *    infinite). A delayed_work fires every tdr_timeout_ms to call
- *    aie2_legacy_tdr_detect(). On stall, aie2_tdr_recover_all()
- *    iterates all stuck contexts, dumps health, and performs stop/restart.
+ * A standalone TDR timer is used for AIE2 devices. A delayed_work fires
+ * every tdr_timeout_ms to call aie2_legacy_tdr_detect(). On stall,
+ * aie2_tdr_recover_all() iterates all stuck contexts, dumps health, and
+ * performs stop/restart.
  *
  * Detection uses a two-phase approach to avoid false positives: each call
  * compares the current TDR status against the previous progress snapshot.
@@ -21,7 +17,6 @@
  * has occurred across two consecutive intervals while jobs remain pending.
  */
 
-#ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
 #include "aie2_pci.h"
 #include "amdxdna_coredump.h"
 #include "amdxdna_drv.h"
@@ -32,9 +27,7 @@
 
 static int aie2_legacy_tdr_hwctx_pending(struct amdxdna_hwctx *hwctx, void *arg)
 {
-	u64 submit_cnt = atomic64_read(&hwctx->job_submit_cnt);
-
-	if (submit_cnt > hwctx->priv->completed)
+	if (atomic64_read(&hwctx->job_submit_cnt) > atomic64_read(&hwctx->job_free_cnt))
 		return 1;
 
 	return 0;
@@ -65,8 +58,9 @@ static bool aie2_legacy_tdr_detect(struct amdxdna_dev *xdna)
 		WRITE_ONCE(ndev->tdr_status, AIE2_TDR_WAIT);
 	else if (!pending)
 		/*
-		 * this is to avoid false positives. In submission, the counter is increased after
-		 * the job is submitted to the drm scheduler but tdr signal is in job run time.
+		 * Avoid false positives: job_submit_cnt is incremented before
+		 * aie2_tdr_signal() fires in aie2_job_run(). If no jobs are
+		 * pending, treat as signaled so the next interval starts fresh.
 		 */
 		tdr = AIE2_TDR_SIGNALED;
 
@@ -80,8 +74,6 @@ static int aie2_tdr_stop_hwctx(struct amdxdna_hwctx *hwctx, void *arg)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct app_health_report *report = NULL;
-	struct drm_gpu_scheduler *sched;
-	struct drm_sched_job *s_job;
 	int ret;
 
 	report = kzalloc_obj(*report);
@@ -103,36 +95,36 @@ static int aie2_tdr_stop_hwctx(struct amdxdna_hwctx *hwctx, void *arg)
 		}
 	}
 
-	sched = &hwctx->priv->sched;
-	drm_sched_stop(sched, NULL);
+	kfree(hwctx->priv->cached_health);
 	/*
-	 * On older kernels (before 6.17), drm_sched_entity
-	 * exposes the pending_list directly for each scheduler.
-	 * It is safe to access sched->pending_list here as the
-	 * list remains available and visible outside the DRM core.
-	 * Newer kernels may encapsulate or change this, but for
-	 * legacy compatibility, this direct access is intentional.
+	 * dev_lock is held here but is not what protects this assignment against
+	 * response handlers — those do not acquire dev_lock. The ordering is what
+	 * makes this safe: cached_health is set before aie2_destroy_context()
+	 * stops the mailbox channel and drains pending callbacks. Response handlers
+	 * only check cached_health when data == NULL, which only happens during
+	 * that drain, so cached_health is always fully set by then.
 	 */
-	s_job = list_first_entry_or_null(&sched->pending_list, struct drm_sched_job, list);
-	if (s_job && report) {
-		struct amdxdna_sched_job *job;
+	hwctx->priv->cached_health = report;
 
-		job = drm_job_to_xdna_job(s_job);
-		job->job_timeout = true;
-		hwctx->priv->cached_health = report;
-		report = NULL;
+	/*
+	 * Hold io_lock across aie2_destroy_context() to serialize with the
+	 * submit path: aie2_job_run() holds io_lock while sending through
+	 * mbox_chann, so this ensures the channel is not freed under an
+	 * active send.
+	 */
+	mutex_lock(&hwctx->priv->io_lock);
+	ret = aie2_destroy_context(ndev, hwctx);
+	mutex_unlock(&hwctx->priv->io_lock);
+	if (ret == -ETIME) {
+		/*
+		 * Firmware did not respond to destroy context — it is wedged.
+		 * Power-cycle the NPU via SMU to reload the firmware.
+		 * aie2_hw_reset() rate-limits itself to one reset per
+		 * AIE2_HW_RESET_MIN_INTERVAL_MS.
+		 */
+		XDNA_WARN(xdna, "Firmware unresponsive, power-cycling NPU");
+		aie2_hw_reset(xdna);
 	}
-
-	kfree(report);
-
-	aie2_destroy_context(ndev, hwctx);
-#ifdef HAVE_6_13_drm_sched_start_errno
-	drm_sched_start(sched, 0);
-#elif defined(HAVE_6_10_drm_sched_start_full_recovery)
-	drm_sched_start(sched, true);
-#else
-	drm_sched_start(sched);
-#endif
 
 	return 0;
 }
@@ -200,5 +192,3 @@ void aie2_tdr_stop(struct amdxdna_dev *xdna)
 
 	XDNA_DBG(xdna, "TDR timer stopped");
 }
-
-#endif /* HAVE_6_17_drm_gpu_sched_stat_no_hang */

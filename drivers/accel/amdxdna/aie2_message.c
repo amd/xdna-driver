@@ -369,8 +369,9 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 		goto del_ctx_req;
 	}
 
+	/* +1 for the config_cu message that can be in-flight concurrently */
 	ret = xdna_mailbox_start_channel(hwctx->priv->mbox_chann, &x2i, &i2x,
-					 intr_reg, ret);
+					 intr_reg, ret, HWCTX_MAX_CMDS + 1);
 	if (ret) {
 		XDNA_ERR(xdna, "Not able to create channel");
 		ret = -EINVAL;
@@ -581,6 +582,7 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx,
 	struct config_cu_req req = { 0 };
 	struct xdna_mailbox_msg msg;
 	struct amdxdna_gem_obj *abo;
+	int ret;
 	int i;
 
 	if (!chann)
@@ -620,7 +622,11 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx,
 	msg.handle = hwctx;
 	msg.opcode = MSG_OP_CONFIG_CU;
 	msg.notify_cb = notify_cb;
-	return xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+
+	mutex_lock(&hwctx->priv->io_lock);
+	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	mutex_unlock(&hwctx->priv->io_lock);
+	return ret;
 }
 
 static int aie2_init_exec_cu_req(struct amdxdna_gem_obj *cmd_bo, void *req,
