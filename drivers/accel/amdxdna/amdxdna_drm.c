@@ -114,8 +114,8 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		/* No need to fail open since user may use pa + carveout later. */
 		if (amdxdna_sva_init(client)) {
 			XDNA_WARN(xdna, "PASID not available for pid %d", client->pid);
-			if (!amdxdna_use_carveout(xdna)) {
-				XDNA_ERR(xdna, "PASID unavailable and carveout not configured");
+			if (!amdxdna_use_cbuf(xdna)) {
+				XDNA_ERR(xdna, "PASID unavailable and no BO backing configured");
 				cleanup_srcu_struct(&client->hwctx_srcu);
 				kfree(client);
 				return -EINVAL;

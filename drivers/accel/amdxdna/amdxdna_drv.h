@@ -208,6 +208,12 @@ struct amdxdna_dev {
 	 */
 	struct device			*fw_dma_dev;
 
+	/*
+	 * True when the DT "aie" reserved region is bound as ddev.dev's default
+	 * DMA pool (the create-BO backing). Platform transport only.
+	 */
+	bool				aie_region;
+
 	/* Firmware Debug/Profile/Trace (DPT) framework. Each channel owns the
 	 * SRCU domain guarding its own handle; on disable we synchronize_srcu
 	 * so kfree of the handle is provably ordered after any watcher's

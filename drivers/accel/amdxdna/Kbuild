@@ -74,6 +74,13 @@ endif
 # build keeps the PCI side. amdxdna_mailbox.o and amdxdna_mailbox_plat.o both
 # provide struct mailbox and the amdxdna_mailbox.h API, and each side provides
 # the same aie4 symbols and the single module entry point, so only one is built.
+# Out-of-tree bridge: in-tree, Kconfig makes CONFIG_DRM_ACCEL_AMDXDNA_PLAT a C
+# macro via autoconf.h, so IS_ENABLED() works. Here it is only a Make variable,
+# so define the macro ourselves; the source keeps using IS_ENABLED() unchanged.
+ifneq ($(CONFIG_DRM_ACCEL_AMDXDNA_PLAT),)
+ccflags-y += -DCONFIG_DRM_ACCEL_AMDXDNA_PLAT=1
+endif
+
 amdxdna-$(CONFIG_DRM_ACCEL_AMDXDNA_PLAT) += \
 	aie4.o \
 	aie4_debugfs.o \

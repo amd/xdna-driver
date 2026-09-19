@@ -102,20 +102,48 @@ static struct device *amdxdna_fw_dma_dev_create(struct amdxdna_dev *xdna,
  */
 static int amdxdna_mem_regions_init(struct amdxdna_dev *xdna, struct device_node *np)
 {
-	int fw_idx;
+	int aie_idx, fw_idx, ret;
+
+	/* The AIE/CERT create-BO pool on ddev.dev is 64-bit; widen its mask. */
+	ret = dma_set_mask_and_coherent(xdna->ddev.dev, DMA_BIT_MASK(64));
+	if (ret) {
+		XDNA_ERR(xdna, "Set 64-bit DMA mask failed, ret %d", ret);
+		return ret;
+	}
+
+	/*
+	 * Optional "aie" reserved region -> ddev.dev's default DMA pool, backing
+	 * create-BOs. Absent it, create-BOs fall back to system CMA.
+	 */
+	aie_idx = of_property_match_string(np, "memory-region-names", "aie");
+	if (aie_idx >= 0) {
+		ret = of_reserved_mem_device_init_by_idx(xdna->ddev.dev, np, aie_idx);
+		if (ret) {
+			XDNA_ERR(xdna, "Bind aie region failed, ret %d", ret);
+			return ret;
+		}
+		xdna->aie_region = true;
+		XDNA_INFO(xdna, "aie region bound to %s", dev_name(xdna->ddev.dev));
+	}
 
 	fw_idx = of_property_match_string(np, "memory-region-names", "fw");
 	xdna->fw_dma_dev = amdxdna_fw_dma_dev_create(xdna, np, fw_idx);
 	if (IS_ERR(xdna->fw_dma_dev)) {
-		int ret = PTR_ERR(xdna->fw_dma_dev);
-
+		ret = PTR_ERR(xdna->fw_dma_dev);
 		xdna->fw_dma_dev = NULL;
-		return ret;
+		goto release_aie;
 	}
 	XDNA_INFO(xdna, "fw dma dev %s (%s)", dev_name(xdna->fw_dma_dev),
 		  fw_idx >= 0 ? "reserved region" : "32-bit system CMA");
 
 	return 0;
+
+release_aie:
+	if (xdna->aie_region) {
+		of_reserved_mem_device_release(xdna->ddev.dev);
+		xdna->aie_region = false;
+	}
+	return ret;
 }
 
 static void amdxdna_mem_regions_fini(struct amdxdna_dev *xdna)
@@ -124,6 +152,10 @@ static void amdxdna_mem_regions_fini(struct amdxdna_dev *xdna)
 		of_reserved_mem_device_release(xdna->fw_dma_dev);
 		device_unregister(xdna->fw_dma_dev);
 		xdna->fw_dma_dev = NULL;
+	}
+	if (xdna->aie_region) {
+		of_reserved_mem_device_release(xdna->ddev.dev);
+		xdna->aie_region = false;
 	}
 }
 

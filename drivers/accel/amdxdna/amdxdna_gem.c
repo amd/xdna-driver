@@ -1217,7 +1217,7 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 
 	if (args->vaddr)
 		abo = amdxdna_gem_create_ubuf_object(dev, args, filp);
-	else if (amdxdna_use_carveout(to_xdna_dev(dev)))
+	else if (amdxdna_use_cbuf(to_xdna_dev(dev)))
 		abo = amdxdna_gem_create_cbuf_object(dev, args);
 	else
 #ifdef AMDXDNA_NPU3A
