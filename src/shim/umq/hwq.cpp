@@ -355,8 +355,18 @@ bind_hwctx(const hwctx& ctx)
   hwq::bind_hwctx(ctx);
   // setup doorbell mapping by child class
   auto doorbell_offset = ctx.get_doorbell();
-  if (doorbell_offset != AMDXDNA_INVALID_DOORBELL_OFFSET)
+  if (doorbell_offset != AMDXDNA_INVALID_DOORBELL_OFFSET) {
+#ifdef XDNA_UMQ_CACHE_NONCOHERENT
+    // A user-space doorbell means user-mode submission, where user space must
+    // publish the ring writes to DRAM before ringing the doorbell.  That cache
+    // maintenance is not implemented for the non-coherent platform, so refuse
+    // UMS here.  Kernel-mode submission (no user-space doorbell, driver rings
+    // the doorbell and owns the ring's cache maintenance) is the supported path.
+    shim_err(ENOTSUP,
+      "UMQ user-mode submission is not supported on the non-coherent platform");
+#endif
     m_mapped_doorbell = map_doorbell(m_pdev, ctx.get_doorbell());
+  }
 }
 
 void
