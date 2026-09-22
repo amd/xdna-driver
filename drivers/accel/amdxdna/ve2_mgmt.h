@@ -3,7 +3,7 @@
  * Copyright (C) 2024-2026, Advanced Micro Devices, Inc.
  *
  * VE2 management backend — XRS resource request, AIE partition lifecycle,
- * and command scheduling via the Linux xlnx-aie partition APIs.
+ * and command scheduling through the VE2 AIE adapter.
  */
 
 #ifndef _VE2_MGMT_H_
@@ -12,8 +12,8 @@
 #include <linux/completion.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
-#include <linux/xlnx-ai-engine.h>
 
+#include "ve2_aie.h"
 #include "ve2_error.h"
 
 struct amdxdna_dev;
@@ -72,7 +72,7 @@ static inline int ve2_partition_read_privileged_mem(struct amdxdna_mgmtctx *mgmt
 {
 	u32 offset = CERT_HANDSHAKE_OFF(0) + field_off;
 
-	return aie_partition_read_privileged_mem(mgmtctx->aie_dev, offset, size, buf);
+	return ve2_aie_priv_read(mgmtctx->aie_dev, offset, size, buf);
 }
 
 static inline int ve2_partition_write_privileged_mem(struct amdxdna_mgmtctx *mgmtctx,
@@ -80,7 +80,7 @@ static inline int ve2_partition_write_privileged_mem(struct amdxdna_mgmtctx *mgm
 {
 	u32 offset = CERT_HANDSHAKE_OFF(0) + field_off;
 
-	return aie_partition_write_privileged_mem(mgmtctx->aie_dev, offset, size, buf);
+	return ve2_aie_priv_write(mgmtctx->aie_dev, offset, size, buf);
 }
 
 static inline int ve2_aie_read_idle(struct amdxdna_mgmtctx *mgmtctx, u32 *idle)
@@ -88,19 +88,6 @@ static inline int ve2_aie_read_idle(struct amdxdna_mgmtctx *mgmtctx, u32 *idle)
 	return ve2_partition_read_privileged_mem(mgmtctx,
 						 offsetof(struct handshake, cert_idle_status),
 						 sizeof(*idle), idle);
-}
-
-static inline int ve2_partition_read(struct device *aie_dev, u32 col, u32 row,
-				     u32 offset, size_t size, void *buf)
-{
-	struct aie_location loc = { .col = col, .row = row };
-
-	return aie_partition_read(aie_dev, loc, offset, size, buf);
-}
-
-static inline int ve2_partition_initialize(struct device *dev, struct aie_partition_init_args *args)
-{
-	return aie_partition_initialize(dev, args);
 }
 
 static inline int get_ctx_read_index(struct amdxdna_hwctx *hwctx, u64 *read_index)

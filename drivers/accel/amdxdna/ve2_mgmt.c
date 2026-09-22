@@ -3,7 +3,7 @@
  * Copyright (C) 2024-2026, Advanced Micro Devices, Inc.
  *
  * VE2 management backend — XRS resource request, AIE partition lifecycle,
- * and command scheduling via the Linux xlnx-aie partition APIs.
+ * and command scheduling through the VE2 AIE adapter.
  */
 
 #include <linux/delay.h>
@@ -15,12 +15,12 @@
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
-#include <linux/xlnx-ai-engine.h>
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_solver.h"
 #include "trace/events/amdxdna.h"
+#include "ve2_aie.h"
 #include "ve2_aux.h"
 #include "ve2_hwctx.h"
 #include "ve2_host_queue.h"
@@ -151,14 +151,14 @@ static void ve2_cert_update_host_time(struct amdxdna_mgmtctx *mgmtctx, u32 num_c
 		u32 addr = CERT_HANDSHAKE_OFF(col) +
 			   offsetof(struct handshake, host_time_high);
 
-		aie_partition_write_privileged_mem(mgmtctx->aie_dev, addr, sizeof(hi), &hi);
+		ve2_aie_priv_write(mgmtctx->aie_dev, addr, sizeof(hi), &hi);
 
 		addr = CERT_HANDSHAKE_OFF(col) + offsetof(struct handshake, host_time_low);
-		aie_partition_write_privileged_mem(mgmtctx->aie_dev, addr, sizeof(lo), &lo);
+		ve2_aie_priv_write(mgmtctx->aie_dev, addr, sizeof(lo), &lo);
 	}
 }
 
-static void ve2_free_hs_data(struct aie_op_handshake_data *hs_data, u32 max_cols)
+static void ve2_free_hs_data(struct ve2_aie_handshake *hs_data, u32 max_cols)
 {
 	/*
 	 * The per-column cert_hs storage is either carved from the hwctx
@@ -169,15 +169,14 @@ static void ve2_free_hs_data(struct aie_op_handshake_data *hs_data, u32 max_cols
 	kfree(hs_data);
 }
 
-static struct aie_op_handshake_data *
+static struct ve2_aie_handshake *
 ve2_prepare_hs_data(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_hwctx *hwctx, bool init)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
 	struct amdxdna_dev *xdna = mgmtctx->xdna;
 	size_t col_size = sizeof(struct handshake);
-	struct aie_op_handshake_data *hs_data;
+	struct ve2_aie_handshake *hs_data;
 	u32 num_col = mgmtctx->num_col;
-	struct aie_location aie_loc;
 	struct handshake *cert_hs;
 
 	if (vp && vp->hs_buf_va) {
@@ -189,8 +188,6 @@ ve2_prepare_hs_data(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_hwctx *hwctx
 		}
 
 		for (u32 col = 0; col < num_col; col++) {
-			aie_loc.col = col;
-			aie_loc.row = 0;
 			cert_hs = (struct handshake *)((u8 *)vp->hs_buf_va + col * col_size);
 			if (init) {
 				memset(cert_hs, 0, col_size);
@@ -206,7 +203,8 @@ ve2_prepare_hs_data(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_hwctx *hwctx
 			hs_data[col].dma_addr = vp->hs_buf_dma + col * col_size;
 			hs_data[col].size = col_size;
 			hs_data[col].offset = 0x0;
-			hs_data[col].loc = aie_loc;
+			hs_data[col].col = col;
+			hs_data[col].row = 0;
 		}
 	} else {
 		/* Fallback: single allocation for the descriptor array + cert_hs. */
@@ -220,14 +218,13 @@ ve2_prepare_hs_data(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_hwctx *hwctx
 
 		cert_hs = (struct handshake *)(hs_data + num_col);
 		for (u32 col = 0; col < num_col; col++) {
-			aie_loc.col = col;
-			aie_loc.row = 0;
 			if (init)
 				cert_setup_partition(mgmtctx, hwctx, col, &cert_hs[col]);
 			hs_data[col].addr = &cert_hs[col];
 			hs_data[col].size = col_size;
 			hs_data[col].offset = 0x0;
-			hs_data[col].loc = aie_loc;
+			hs_data[col].col = col;
+			hs_data[col].row = 0;
 		}
 	}
 
@@ -393,10 +390,9 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 {
 	struct amdxdna_dev *xdna = mgmtctx->xdna;
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
-	struct aie_partition_init_args args = { };
-	struct aie_op_handshake_data *hs_data;
+	struct ve2_aie_handshake *hs_data;
+	enum ve2_aie_init_mode init_mode;
 	u32 num_col = mgmtctx->num_col;
-	struct aie_location lead_loc = { .col = 0, .row = 0 };
 	int ret;
 
 	if (!vp)
@@ -418,8 +414,8 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 				u32 addr = CERT_HANDSHAKE_OFF(acol) +
 					   offsetof(struct handshake, save_dbg_buf_offset);
 
-				if (aie_partition_read_privileged_mem(mgmtctx->aie_dev, addr,
-								      sizeof(off), &off) >= 0)
+				if (ve2_aie_priv_read(mgmtctx->aie_dev, addr,
+						      sizeof(off), &off) >= 0)
 					avp->hwctx_config[acol].dbg_buf_ddr_offset = off;
 			}
 		}
@@ -431,22 +427,13 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 		return -ENOMEM;
 	}
 
-	args.handshake = hs_data;
-	args.handshake_cols = num_col;
-	args.locs = NULL;
-	args.num_tiles = 0;
 	if (!ve2_perf_optimization)
-		args.init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_HANDSHAKE |
-				  AIE_PART_INIT_OPT_DIS_TLAST_ERROR) &
-				 ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+		init_mode = VE2_AIE_INIT_RUNTIME;
 	else
-		args.init_opts = (AIE_PART_INIT_OPT_COLUMN_RST | AIE_PART_INIT_OPT_SHIM_RST |
-				  AIE_PART_INIT_OPT_ISOLATE | AIE_PART_INIT_OPT_SET_L2_IRQ |
-				  AIE_PART_INIT_OPT_NMU_CONFIG | AIE_PART_INIT_OPT_DIS_TLAST_ERROR |
-				  AIE_PART_INIT_OPT_USER_EVENT1_INIT | AIE_PART_INIT_OPT_HANDSHAKE);
+		init_mode = VE2_AIE_INIT_RUNTIME_PERF;
 
 	trace_xdna_partition_init_start(hwctx->name, hwctx->id, mgmtctx->start_col, num_col);
-	ret = aie_partition_initialize(mgmtctx->aie_dev, &args);
+	ret = ve2_aie_partition_initialize(mgmtctx->aie_dev, init_mode, hs_data, num_col);
 	trace_xdna_partition_init_done(hwctx->name, hwctx->id, mgmtctx->start_col, num_col, ret);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
@@ -460,7 +447,7 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 	ve2_cert_update_host_time(mgmtctx, num_col);
 
 	/* Wake up the lead UC only */
-	ret = aie_partition_uc_wakeup(mgmtctx->aie_dev, &lead_loc);
+	ret = ve2_aie_partition_wake_lead_uc(mgmtctx->aie_dev);
 	if (ret)
 		goto release_hs_data;
 
@@ -686,8 +673,7 @@ static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
 	struct amdxdna_ctx_priv *vp;
 	int ret;
 
-	ret = aie_partition_read_privileged_mem(mgmtctx->aie_dev, off,
-						sizeof(misc_status), &misc_status);
+	ret = ve2_aie_priv_read(mgmtctx->aie_dev, off, sizeof(misc_status), &misc_status);
 	if (ret || !misc_status)
 		return false;
 
@@ -1071,7 +1057,7 @@ static void ve2_aie_error_cb(void *arg)
 {
 	struct amdxdna_mgmtctx *mgmtctx = arg;
 	struct amdxdna_async_err_cache *cache;
-	struct aie_errors *aie_errs;
+	struct ve2_aie_errors *aie_errs;
 	struct amdxdna_dev *xdna;
 	int i;
 
@@ -1100,9 +1086,10 @@ static void ve2_aie_error_cb(void *arg)
 		return;
 	}
 
-	aie_errs = aie_get_errors(mgmtctx->aie_dev);
-	if (IS_ERR_OR_NULL(aie_errs)) {
-		XDNA_ERR(xdna, "%s: aie_get_errors returned NULL\n", __func__);
+	aie_errs = ve2_aie_get_errors(mgmtctx->aie_dev);
+	if (IS_ERR(aie_errs)) {
+		XDNA_ERR(xdna, "%s: failed to get AIE errors: %ld\n",
+			 __func__, PTR_ERR(aie_errs));
 		mutex_unlock(&mgmtctx->ctx_lock);
 		atomic_set(&mgmtctx->error_cb_in_progress, 0);
 		complete(&mgmtctx->error_cb_completion);
@@ -1115,39 +1102,39 @@ static void ve2_aie_error_cb(void *arg)
 	 * them onto the amdxdna error encoding consumed by userspace.
 	 */
 	if (aie_errs->num_err > 0) {
-		struct aie_error *last_err = &aie_errs->errors[aie_errs->num_err - 1];
+		struct ve2_aie_error *last_err = &aie_errs->errors[aie_errs->num_err - 1];
 		enum amdxdna_error_num err_num;
 		enum amdxdna_error_module err_mod;
 
 		switch (last_err->category) {
-		case 0: /* AIE_ERROR_SATURATION */
+		case VE2_AIE_ERROR_SATURATION:
 			err_num = AMDXDNA_ERROR_NUM_AIE_SATURATION;
 			break;
-		case 1: /* AIE_ERROR_FP */
+		case VE2_AIE_ERROR_FP:
 			err_num = AMDXDNA_ERROR_NUM_AIE_FP;
 			break;
-		case 2: /* AIE_ERROR_STREAM */
+		case VE2_AIE_ERROR_STREAM:
 			err_num = AMDXDNA_ERROR_NUM_AIE_STREAM;
 			break;
-		case 3: /* AIE_ERROR_ACCESS */
+		case VE2_AIE_ERROR_ACCESS:
 			err_num = AMDXDNA_ERROR_NUM_AIE_ACCESS;
 			break;
-		case 4: /* AIE_ERROR_BUS */
+		case VE2_AIE_ERROR_BUS:
 			err_num = AMDXDNA_ERROR_NUM_AIE_BUS;
 			break;
-		case 5: /* AIE_ERROR_INSTRUCTION */
+		case VE2_AIE_ERROR_INSTRUCTION:
 			err_num = AMDXDNA_ERROR_NUM_AIE_INSTRUCTION;
 			break;
-		case 6: /* AIE_ERROR_ECC */
+		case VE2_AIE_ERROR_ECC:
 			err_num = AMDXDNA_ERROR_NUM_AIE_ECC;
 			break;
-		case 7: /* AIE_ERROR_LOCK */
+		case VE2_AIE_ERROR_LOCK:
 			err_num = AMDXDNA_ERROR_NUM_AIE_LOCK;
 			break;
-		case 8: /* AIE_ERROR_DMA */
+		case VE2_AIE_ERROR_DMA:
 			err_num = AMDXDNA_ERROR_NUM_AIE_DMA;
 			break;
-		case 9: /* AIE_ERROR_MEM_PARITY */
+		case VE2_AIE_ERROR_MEM_PARITY:
 			err_num = AMDXDNA_ERROR_NUM_AIE_MEM_PARITY;
 			break;
 		default:
@@ -1156,13 +1143,13 @@ static void ve2_aie_error_cb(void *arg)
 		}
 
 		switch (last_err->module) {
-		case 0: /* AIE_MEM_MOD */
+		case VE2_AIE_ERROR_MODULE_MEMORY:
 			err_mod = AMDXDNA_ERROR_MODULE_AIE_MEMORY;
 			break;
-		case 1: /* AIE_CORE_MOD */
+		case VE2_AIE_ERROR_MODULE_CORE:
 			err_mod = AMDXDNA_ERROR_MODULE_AIE_CORE;
 			break;
-		case 2: /* AIE_PL_MOD */
+		case VE2_AIE_ERROR_MODULE_PL:
 			err_mod = AMDXDNA_ERROR_MODULE_AIE_PL;
 			break;
 		default:
@@ -1174,8 +1161,8 @@ static void ve2_aie_error_cb(void *arg)
 		mutex_lock(&cache->lock);
 		cache->err.ts_us = ktime_to_us(ktime_get_real());
 		cache->err.err_code = AMDXDNA_ERROR_ENCODE(err_num, err_mod);
-		cache->err.ex_err_code = AMDXDNA_EXTRA_ERR_ENCODE(last_err->loc.row,
-								  last_err->loc.col);
+		cache->err.ex_err_code = AMDXDNA_EXTRA_ERR_ENCODE(last_err->row,
+								  last_err->col);
 		mutex_unlock(&cache->lock);
 	}
 
@@ -1185,11 +1172,11 @@ static void ve2_aie_error_cb(void *arg)
 			 aie_errs->errors[i].error_id,
 			 aie_errs->errors[i].module,
 			 aie_errs->errors[i].category,
-			 aie_errs->errors[i].loc.col,
-			 aie_errs->errors[i].loc.row);
+			 aie_errs->errors[i].col,
+			 aie_errs->errors[i].row);
 	}
 
-	aie_free_errors(aie_errs);
+	ve2_aie_free_errors(aie_errs);
 
 	/* Optional deep dump of HSA queue + firmware handshake state. */
 	if (dbg_dump_on_error || verbosity >= VERBOSITY_LEVEL_DBG)
@@ -1250,7 +1237,6 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 	u32 start_col = hwctx->start_col;
 	u32 num_col = hwctx->num_col;
 	struct amdxdna_mgmtctx *mgmtctx;
-	struct aie_partition_req req = { };
 	struct device *aie_dev;
 	int ret;
 
@@ -1289,20 +1275,16 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 
 		INIT_WORK(&mgmtctx->scheduler_work, ve2_scheduler_work);
 
-		req.partition_id = (start_col << AIE_PART_ID_START_COL_SHIFT) |
-				   (num_col << AIE_PART_ID_NUM_COLS_SHIFT);
-		req.user_event1_complete = ve2_irq_handler;
-		req.user_event1_priv = mgmtctx;
-		aie_dev = aie_partition_request(&req);
+		aie_dev = ve2_aie_partition_request(start_col, num_col, ve2_irq_handler,
+						    mgmtctx, &mgmtctx->partition_id);
 		if (IS_ERR(aie_dev)) {
 			ret = PTR_ERR(aie_dev);
 			goto destroy_wq;
 		}
 
 		mgmtctx->aie_dev = aie_dev;
-		mgmtctx->partition_id = req.partition_id;
 
-		ret = aie_register_error_notification(aie_dev, ve2_aie_error_cb, mgmtctx);
+		ret = ve2_aie_register_error_cb(aie_dev, ve2_aie_error_cb, mgmtctx);
 		if (ret) {
 			XDNA_ERR(xdna, "Failed to register AIE error notification: %d", ret);
 			goto release_part;
@@ -1318,8 +1300,8 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 	return 0;
 
 release_part:
-	aie_partition_teardown(mgmtctx->aie_dev);
-	aie_partition_release(mgmtctx->aie_dev);
+	ve2_aie_partition_teardown(mgmtctx->aie_dev);
+	ve2_aie_partition_release(mgmtctx->aie_dev);
 	mgmtctx->aie_dev = NULL;
 destroy_wq:
 	destroy_workqueue(mgmtctx->work_queue);
@@ -1351,7 +1333,7 @@ static void ve2_clear_partition_handshake(struct amdxdna_mgmtctx *mgmtctx,
 					  struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev *xdna = mgmtctx->xdna;
-	struct aie_op_handshake_data *hs_data;
+	struct ve2_aie_handshake *hs_data;
 	int ret;
 
 	hs_data = ve2_prepare_hs_data(mgmtctx, hwctx, false);
@@ -1360,7 +1342,8 @@ static void ve2_clear_partition_handshake(struct amdxdna_mgmtctx *mgmtctx,
 		return;
 	}
 
-	ret = aie_partition_handshake_update(mgmtctx->aie_dev, hs_data, mgmtctx->num_col);
+	ret = ve2_aie_partition_handshake_update(mgmtctx->aie_dev, hs_data,
+						 mgmtctx->num_col);
 	if (ret < 0)
 		XDNA_ERR(xdna, "aie partition handshake update failed, ret: %d", ret);
 
@@ -1414,7 +1397,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 
 		ve2_clear_partition_handshake(mgmtctx, hwctx);
 
-		aie_unregister_error_notification(mgmtctx->aie_dev);
+		ve2_aie_unregister_error_cb(mgmtctx->aie_dev);
 
 		mutex_lock(&mgmtctx->ctx_lock);
 		/* Update the active context as partition doesn't exists any more */
@@ -1423,8 +1406,8 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 		mgmtctx->work_queue = NULL;
 		mutex_unlock(&mgmtctx->ctx_lock);
 
-		aie_partition_teardown(mgmtctx->aie_dev);
-		aie_partition_release(mgmtctx->aie_dev);
+		ve2_aie_partition_teardown(mgmtctx->aie_dev);
+		ve2_aie_partition_release(mgmtctx->aie_dev);
 		mgmtctx->aie_dev = NULL;
 
 		if (wq)
@@ -1443,15 +1426,14 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 int notify_fw_cmd_ready(struct amdxdna_mgmtctx *mgmtctx)
 {
 	u32 event_val = VE2_USER_EVENT_ID;
-	struct aie_location loc = { .col = 0, .row = 0 };
 	int ret;
 
-	ret = aie_partition_write(mgmtctx->aie_dev, loc, VE2_EVENT_GENERATE_REG,
-				  sizeof(event_val), &event_val, 0);
+	ret = ve2_aie_write(mgmtctx->aie_dev, 0, 0, VE2_EVENT_GENERATE_REG,
+			    sizeof(event_val), &event_val);
 	if (ret < 0)
 		return ret;
 
-	/* aie_partition_write returns bytes written on success (typically 4). */
+	/* The adapter returns the underlying byte count on success. */
 	return 0;
 }
 
@@ -1487,7 +1469,7 @@ int ve2_cache_coredump(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx, u6
 		return -ENOMEM;
 
 	/* hwctx is the active ctx on this partition during the timeout path. */
-	ret = aie_partition_coredump(mgmtctx->aie_dev, size, buf);
+	ret = ve2_aie_coredump(mgmtctx->aie_dev, size, buf);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Auto coredump capture failed for hwctx %u, err:%d",
 			 hwctx->id, ret);

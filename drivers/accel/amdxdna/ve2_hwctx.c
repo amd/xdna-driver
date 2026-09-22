@@ -1078,10 +1078,9 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	 * ve2_prepare_hs_data() iterates over.
 	 *
 	 * Allocate DMA-coherent memory from the AIE partition device and hand
-	 * its per-column dma_addr to aie_partition_initialize() via
-	 * aie_op_handshake_data.dma_addr. The AIE driver then uses this buffer
-	 * directly (its "pre-known dma_addr" fast path) instead of doing its
-	 * own per-column dmam_alloc_coherent(), which is not viable here.
+	 * its per-column dma_addr to the VE2 AIE adapter. The underlying AIE
+	 * driver then uses this buffer directly instead of doing its own
+	 * per-column coherent allocation, which is not viable here.
 	 */
 	if (vp->mgmtctx && vp->mgmtctx->num_col && vp->mgmtctx->aie_dev) {
 		vp->hs_buf_size = vp->mgmtctx->num_col * sizeof(struct handshake);
@@ -1182,7 +1181,7 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	/*
 	 * Free the coherent handshake buffer before tearing the partition
-	 * down: aie_dev becomes invalid after aie_partition_release().
+	 * down: aie_dev becomes invalid after the adapter releases it.
 	 */
 	if (vp && vp->hs_buf_va && vp->mgmtctx && vp->mgmtctx->aie_dev) {
 		dma_free_coherent(vp->mgmtctx->aie_dev, vp->hs_buf_size,
@@ -1654,10 +1653,10 @@ static void ve2_fill_health_data(struct amdxdna_hwctx *hwctx, void *cmd_data, u3
 		return;
 
 	for (col = 0; col < num_uc; col++) {
-		ret = aie_partition_read_privileged_mem(mgmtctx->aie_dev,
-							CERT_HANDSHAKE_OFF(col) +
-							offsetof(struct handshake, mpaie_alive),
-							sizeof(*hs), hs);
+		ret = ve2_aie_priv_read(mgmtctx->aie_dev,
+					CERT_HANDSHAKE_OFF(col) +
+					offsetof(struct handshake, mpaie_alive),
+					sizeof(*hs), hs);
 		if (ret < 0) {
 			XDNA_ERR(xdna, "handshake read failed col %u ret %d", col, ret);
 			break;
