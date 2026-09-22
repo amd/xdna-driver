@@ -60,19 +60,48 @@ unlock:
 DEFINE_DEBUGFS_ATTRIBUTE(aie4_ctx_hysteresis_fops, aie4_ctx_hysteresis_get,
 			 aie4_ctx_hysteresis_set, "%llu\n");
 
+static int aie4_kernel_submit_get(void *data, u64 *val)
+{
+	struct amdxdna_dev_hdl *ndev = data;
+
+	*val = ndev->kernel_submit;
+	return 0;
+}
+
+/* Read-only: a NULL set returns -EACCES on write, even for root. */
+DEFINE_DEBUGFS_ATTRIBUTE(aie4_kernel_submit_fops, aie4_kernel_submit_get,
+			 NULL, "%llu\n");
+
 void aie4_debugfs_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	/*
+	 * kernel_mode_submission (0 - user space, 1 - driver): the platform
+	 * (_PLAT) transport supports only kernel-mode submission -- user-mode
+	 * submission needs user-space host-queue cache maintenance that is not
+	 * implemented, and aie4_hwctx_umq_init() never sets up umq_sgt for a UMS
+	 * context, so one would NULL-deref in the non-coherent host-queue syncs.
+	 * Expose it read-only there (a NULL debugfs set, so writes fail with
+	 * -EACCES even for root) so it reports the fixed mode and cannot be
+	 * flipped to a crashing config.  The coherent PCI transport supports UMS,
+	 * so keep the knob writable.
+	 */
+	if (IS_ENABLED(CONFIG_DRM_ACCEL_AMDXDNA_PLAT)) {
+		debugfs_create_file_unsafe("kernel_mode_submission", 0400,
+					   xdna->ddev.accel->debugfs_root, ndev,
+					   &aie4_kernel_submit_fops);
+	} else {
+		debugfs_create_bool("kernel_mode_submission", 0600,
+				    xdna->ddev.accel->debugfs_root,
+				    &ndev->kernel_submit);
+	}
+
+	/*
 	 * The platform transport has no SR-IOV PF/VF split: it always runs hw
 	 * contexts and always programs the context switch hysteresis, so expose
-	 * both knobs unconditionally.
-	 * kernel_mode_submission: 0 - submit by user space, 1 - submit by driver.
+	 * that knob unconditionally.
 	 */
-	debugfs_create_bool("kernel_mode_submission", 0600,
-			    xdna->ddev.accel->debugfs_root, &ndev->kernel_submit);
-
 	debugfs_create_file_unsafe("ctx_switch_hysteresis_us", 0600,
 				   xdna->ddev.accel->debugfs_root, ndev,
 				   &aie4_ctx_hysteresis_fops);
