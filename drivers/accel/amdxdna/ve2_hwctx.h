@@ -111,10 +111,9 @@ struct amdxdna_ctx_priv {
 	 * allocation.
 	 *
 	 * DMA-coherent memory allocated from the AIE partition device. Its
-	 * per-column dma_addr is handed to aie_partition_initialize() via
-	 * aie_op_handshake_data.dma_addr so the AIE driver uses this buffer
-	 * directly instead of doing its own per-column dmam_alloc_coherent()
-	 * (the latter path is not viable here and fails EXEC_CMD).
+	 * per-column DMA addresses are handed to the VE2 AIE adapter so the
+	 * underlying driver uses this buffer directly instead of allocating
+	 * its own coherent storage (that path is not viable here).
 	 */
 	void				*hs_buf_va;
 	dma_addr_t			hs_buf_dma;

@@ -13,11 +13,11 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/slab.h>
 #include <linux/string.h>
-#include <linux/xlnx-ai-engine.h>
 
 #include "amdxdna_aux_drv.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_solver.h"
+#include "ve2_aie.h"
 #include "ve2_aux.h"
 #include "ve2_debug.h"
 #include "ve2_hwctx.h"
@@ -35,9 +35,9 @@ static int ve2_store_firmware_version(struct ve2_firmware_version *c_version,
 	if (!version)
 		return -ENOMEM;
 
-	ret = ve2_partition_read(xaie_dev, 0, 0,
-				 VE2_PROG_DATA_MEMORY_OFF + VE2_CERT_VERSION_OFF,
-				 VE2_CERT_VERSION_SIZE, version);
+	ret = ve2_aie_read(xaie_dev, 0, 0,
+			   VE2_PROG_DATA_MEMORY_OFF + VE2_CERT_VERSION_OFF,
+			   VE2_CERT_VERSION_SIZE, version);
 	if (ret < 0) {
 		kfree(version);
 		return ret;
@@ -57,10 +57,9 @@ static int ve2_store_firmware_version(struct ve2_firmware_version *c_version,
 static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 {
 	struct amdxdna_dev *xdna = xdna_hdl->xdna;
-	struct aie_partition_init_args args;
-	struct aie_partition_req request = { };
 	const struct firmware *fw;
 	struct device *xaie_dev;
+	u32 partition_id;
 	char *buf;
 	int ret;
 
@@ -83,27 +82,21 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	memcpy(buf, fw->data, fw->size);
 	release_firmware(fw);
 
-	xaie_dev = aie_partition_request(&request);
+	xaie_dev = ve2_aie_partition_request(0, 0, NULL, NULL, &partition_id);
 	if (IS_ERR(xaie_dev)) {
 		ret = PTR_ERR(xaie_dev);
 		XDNA_ERR(xdna, "aie partition request failed: %d", ret);
 		goto out;
 	}
-	XDNA_DBG(xdna, "aie partition request succeeded: 0x%x", request.partition_id);
+	XDNA_DBG(xdna, "aie partition request succeeded: 0x%x", partition_id);
 
-	args.locs = NULL;
-	args.num_tiles = 0;
-	args.handshake_cols = 0;
-	args.handshake = NULL;
-	args.init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR) &
-			 ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
-	ret = ve2_partition_initialize(xaie_dev, &args);
+	ret = ve2_aie_partition_initialize(xaie_dev, VE2_AIE_INIT_FIRMWARE, NULL, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
 		goto release;
 	}
 
-	ret = aie_load_cert_broadcast(xaie_dev, buf);
+	ret = ve2_aie_load_cert(xaie_dev, buf);
 	if (ret) {
 		XDNA_ERR(xdna, "aie load cert broadcast failed %d", ret);
 		goto teardown;
@@ -119,9 +112,9 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	XDNA_INFO(xdna, "CERT minor: %d", xdna_hdl->fw_version.minor);
 
 teardown:
-	aie_partition_teardown(xaie_dev);
+	ve2_aie_partition_teardown(xaie_dev);
 release:
-	aie_partition_release(xaie_dev);
+	ve2_aie_partition_release(xaie_dev);
 out:
 	kfree(buf);
 	return ret;
@@ -147,8 +140,7 @@ static int ve2_capture_col_firmware_status(struct amdxdna_dev *xdna,
 		return -ENOMEM;
 
 	offset = CERT_HANDSHAKE_OFF(col) + offsetof(struct handshake, mpaie_alive);
-	ret = aie_partition_read_privileged_mem(mgmtctx->aie_dev, offset,
-						sizeof(*hs), hs);
+	ret = ve2_aie_priv_read(mgmtctx->aie_dev, offset, sizeof(*hs), hs);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "read fw status col %u failed: %d", col, ret);
 		goto done;
@@ -507,13 +499,13 @@ int ve2_probe(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl *hdl)
 	struct init_config xrs_cfg = { };
 	int ret;
 
-	ret = aie_get_device_info(&hdl->aie_dev_info);
+	ret = ve2_aie_get_device_info(&hdl->aie_dev_info);
 	if (ret) {
 		if (ret == -ENODEV) {
 			XDNA_INFO(xdna, "AIE device not ready yet, deferring probe");
 			return -EPROBE_DEFER;
 		}
-		XDNA_ERR(xdna, "aie_get_device_info failed %d", ret);
+		XDNA_ERR(xdna, "AIE device info query failed %d", ret);
 		return ret;
 	}
 

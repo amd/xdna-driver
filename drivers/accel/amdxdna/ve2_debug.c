@@ -2,7 +2,7 @@
 /*
  * Copyright (C) 2026, Advanced Micro Devices, Inc.
  *
- * VE2 debug / info ioctls: hwctx array for XRT aie_partition_info query.
+ * VE2 debug / info ioctls, including the XRT partition-info query.
  */
 
 #include <drm/drm_device.h>
@@ -18,12 +18,12 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
-#include <linux/xlnx-ai-engine.h>
 
 #include "drm/amdxdna_accel.h"
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_pci_drv.h"
+#include "ve2_aie.h"
 #include "ve2_aux.h"
 #include "ve2_debug.h"
 #include "ve2_hwctx.h"
@@ -197,7 +197,6 @@ static int ve2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	struct amdxdna_mgmtctx *mgmtctx;
 	struct amdxdna_ctx_priv *vp;
 	struct amdxdna_client *tmp;
-	struct aie_location loc;
 	void *local_buf = NULL;
 	u32 buf_size, offset;
 	unsigned long hx_id;
@@ -266,7 +265,7 @@ static int ve2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	if (!local_buf)
 		return -ENOMEM;
 
-	/* Drop dev_lock — aie_partition_read can block on hardware I/O */
+	/* Drop dev_lock: AIE hardware I/O can block. */
 	mutex_unlock(&xdna->dev_lock);
 	mutex_lock(&mgmtctx->ctx_lock);
 
@@ -278,20 +277,18 @@ static int ve2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		return -EPERM;
 	}
 
-	loc.col = footer.col;
-	loc.row = footer.row;
 	if (enable_debug_queue) {
 		ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
 					    footer.addr, local_buf, footer.size, DBG_CMD_READ);
 	} else {
-		ret = aie_partition_read(mgmtctx->aie_dev, loc, footer.addr,
-					 footer.size, local_buf);
+		ret = ve2_aie_read(mgmtctx->aie_dev, footer.col, footer.row,
+				   footer.addr, footer.size, local_buf);
 	}
 	mutex_unlock(&mgmtctx->ctx_lock);
 	mutex_lock(&xdna->dev_lock);
 
 	if (ret < 0) {
-		XDNA_ERR(xdna, "aie_partition_read failed: %d", ret);
+		XDNA_ERR(xdna, "AIE partition read failed: %d", ret);
 		kfree(local_buf);
 		return ret;
 	}
@@ -448,9 +445,9 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	if (!local_buf)
 		return -ENOMEM;
 
-	ret = aie_partition_coredump(mgmtctx->aie_dev, rel_size, local_buf);
+	ret = ve2_aie_coredump(mgmtctx->aie_dev, rel_size, local_buf);
 	if (ret < 0) {
-		XDNA_ERR(xdna, "aie_partition_coredump failed: %d", ret);
+		XDNA_ERR(xdna, "AIE partition coredump failed: %d", ret);
 		vfree(local_buf);
 		return ret;
 	}
@@ -496,7 +493,7 @@ static int ve2_get_firmware_version(struct amdxdna_client *client,
 static int ve2_get_aie_metadata(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	struct aie_device_info *info = &ve2_dev_hdl(xdna)->aie_dev_info;
+	struct ve2_aie_device_info *info = &ve2_dev_hdl(xdna)->aie_dev_info;
 	struct amdxdna_drm_query_aie_metadata *meta;
 	int ret = 0;
 
@@ -537,7 +534,6 @@ static int ve2_get_aie_metadata(struct amdxdna_client *client, struct amdxdna_dr
 static struct device *ve2_get_clock_aie_dev(struct amdxdna_dev *xdna, bool *temp)
 {
 	struct amdxdna_dev_hdl *hdl = ve2_dev_hdl(xdna);
-	struct aie_partition_req req = { };
 	struct device *aie_dev;
 	u32 i;
 
@@ -548,9 +544,7 @@ static struct device *ve2_get_clock_aie_dev(struct amdxdna_dev *xdna, bool *temp
 			return hdl->ve2_mgmtctx[i].aie_dev;
 	}
 
-	req.partition_id = (0 << AIE_PART_ID_START_COL_SHIFT) |
-			   (VE2_MIN_COL_SUPPORT << AIE_PART_ID_NUM_COLS_SHIFT);
-	aie_dev = aie_partition_request(&req);
+	aie_dev = ve2_aie_partition_request(0, VE2_MIN_COL_SUPPORT, NULL, NULL, NULL);
 	if (IS_ERR(aie_dev)) {
 		XDNA_ERR(xdna, "Failed to request temporary AIE partition: %ld",
 			 PTR_ERR(aie_dev));
@@ -564,7 +558,7 @@ static struct device *ve2_get_clock_aie_dev(struct amdxdna_dev *xdna, bool *temp
 static void ve2_put_clock_aie_dev(struct device *aie_dev, bool temp)
 {
 	if (temp && !IS_ERR_OR_NULL(aie_dev))
-		aie_partition_release(aie_dev);
+		ve2_aie_partition_release(aie_dev);
 }
 
 static int ve2_get_clock_metadata(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
@@ -586,7 +580,7 @@ static int ve2_get_clock_metadata(struct amdxdna_client *client, struct amdxdna_
 	if (IS_ERR(aie_dev))
 		return PTR_ERR(aie_dev);
 
-	ret = aie_partition_get_freq(aie_dev, &aie_freq);
+	ret = ve2_aie_get_freq(aie_dev, &aie_freq);
 	ve2_put_clock_aie_dev(aie_dev, temp);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to read AIE frequency: %d", ret);
@@ -788,7 +782,7 @@ static int ve2_get_aie_part_fd(struct amdxdna_client *client,
 		goto unlock;
 	}
 
-	aie_fd = aie_partition_get_fd(mgmtctx->aie_dev);
+	aie_fd = ve2_aie_get_fd(mgmtctx->aie_dev);
 	if (aie_fd < 0) {
 		XDNA_ERR(xdna, "Failed to get AIE partition FD: %d", aie_fd);
 		ret = aie_fd;
@@ -860,7 +854,6 @@ static int ve2_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm_
 	struct amdxdna_mgmtctx *mgmtctx;
 	struct amdxdna_ctx_priv *vp;
 	struct amdxdna_client *tmp;
-	struct aie_location loc;
 	void *local_buf = NULL;
 	unsigned long hx_id;
 	u32 offset;
@@ -934,8 +927,8 @@ static int ve2_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm_
 	}
 
 	/*
-	 * aie_partition_write can block on hardware I/O. Release dev_lock
-	 * before calling it to avoid stalling all other IOCTLs. Use
+	 * AIE hardware I/O can block. Release dev_lock before calling it to
+	 * avoid stalling all other IOCTLs. Use
 	 * mgmtctx->ctx_lock to serialize against context switches.
 	 */
 	mutex_unlock(&xdna->dev_lock);
@@ -949,8 +942,6 @@ static int ve2_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm_
 		return -EPERM;
 	}
 
-	loc.col = footer.col;
-	loc.row = footer.row;
 	if (enable_debug_queue) {
 		/* TODO: temporary fix to exit the debug queue. */
 		if (footer.col == 3) {
@@ -963,14 +954,14 @@ static int ve2_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm_
 						    DBG_CMD_WRITE);
 		}
 	} else {
-		ret = aie_partition_write(mgmtctx->aie_dev, loc, footer.addr, footer.size,
-					  local_buf, 0);
+		ret = ve2_aie_write(mgmtctx->aie_dev, footer.col, footer.row,
+				    footer.addr, footer.size, local_buf);
 	}
 	mutex_unlock(&mgmtctx->ctx_lock);
 	mutex_lock(&xdna->dev_lock);
 
 	if (ret < 0)
-		XDNA_ERR(xdna, "aie_partition_write failed: %d", ret);
+		XDNA_ERR(xdna, "AIE partition write failed: %d", ret);
 	else
 		ret = 0;
 
@@ -1005,7 +996,7 @@ static int ve2_set_clock_freq(struct amdxdna_client *client, struct amdxdna_drm_
 	if (IS_ERR(aie_dev))
 		return PTR_ERR(aie_dev);
 
-	ret = aie_partition_set_freq_req(aie_dev, freq_hz);
+	ret = ve2_aie_set_freq(aie_dev, freq_hz);
 	ve2_put_clock_aie_dev(aie_dev, temp);
 	if (ret)
 		XDNA_ERR(xdna, "Failed to set AIE frequency to %llu Hz: %d", freq_hz, ret);

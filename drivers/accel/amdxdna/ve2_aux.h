@@ -10,9 +10,9 @@
 #define _VE2_AUX_H_
 
 #include <linux/types.h>
-#include <linux/xlnx-ai-engine.h>
 
 #include "amdxdna_pci_drv.h"
+#include "ve2_aie.h"
 
 struct amdxdna_dev_priv {
 	const char			*fw_path;
@@ -68,7 +68,7 @@ struct ve2_mem_topology {
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
 	const struct amdxdna_dev_priv	*priv;
-	struct aie_device_info		aie_dev_info;
+	struct ve2_aie_device_info	aie_dev_info;
 	struct ve2_firmware_version	fw_version;
 	struct amdxdna_mgmtctx		*ve2_mgmtctx;
 	struct ve2_firmware_status	**fw_slots;	/* [cols] per-column FW status */

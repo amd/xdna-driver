@@ -105,6 +105,7 @@ amdxdna-$(CONFIG_DRM_ACCEL_AMDXDNA_PLAT) += \
 amdxdna-$(OFT_CONFIG_AMDXDNA_AUX) += \
 	amdxdna_mailbox.o \
 	amdxdna_aux_drv.o \
+	ve2_aie.o \
 	ve2_mgmt.o \
 	ve2_aux.o \
 	ve2_hwctx.o \
