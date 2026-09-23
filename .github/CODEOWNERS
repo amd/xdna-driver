@@ -5,5 +5,5 @@
 # <path>/ matches files under <path> and any of its subdirectories unless later match
 # <path>/* matches files under <path> but *not* further nested files.
 
-drivers/ @houlz0507 @maxzhen @xdavidz
-include/ @houlz0507 @maxzhen @xdavidz
+drivers/ @houlz0507 @maxzhen @xdavidz @wendyliang25
+include/ @houlz0507 @maxzhen @xdavidz @wendyliang25
