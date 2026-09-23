@@ -360,21 +360,17 @@ int main(void)
 }
 EOF
 
-# Test kmalloc wrapper APIs (all introduced in 7.0):
-#   kzalloc_obj, kzalloc_flex, kmalloc_flex,
-#   kmalloc_objs, kzalloc_objs, kvzalloc_objs, kvmalloc_objs
-# One compilation test is sufficient since they were all added together.
-try_compile HAVE_7_0_kmalloc_ops << 'EOF'
+# Test kmalloc_obj/objs wrapper APIs (introduced in 7.0):
+#   kzalloc_obj, kmalloc_objs, kzalloc_objs, kvzalloc_objs, kvmalloc_objs
+try_compile HAVE_7_0_kmalloc_objs << 'EOF'
 #include <linux/slab.h>
 int main(void)
 {
-	struct my_obj { int c; int data[]; };
+	struct my_obj { int c; };
 	struct my_obj *p;
 	int *q;
 
 	p = kzalloc_obj(*p);
-	p = kzalloc_flex(*p, data, 1);
-	p = kmalloc_flex(*p, data, 1);
 	q = kmalloc_objs(*q, 4);
 	q = kzalloc_objs(*q, 4);
 	q = kvzalloc_objs(*q, 4);
@@ -383,14 +379,33 @@ int main(void)
 }
 EOF
 cat >> "$OUT" <<'EOF'
-#ifndef HAVE_7_0_kmalloc_ops
+#ifndef HAVE_7_0_kmalloc_objs
 #define kzalloc_obj(obj)		kzalloc(sizeof(obj), GFP_KERNEL)
-#define kzalloc_flex(obj, member, n)	kzalloc(struct_size(&(obj), member, n), GFP_KERNEL)
-#define kmalloc_flex(obj, member, n)	kmalloc(struct_size(&(obj), member, n), GFP_KERNEL)
 #define kmalloc_objs(obj, n)		kmalloc_array(n, sizeof(obj), GFP_KERNEL)
 #define kzalloc_objs(obj, n)		kcalloc(n, sizeof(obj), GFP_KERNEL)
 #define kvzalloc_objs(obj, n)		kvcalloc(n, sizeof(obj), GFP_KERNEL)
 #define kvmalloc_objs(obj, n)		kvmalloc_array(n, sizeof(obj), GFP_KERNEL)
+#endif
+EOF
+
+# Test kmalloc_flex wrapper APIs (introduced in 7.0):
+#   kzalloc_flex, kmalloc_flex
+try_compile HAVE_7_0_kmalloc_flex << 'EOF'
+#include <linux/slab.h>
+int main(void)
+{
+	struct my_obj { int c; int data[]; };
+	struct my_obj *p;
+
+	p = kzalloc_flex(*p, data, 1);
+	p = kmalloc_flex(*p, data, 1);
+	return 0;
+}
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_7_0_kmalloc_flex
+#define kzalloc_flex(obj, member, n)	kzalloc(struct_size(&(obj), member, n), GFP_KERNEL)
+#define kmalloc_flex(obj, member, n)	kmalloc(struct_size(&(obj), member, n), GFP_KERNEL)
 #endif
 EOF
 
