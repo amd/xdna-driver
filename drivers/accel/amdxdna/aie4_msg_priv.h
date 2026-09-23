@@ -115,9 +115,22 @@ struct aie4_msg_runtime_config_force_preemption {
 enum aie4_msg_runtime_config_type {
 	AIE4_RUNTIME_CONFIG_FORCE_PREEMPTION		= 0x1,
 	AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL		= 0x5,
+	AIE4_RUNTIME_CONFIG_HWS_DEBUG_MODE		= 0xB,
 	AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS	= 0xD,
 	AIE4_MAX_RUNTIME_CONFIG
 };
+
+/* HWS debug mode control: 0 = disable, 2 = arm on error. */
+enum aie4_msg_hws_debug_mode {
+	AIE4_HWS_DEBUG_MODE_DISABLE		= 0,
+	AIE4_HWS_DEBUG_MODE_ARM_ON_ERROR	= 2,
+};
+
+struct aie4_msg_runtime_config_hws_debug_mode {
+	__u8	mode;
+	__u8	reserved;
+	__u16	ctx_id;
+} __packed;
 
 struct aie4_msg_set_runtime_cfg_req {
 	__u32 type;
