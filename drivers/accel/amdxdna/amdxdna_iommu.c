@@ -5,14 +5,12 @@
 
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_managed.h>
+#include <linux/bits.h>
 #include <linux/iommu.h>
 #include <linux/iova.h>
 #ifdef HAVE_iommu_paging_domain_alloc_flags
 /* IOMMU_HWPT_ALLOC_PASID is defined in uiommufd.h */
 #include <uapi/linux/iommufd.h>
-#else
-/* used GENMASK() to define iommu iova upper limit */
-#include <linux/bits.h>
 #endif
 
 #include "amdxdna_gem.h"
@@ -31,7 +29,17 @@ static struct iova *amdxdna_iommu_alloc_iova(struct amdxdna_dev *xdna,
 	struct iova *iova;
 
 #ifdef HAVE_iommu_paging_domain_alloc_flags
+#ifdef HAVE_xen_phy_dma_ops
+	/*
+	 * Under Xen (HAVE_xen_phy_dma_ops), the Xen PV-IOMMU advertises a 48-bit
+	 * aperture (caps.max_iova_addr). However, the NPU DMA engine only addresses
+	 * a 47-bit IOVA space. Cap the IOVA allocation to 47 bits so we never hand
+	 * firmware an IOVA address it cannot reach.
+	 */
+	end = min_t(u64, xdna->domain->geometry.aperture_end, GENMASK_ULL(46, 0));
+#else
 	end = xdna->domain->geometry.aperture_end;
+#endif
 #else
 	/* xdna PD_MODE_V2 device uses a 47-bit IOVA address space */
 	end = GENMASK(46, 0);
@@ -207,6 +215,18 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 #ifdef HAVE_iommu_paging_domain_alloc_flags
 	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev,
 						       IOMMU_HWPT_ALLOC_PASID);
+#if defined(HAVE_xen_phy_dma_ops) && defined(HAVE_iommu_paging_domain_alloc)
+	/*
+	 * force_iova is the non-PASID fallback path, so a PASID-capable domain
+	 * is not required. IOMMUs that only implement domain_alloc_paging (e.g.
+	 * the Xen PV-IOMMU) reject the PASID flag with -EOPNOTSUPP; retry the
+	 * plain paging alloc so those backends still work.
+	 */
+	if (PTR_ERR(xdna->domain) == -EOPNOTSUPP) {
+		XDNA_WARN(xdna, "PASID domain unsupported, retrying plain paging alloc");
+		xdna->domain = iommu_paging_domain_alloc(xdna->ddev.dev);
+	}
+#endif
 #elif defined(HAVE_iommu_paging_domain_alloc)
 	xdna->domain = iommu_paging_domain_alloc(xdna->ddev.dev);
 #else
@@ -217,11 +237,8 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 	 * iommu_paging_domain_alloc_flags
 	 */
 	if (IS_ERR_OR_NULL(xdna->domain)) {
-		XDNA_ERR(xdna, "Failed to alloc iommu domain");
-		if (IS_ERR(xdna->domain))
-			ret = PTR_ERR(xdna->domain);
-		else
-			ret = -EINVAL;
+		ret = xdna->domain ? PTR_ERR(xdna->domain) : -EINVAL;
+		XDNA_ERR(xdna, "Failed to alloc iommu domain, ret %d", ret);
 		goto put_group;
 	}
 
