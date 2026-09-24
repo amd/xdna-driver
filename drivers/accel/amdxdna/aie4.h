@@ -11,6 +11,7 @@
 
 #include <linux/device.h>
 #include <linux/iopoll.h>
+#include <linux/limits.h>
 #include <linux/list.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
@@ -266,6 +267,8 @@ int aie4_rw_aie_reg(struct amdxdna_hwctx *hwctx, bool is_read,
 int aie4_rw_aie_mem(struct amdxdna_hwctx *hwctx, bool is_read,
 		    u8 row, u8 col, u32 aie_addr,
 		    dma_addr_t dram_addr, u32 size);
+
+int aie4_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg);
 
 int aie4_set_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type,
 			 const void *data, size_t size);

@@ -65,7 +65,7 @@ int aie4_fw_log_fini(struct amdxdna_dev *xdna)
 	DECLARE_AIE_MSG(aie4_msg_stop_fw_log, AIE4_MSG_OP_STOP_FW_LOG);
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_ERR(xdna, "Failed to stop FW log: %d", ret);
 
@@ -136,7 +136,7 @@ int aie4_fw_trace_config(struct amdxdna_dev *xdna, u32 categories)
 
 	req.categories = categories;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_ERR(xdna,
 			 "Set FW trace categories failed, ret %d status 0x%x",
@@ -150,7 +150,7 @@ int aie4_fw_trace_fini(struct amdxdna_dev *xdna)
 	DECLARE_AIE_MSG(aie4_msg_stop_fw_trace, AIE4_MSG_OP_STOP_FW_TRACE);
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_ERR(xdna, "Failed to stop FW trace: %d", ret);
 

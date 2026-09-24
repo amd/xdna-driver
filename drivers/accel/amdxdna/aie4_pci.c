@@ -508,7 +508,7 @@ int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 
 	req.partition_col_start = 0;
 	req.partition_col_count = AIE4_TOTAL_COLUMN;
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "partition init failed: %d", ret);
 		return ret;
@@ -525,7 +525,7 @@ void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 	int ret;
 
 	req.partition_id = ndev->partition_id;
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_ERR(xdna, "partition fini failed: %d", ret);
 }
@@ -630,7 +630,7 @@ int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev)
 		ndev->dpm_clk_tbl[i] = ndev->priv->dpm_clk_tbl[i];
 	ndev->max_dpm_level = i ? i - 1 : 0;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_WARN(xdna, "Get DPM freq table failed, ret %d status 0x%x",
 			  ret, resp.status);
@@ -2319,7 +2319,7 @@ int aie4_fw_log_fini(struct amdxdna_dev *xdna)
 	DECLARE_AIE_MSG(aie4_msg_stop_fw_log, AIE4_MSG_OP_STOP_FW_LOG);
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_ERR(xdna, "Failed to stop FW log: %d", ret);
 
@@ -2390,7 +2390,7 @@ int aie4_fw_trace_config(struct amdxdna_dev *xdna, u32 categories)
 
 	req.categories = categories;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_ERR(xdna,
 			 "Set FW trace categories failed, ret %d status 0x%x",
@@ -2404,7 +2404,7 @@ int aie4_fw_trace_fini(struct amdxdna_dev *xdna)
 	DECLARE_AIE_MSG(aie4_msg_stop_fw_trace, AIE4_MSG_OP_STOP_FW_TRACE);
 	int ret;
 
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
 		XDNA_ERR(xdna, "Failed to stop FW trace: %d", ret);
 
@@ -2569,6 +2569,9 @@ const struct amdxdna_dev_ops aie4_pf_ops = {
 	.fini			= aie4_pf_fini,
 	.debugfs_init		= aie4_debugfs_init,
 	.sriov_configure        = aie4_sriov_configure,
+	.get_aie_info		= aie4_get_info,
+	.set_aie_state		= aie4_set_state,
+	.get_array		= aie4_get_array,
 	.resume			= aie4_pf_resume,
 	.suspend		= aie4_pf_suspend,
 	.runtime_resume		= aie4_pf_resume,
