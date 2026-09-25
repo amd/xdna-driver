@@ -406,11 +406,16 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 	}
 
 	xdna_mailbox_intr_reg = ndev->aie.mgmt_i2x.mb_head_ptr_reg + 4;
+	/*
+	 * At any given time, at most AMDXDNA_MAX_ASYNC_EVENT_BUFS async event
+	 * messages plus 1 other management command can be unresponded.
+	 */
 	ret = xdna_mailbox_start_channel(ndev->aie.mgmt_chann,
 					 &ndev->aie.mgmt_x2i,
 					 &ndev->aie.mgmt_i2x,
 					 xdna_mailbox_intr_reg,
-					 mgmt_mb_irq);
+					 mgmt_mb_irq,
+					 AMDXDNA_MAX_ASYNC_EVENT_BUFS + 1);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to start management mailbox channel");
 		ret = -EINVAL;
@@ -435,7 +440,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto stop_fw;
 	}
 
-	ret = amdxdna_async_events_alloc(&ndev->aie, ndev->total_col);
+	ret = amdxdna_async_events_alloc(&ndev->aie, AMDXDNA_MAX_ASYNC_EVENT_BUFS);
 	if (ret) {
 		XDNA_ERR(xdna, "Allocate async events failed, ret %d", ret);
 		goto stop_fw;

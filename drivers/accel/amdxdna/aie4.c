@@ -186,7 +186,7 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	ret = amdxdna_async_events_alloc(&ndev->aie, ndev->total_col);
+	ret = amdxdna_async_events_alloc(&ndev->aie, AMDXDNA_MAX_ASYNC_EVENT_BUFS);
 	if (ret) {
 		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
 		goto partition_fini;

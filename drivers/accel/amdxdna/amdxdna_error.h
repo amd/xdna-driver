@@ -82,6 +82,16 @@ enum amdxdna_error_module {
 /* Per-event async report buffer size. Shared by aie2 and aie4 firmware. */
 #define ASYNC_BUF_SIZE		SZ_8K
 
+/*
+ * Maximum number of async event buffers. This value is used in two places:
+ * (1) to size the management mailbox channel, which must happen before
+ * total_col is known from firmware; (2) to allocate the async event pool,
+ * which runs after total_col is known. Both counts must match — the channel
+ * is sized AMDXDNA_MAX_ASYNC_EVENT_BUFS + 1 (one extra for other management
+ * commands), so the pool cannot exceed AMDXDNA_MAX_ASYNC_EVENT_BUFS slots.
+ */
+#define AMDXDNA_MAX_ASYNC_EVENT_BUFS	4
+
 struct aie_device;
 struct amdxdna_async_error;
 struct amdxdna_async_events;
