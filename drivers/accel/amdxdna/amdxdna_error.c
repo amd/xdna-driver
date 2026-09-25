@@ -3,7 +3,6 @@
  * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
-#include <drm/drm_cache.h>
 #include <drm/drm_device.h>
 #include <drm/drm_print.h>
 #include <linux/bits.h>
@@ -321,7 +320,7 @@ static int amdxdna_async_error_cb(void *handle, void __iomem *data, size_t size)
 
 static int amdxdna_async_event_send(struct amdxdna_async_event *e)
 {
-	drm_clflush_virt_range(e->buf, e->size); /* device can access */
+	amdxdna_msg_buff_sync_for_device(e->hdl); /* device can access */
 	return e->aie->xdna->dev_info->ops->register_async_event(e->aie, e->addr, e->size,
 								 e, amdxdna_async_error_cb);
 }
@@ -345,7 +344,7 @@ static void amdxdna_async_error_worker(struct work_struct *err_work)
 	e->resp.status = info->async_max_status_code;
 
 	/* Invalidate stale cache lines before reading the device-written report. */
-	drm_clflush_virt_range(e->buf, e->size);
+	amdxdna_msg_buff_sync_for_cpu(e->hdl);
 
 	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4, e->buf, 0x100, false);
 

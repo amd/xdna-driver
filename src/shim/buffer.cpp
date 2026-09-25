@@ -166,9 +166,17 @@ clflush_data(const void *base, size_t offset, size_t len)
 bool
 is_driver_sync()
 {
+#if defined(__aarch64__)
+  // On aarch64 userspace cache maintenance (DC CIVAC) may trap at EL0 when
+  // SCTLR_EL1.UCI is cleared, silently dropping the flush.  Route every BO
+  // cache op through the driver (SYNC_BO) so input/instruction buffers really
+  // reach DRAM before the device reads them and outputs are invalidated after.
+  return true;
+#else
   static bool drv_sync =
     xrt_core::config::detail::get_bool_value("Debug.force_driver_sync", false);
   return drv_sync;
+#endif
 }
 
 bool

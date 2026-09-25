@@ -6,6 +6,13 @@
 
 #include "../pcidev.h"
 
+// DMA cache-coherency policy for UMQ devices, resolved at build time.
+//
+// UMQ parts are cache-coherent by default.  Define XDNA_UMQ_CACHE_NONCOHERENT
+// (e.g. for the aie2ps platform npu12, a non-coherent aarch64 DMA master) so
+// is_cache_coherent() reports false and buffer::sync() does real cache
+// maintenance instead of skipping it.
+
 namespace shim_xdna {
 
 class pdev_umq : public pdev

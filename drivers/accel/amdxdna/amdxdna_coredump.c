@@ -4,7 +4,6 @@
  */
 
 #include "drm/amdxdna_accel.h"
-#include <drm/drm_cache.h>
 #include <drm/drm_print.h>
 #include <linux/errno.h>
 #include <linux/sizes.h>
@@ -89,13 +88,13 @@ char *amdxdna_get_hwctx_coredump(struct amdxdna_hwctx *hwctx)
 		}
 
 		memset(to_cpu_addr(data_hdls[i], 0), 0, to_buf_size(data_hdls[i]));
-		drm_clflush_virt_range(to_cpu_addr(data_hdls[i], 0), to_buf_size(data_hdls[i]));
+		amdxdna_msg_buff_sync_for_device(data_hdls[i]);
 
 		buf_list[i].buf_addr = to_dma_addr(data_hdls[i], 0);
 		buf_list[i].buf_size = coredump_data_chunk_size;
 	}
 
-	drm_clflush_virt_range(buf_list, to_buf_size(list_hdl));
+	amdxdna_msg_buff_sync_for_device(list_hdl);
 
 	ret = aie->msg_ops.get_coredump(hwctx, list_hdl, num_bufs);
 	if (ret) {
@@ -103,8 +102,11 @@ char *amdxdna_get_hwctx_coredump(struct amdxdna_hwctx *hwctx)
 		goto out;
 	}
 
-	for (i = 0, offset = 0; i < num_bufs; i++, offset += coredump_data_chunk_size)
+	for (i = 0, offset = 0; i < num_bufs; i++, offset += coredump_data_chunk_size) {
+		/* Invalidate stale cache lines before reading CERT-written data. */
+		amdxdna_msg_buff_sync_for_cpu(data_hdls[i]);
 		memcpy(buf + offset, to_cpu_addr(data_hdls[i], 0), coredump_data_chunk_size);
+	}
 
 out:
 	if (data_hdls) {

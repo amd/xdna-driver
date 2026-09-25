@@ -28,7 +28,11 @@ bool
 pdev_umq::
 is_cache_coherent() const
 {
+#ifdef XDNA_UMQ_CACHE_NONCOHERENT
+  return false;
+#else
   return true;
+#endif
 }
 
 void *

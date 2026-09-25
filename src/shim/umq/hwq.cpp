@@ -355,8 +355,18 @@ bind_hwctx(const hwctx& ctx)
   hwq::bind_hwctx(ctx);
   // setup doorbell mapping by child class
   auto doorbell_offset = ctx.get_doorbell();
-  if (doorbell_offset != AMDXDNA_INVALID_DOORBELL_OFFSET)
+  if (doorbell_offset != AMDXDNA_INVALID_DOORBELL_OFFSET) {
+#ifdef XDNA_UMQ_CACHE_NONCOHERENT
+    // A user-space doorbell means user-mode submission, where user space must
+    // publish the ring writes to DRAM before ringing the doorbell.  That cache
+    // maintenance is not implemented for the non-coherent platform, so refuse
+    // UMS here.  Kernel-mode submission (no user-space doorbell, driver rings
+    // the doorbell and owns the ring's cache maintenance) is the supported path.
+    shim_err(ENOTSUP,
+      "UMQ user-mode submission is not supported on the non-coherent platform");
+#endif
     m_mapped_doorbell = map_doorbell(m_pdev, ctx.get_doorbell());
+  }
 }
 
 void
@@ -384,11 +394,30 @@ is_kernel_mode_submission() const
   return !m_mapped_doorbell;
 }
 
+// CERT writes the exec-buf completion state into the command BO by DMA; on a
+// non-coherent device the CPU's cached copy is stale, so invalidate before
+// reading it.  Compiled out on a coherent build; where non-coherent,
+// buffer::sync() routes through the driver (SYNC_BO) on aarch64, where userspace
+// DC CIVAC may trap at EL0 (SCTLR_EL1.UCI).
+static void
+invalidate_cmd(const cmd_buffer *boh)
+{
+#ifdef XDNA_UMQ_CACHE_NONCOHERENT
+  auto sz = boh->get_properties().size;
+  const_cast<cmd_buffer *>(boh)->sync(
+    xrt_core::buffer_handle::direction::device2host, sz, 0);
+#else
+  (void)boh;
+#endif
+}
+
 void
 hwq_umq::
 complete_command(xrt_core::buffer_handle *cmd) const
 {
   auto boh = static_cast<cmd_buffer*>(cmd);
+
+  invalidate_cmd(boh);
   auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
 
   // Single cmd completion, cmd state maybe updated by CERT (normal case), or by
@@ -436,6 +465,7 @@ complete_command(xrt_core::buffer_handle *cmd) const
   auto payload = get_ert_cmd_chain_data(cmdpkt);
   auto last_cmd_bo = static_cast<const cmd_buffer *>(
     m_pdev.find_bo_by_handle(payload->data[payload->command_count - 1]));
+  invalidate_cmd(last_cmd_bo);
   auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
   // Most common case, cmd is completed successfully.
   if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
@@ -447,6 +477,7 @@ complete_command(xrt_core::buffer_handle *cmd) const
   for (size_t i = payload->command_count; i > 0; i--) {
     auto idx = i - 1;
     auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[idx]));
+    invalidate_cmd(subcmd);
     auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd->vaddr());
     auto st = subcmd_pkt->state;
     if (st != ERT_CMD_STATE_ABORT) {
@@ -463,6 +494,7 @@ complete_command(xrt_core::buffer_handle *cmd) const
       for (size_t j = 0; j < payload->command_count; j++) {
         auto sc = static_cast<const cmd_buffer *>(
           m_pdev.find_bo_by_handle(payload->data[j]));
+        invalidate_cmd(sc);
         auto pkt = reinterpret_cast<ert_packet *>(sc->vaddr());
 	shim_debug("sub-cmd[%zu] state=%d", j, static_cast<unsigned int>(pkt->state));
       }
@@ -518,6 +550,14 @@ poll_command(xrt_core::buffer_handle *cmd) const
 
   auto boh = static_cast<cmd_buffer*>(cmd);
   auto seq = boh->wait_for_submitted();
+#ifdef XDNA_UMQ_CACHE_NONCOHERENT
+  // CERT DMA-writes read_index into the queue BO to signal completion; on a
+  // non-coherent device the CPU's cached copy is stale, so invalidate it before
+  // reading (mirrors invalidate_cmd()).  read_index is the first header field.
+  m_umq_bo->sync(xrt_core::buffer_handle::direction::device2host,
+    sizeof(m_umq_hdr->read_index),
+    offsetof(struct host_queue_header, read_index));
+#endif
   if (m_umq_hdr->read_index <= seq)
     return 0;
 

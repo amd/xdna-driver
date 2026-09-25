@@ -4,7 +4,6 @@
  */
 
 #include "drm/amdxdna_accel.h"
-#include <drm/drm_cache.h>
 #include <drm/drm_print.h>
 #include <linux/errno.h>
 #include <linux/uaccess.h>
@@ -71,7 +70,7 @@ static int amdxdna_aie_tile_read_mem(struct amdxdna_hwctx *hwctx,
 	}
 
 	memset(to_cpu_addr(dma_hdl, 0), 0, to_buf_size(dma_hdl));
-	drm_clflush_virt_range(to_cpu_addr(dma_hdl, 0), to_buf_size(dma_hdl));
+	amdxdna_msg_buff_sync_for_device(dma_hdl);
 
 	ret = wa->aie->msg_ops.rw_mem(hwctx, true, wa->access->row,
 				      wa->access->col, wa->access->addr,
@@ -82,7 +81,7 @@ static int amdxdna_aie_tile_read_mem(struct amdxdna_hwctx *hwctx,
 		goto free_dma;
 	}
 
-	drm_clflush_virt_range(to_cpu_addr(dma_hdl, 0), to_buf_size(dma_hdl));
+	amdxdna_msg_buff_sync_for_cpu(dma_hdl);
 
 	if (copy_to_user(wa->buf, to_cpu_addr(dma_hdl, 0), wa->access->size)) {
 		XDNA_ERR(xdna, "Failed to copy data to user");
@@ -259,7 +258,7 @@ static int amdxdna_aie_tile_write_mem(struct amdxdna_hwctx *hwctx,
 		goto free_dma;
 	}
 
-	drm_clflush_virt_range(to_cpu_addr(dma_hdl, 0), to_buf_size(dma_hdl));
+	amdxdna_msg_buff_sync_for_device(dma_hdl);
 
 	ret = wa->aie->msg_ops.rw_mem(hwctx, false, wa->access->row,
 				      wa->access->col, wa->access->addr,

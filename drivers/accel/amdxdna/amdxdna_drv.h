@@ -200,6 +200,20 @@ struct amdxdna_dev {
 
 	struct amdxdna_carveout		*carveout;
 
+	/*
+	 * The firmware DMA device: a 32-bit child of ddev.dev that firmware-visible
+	 * driver buffers (mgmt/log/work) are allocated through, optionally backed by
+	 * the DT "fw" reserved region. NULL on PCI and until the platform probe
+	 * creates it -- use amdxdna_fw_dma_dev().
+	 */
+	struct device			*fw_dma_dev;
+
+	/*
+	 * True when the DT "aie" reserved region is bound as ddev.dev's default
+	 * DMA pool (the create-BO backing). Platform transport only.
+	 */
+	bool				aie_region;
+
 	/* Firmware Debug/Profile/Trace (DPT) framework. Each channel owns the
 	 * SRCU domain guarding its own handle; on disable we synchronize_srcu
 	 * so kfree of the handle is provably ordered after any watcher's
@@ -287,6 +301,12 @@ void amdxdna_sva_fini(struct amdxdna_client *client);
 static inline bool amdxdna_iova_on(struct amdxdna_dev *xdna)
 {
 	return !!xdna->domain;
+}
+
+/* The firmware DMA device, or ddev.dev when there is none (PCI). */
+static inline struct device *amdxdna_fw_dma_dev(struct amdxdna_dev *xdna)
+{
+	return xdna->fw_dma_dev ? xdna->fw_dma_dev : xdna->ddev.dev;
 }
 
 static inline bool amdxdna_pasid_on(struct amdxdna_client *client)

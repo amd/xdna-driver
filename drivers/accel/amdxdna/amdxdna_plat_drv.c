@@ -18,11 +18,14 @@
 #include <drm/drm_accel.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_managed.h>
+#include <linux/dma-mapping.h>
 #include <linux/mod_devicetable.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <linux/sched/mm.h>
+#include <linux/slab.h>
 
 #include "amdxdna_cbuf.h"
 #include "amdxdna_ctx.h"
@@ -39,6 +42,126 @@ static void amdxdna_plat_drm_release(struct drm_device *drm, void *res)
 	amdxdna_carveout_fini(xdna);
 	amdxdna_dpt_chan_fini(xdna);
 	ida_destroy(&xdna->hwctx_ida);
+}
+
+static void amdxdna_fw_dev_release(struct device *dev)
+{
+	kfree(dev);
+}
+
+/*
+ * The firmware DMA device: a child of ddev.dev with a 32-bit mask (the firmware
+ * processor is 32-bit). When the DT names a "fw" reserved shared-dma-pool
+ * (@fw_idx >= 0) bind it as this device's default pool -- its region should sit
+ * below 4 GB; otherwise the 32-bit mask still keeps its system-CMA allocations
+ * reachable. No IOMMU is involved, so a plain dma_direct child device is enough.
+ */
+static struct device *amdxdna_fw_dma_dev_create(struct amdxdna_dev *xdna,
+						struct device_node *np, int fw_idx)
+{
+	struct device *dev;
+	int ret;
+
+	dev = kzalloc_obj(*dev);
+	if (!dev)
+		return ERR_PTR(-ENOMEM);
+
+	device_initialize(dev);
+	dev->parent = xdna->ddev.dev;
+	dev->release = amdxdna_fw_dev_release;
+	dev_set_name(dev, "%s-fw", dev_name(xdna->ddev.dev));
+
+	ret = device_add(dev);
+	if (ret) {
+		put_device(dev);
+		return ERR_PTR(ret);
+	}
+
+	ret = dma_coerce_mask_and_coherent(dev, DMA_BIT_MASK(32));
+	if (ret) {
+		device_unregister(dev);
+		return ERR_PTR(ret);
+	}
+
+	if (fw_idx >= 0) {
+		ret = of_reserved_mem_device_init_by_idx(dev, np, fw_idx);
+		if (ret) {
+			device_unregister(dev);
+			return ERR_PTR(ret);
+		}
+	}
+
+	return dev;
+}
+
+/*
+ * Set up the DT DMA regions from the amdxdna node's memory-region-names.
+ * Firmware-visible driver buffers are allocated through a dedicated 32-bit child
+ * device (xdna->fw_dma_dev), optionally backed by the "fw" reserved region; when
+ * the DT does not name "fw" the child stays on 32-bit system CMA.
+ */
+static int amdxdna_mem_regions_init(struct amdxdna_dev *xdna, struct device_node *np)
+{
+	int aie_idx, fw_idx, ret;
+
+	/* The AIE/CERT create-BO pool on ddev.dev is 64-bit; widen its mask. */
+	ret = dma_set_mask_and_coherent(xdna->ddev.dev, DMA_BIT_MASK(64));
+	if (ret) {
+		XDNA_ERR(xdna, "Set 64-bit DMA mask failed, ret %d", ret);
+		return ret;
+	}
+
+	/*
+	 * Optional "aie" reserved region -> ddev.dev's default DMA pool, backing
+	 * create-BOs. Absent it, create-BOs fall back to system CMA.
+	 */
+	aie_idx = of_property_match_string(np, "memory-region-names", "aie");
+	if (aie_idx >= 0) {
+		ret = of_reserved_mem_device_init_by_idx(xdna->ddev.dev, np, aie_idx);
+		if (ret) {
+			XDNA_ERR(xdna, "Bind aie region failed, ret %d", ret);
+			return ret;
+		}
+		xdna->aie_region = true;
+		XDNA_INFO(xdna, "aie region bound to %s", dev_name(xdna->ddev.dev));
+	}
+
+	fw_idx = of_property_match_string(np, "memory-region-names", "fw");
+	xdna->fw_dma_dev = amdxdna_fw_dma_dev_create(xdna, np, fw_idx);
+	if (IS_ERR(xdna->fw_dma_dev)) {
+		ret = PTR_ERR(xdna->fw_dma_dev);
+		xdna->fw_dma_dev = NULL;
+		goto release_aie;
+	}
+	XDNA_INFO(xdna, "fw dma dev %s (%s)", dev_name(xdna->fw_dma_dev),
+		  fw_idx >= 0 ? "reserved region" : "32-bit system CMA");
+
+	return 0;
+
+release_aie:
+	if (xdna->aie_region) {
+		of_reserved_mem_device_release(xdna->ddev.dev);
+		xdna->aie_region = false;
+	}
+	return ret;
+}
+
+static void amdxdna_mem_regions_fini(struct amdxdna_dev *xdna)
+{
+	if (xdna->fw_dma_dev) {
+		of_reserved_mem_device_release(xdna->fw_dma_dev);
+		device_unregister(xdna->fw_dma_dev);
+		xdna->fw_dma_dev = NULL;
+	}
+	if (xdna->aie_region) {
+		of_reserved_mem_device_release(xdna->ddev.dev);
+		xdna->aie_region = false;
+	}
+}
+
+static void amdxdna_mem_regions_release(struct drm_device *drm, void *res)
+{
+	amdxdna_mem_regions_fini(res);
 }
 
 static int amdxdna_plat_probe(struct platform_device *pdev)
@@ -88,22 +211,36 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 		fs_reclaim_release(GFP_KERNEL);
 	}
 
-	ret = amdxdna_iommu_init(xdna);
+	xdna->notifier_wq = drmm_alloc_ordered_workqueue(ddev, "notifier_wq", WQ_MEM_RECLAIM);
+	if (IS_ERR(xdna->notifier_wq))
+		return PTR_ERR(xdna->notifier_wq);
+
+	/*
+	 * Set up the DT DMA regions (the firmware device for the "fw" region)
+	 * before device init -- the firmware handshake allocates mgmt buffers from
+	 * the firmware device.
+	 */
+	ret = amdxdna_mem_regions_init(xdna, dev->of_node);
+	if (ret) {
+		XDNA_ERR(xdna, "DMA region init failed, ret %d", ret);
+		return ret;
+	}
+	/*
+	 * Tear the DMA regions down at the DRM device's final release, not in
+	 * remove(): create-BOs from the "aie" CMA pool can outlive an unplug
+	 * (drm_dev_unplug() does not close open files), and freeing them touches
+	 * fw_dma_dev and the reserved pool.
+	 */
+	ret = drmm_add_action_or_reset(ddev, amdxdna_mem_regions_release, xdna);
 	if (ret)
 		return ret;
-
-	xdna->notifier_wq = drmm_alloc_ordered_workqueue(ddev, "notifier_wq", WQ_MEM_RECLAIM);
-	if (IS_ERR(xdna->notifier_wq)) {
-		ret = PTR_ERR(xdna->notifier_wq);
-		goto iommu_fini;
-	}
 
 	mutex_lock(&xdna->dev_lock);
 	ret = xdna->dev_info->ops->init(xdna);
 	mutex_unlock(&xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
-		goto iommu_fini;
+		return ret;
 	}
 
 	ret = amdxdna_sysfs_init(xdna);
@@ -128,8 +265,6 @@ failed_dev_fini:
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
-iommu_fini:
-	amdxdna_iommu_fini(xdna);
 	return ret;
 }
 
@@ -151,8 +286,6 @@ static void amdxdna_plat_remove(struct platform_device *pdev)
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
 	mutex_unlock(&xdna->client_lock);
-
-	amdxdna_iommu_fini(xdna);
 }
 
 static const struct dev_pm_ops amdxdna_plat_pm_ops = {
