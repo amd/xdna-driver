@@ -214,7 +214,7 @@ struct mailbox_channel *xdna_mailbox_alloc_channel(struct mailbox *mb)
 int xdna_mailbox_start_channel(struct mailbox_channel *mb_chann,
 			       const struct xdna_mailbox_chann_res *x2i,
 			       const struct xdna_mailbox_chann_res *i2x,
-			       u32 xdna_mailbox_intr_reg, int mb_irq)
+			       u32 xdna_mailbox_intr_reg, int mb_irq, u32 n_msg)
 {
 	/* TODO: mgmt shmem ring bring-up (no MSI-X regs on the platform). */
 	return 0;

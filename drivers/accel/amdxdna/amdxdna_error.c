@@ -76,8 +76,8 @@ struct amdxdna_async_event {
 /**
  * struct amdxdna_async_events - pool of async error report buffer slots
  * @wq: ordered workqueue draining the report workers.
- * @event_cnt: number of slots (one per column).
- * @event: per column event slots, each with its own message buffer.
+ * @event_cnt: number of slots in the pool.
+ * @event: event slots, each with its own message buffer.
  */
 struct amdxdna_async_events {
 	struct workqueue_struct		*wq;
