@@ -369,8 +369,9 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 		goto del_ctx_req;
 	}
 
+	/* +1 for the config_cu message that can be in-flight concurrently */
 	ret = xdna_mailbox_start_channel(hwctx->priv->mbox_chann, &x2i, &i2x,
-					 intr_reg, ret);
+					 intr_reg, ret, HWCTX_MAX_CMDS + 1);
 	if (ret) {
 		XDNA_ERR(xdna, "Not able to create channel");
 		ret = -EINVAL;
@@ -620,7 +621,7 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx,
 	msg.handle = hwctx;
 	msg.opcode = MSG_OP_CONFIG_CU;
 	msg.notify_cb = notify_cb;
-	return xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	return xdna_mailbox_send_msg(chann, &msg, 0);
 }
 
 static int aie2_init_exec_cu_req(struct amdxdna_gem_obj *cmd_bo, void *req,
@@ -1058,7 +1059,7 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	print_hex_dump_debug("cmd: ", DUMP_PREFIX_OFFSET, 16, 4, &req,
 			     0x40, false);
 
-	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	ret = xdna_mailbox_send_msg(chann, &msg, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
@@ -1146,7 +1147,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 	msg.send_size = sizeof(req);
 	print_hex_dump_debug("cmdlist msg: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     &req, msg.send_size, false);
-	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	ret = xdna_mailbox_send_msg(chann, &msg, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
@@ -1193,7 +1194,7 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
 	msg.send_size = sizeof(req);
 	print_hex_dump_debug("cmdlist msg: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     &req, msg.send_size, false);
-	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	ret = xdna_mailbox_send_msg(chann, &msg, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
@@ -1229,7 +1230,7 @@ int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	msg.send_size = sizeof(req);
 	msg.opcode = MSG_OP_SYNC_BO;
 
-	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	ret = xdna_mailbox_send_msg(chann, &msg, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
@@ -1264,7 +1265,7 @@ int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *
 	msg.send_size = sizeof(req);
 	msg.opcode = MSG_OP_CONFIG_DEBUG_BO;
 
-	return xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	return xdna_mailbox_send_msg(chann, &msg, 0);
 }
 
 int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
