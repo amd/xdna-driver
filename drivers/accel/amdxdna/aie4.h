@@ -214,6 +214,7 @@ int aie4_query_npu_firmware_version(struct amdxdna_dev_hdl *ndev,
 				    struct amdxdna_drm_query_firmware_version *fw_version);
 int aie4_query_dpm_level(struct amdxdna_dev_hdl *ndev,
 			 u32 *aieclk_dpm_level, u32 *npuhclk_dpm_level);
+int aie4_get_npufw_time(struct amdxdna_dev_hdl *ndev, u64 *timestamp_ns);
 int aie4_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 			  struct aie4_msg_app_health_report *report);
 int aie4_fill_hwctx_health(struct amdxdna_hwctx *hwctx, struct amdxdna_drm_hwctx_entry *entry);

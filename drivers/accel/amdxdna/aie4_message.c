@@ -173,6 +173,20 @@ int aie4_query_dpm_level(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
+int aie4_get_npufw_time(struct amdxdna_dev_hdl *ndev, u64 *timestamp_ns)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_npufw_time, AIE4_MSG_OP_GET_NPUFW_TIME);
+	int ret;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		return ret;
+
+	*timestamp_ns = resp.timestamp_ns;
+
+	return 0;
+}
+
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev,
 			    struct amdxdna_drm_query_aie_metadata *metadata)
 {

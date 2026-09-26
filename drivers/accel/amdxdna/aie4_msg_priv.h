@@ -27,6 +27,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_STOP_FW_TRACE                    = 0x1000B,
 	AIE4_MSG_OP_SET_FW_TRACE_CATEGORIES          = 0x1000C,
 	AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION      = 0x1000F,
+	AIE4_MSG_OP_GET_NPUFW_TIME                   = 0x10011,
 
 	/* PF only */
 	AIE4_MSG_OP_CREATE_VFS                       = 0x20001,
@@ -365,6 +366,17 @@ struct aie4_msg_get_dpm_level_resp {
 	enum aie4_msg_status status;
 	__u32 aieclk_dpm_level;
 	__u32 npuhclk_dpm_level;
+} __packed;
+
+/* AIE4_MSG_OP_GET_NPUFW_TIME */
+struct aie4_msg_get_npufw_time_req {
+	__u32 rsvd;
+} __packed;
+
+struct aie4_msg_get_npufw_time_resp {
+	enum aie4_msg_status status;
+	__u32 rsvd;
+	__u64 timestamp_ns;
 } __packed;
 
 #define AIE4_WORK_BUFFER_MIN_SIZE      SZ_4M
