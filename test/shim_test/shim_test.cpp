@@ -111,6 +111,7 @@ void TEST_certlog_multi_uc(device::id_type, std::shared_ptr<device>&, arg_type&)
 void TEST_certlog_num_ucs_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_certlog_invalid_uc_index(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_certlog_payload_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_npu_fw_time_monotonic(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_df_bw(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_aie4_flr(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_aie4_pf_flr(device::id_type, std::shared_ptr<device>&,
@@ -1798,6 +1799,11 @@ std::vector<test_case> test_list {
   },
   test_case{ "CERT log: payload overflow rejected", {},
     TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_certlog_payload_overflow, {}
+  },
+  // npu_fw_time debugfs node is created only on the non-VF (classic/PF)
+  // paths that drive the management channel, so restrict to npu3.
+  test_case{ "npu_fw_time: firmware timestamp advances", {},
+    TEST_POSITIVE, {npu3}, {}, TEST_npu_fw_time_monotonic, {}
   },
   test_case{ "NPU write to read-only user pointer BO is rejected", {},
     TEST_NEGATIVE, {npu1, npu4, npu3, npu3vf}, {amdxdna}, TEST_write_to_readonly_uptr_bo, {}

@@ -2538,6 +2538,39 @@ unlock:
 DEFINE_DEBUGFS_ATTRIBUTE(aie4_ctx_hysteresis_fops, aie4_ctx_hysteresis_get,
 			 aie4_ctx_hysteresis_set, "%llu\n");
 
+static int aie4_npufw_time_get(void *data, u64 *val)
+{
+	struct amdxdna_dev_hdl *ndev = data;
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	u64 timestamp_ns = 0;
+	int ret, idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	mutex_lock(&xdna->dev_lock);
+
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto unlock;
+
+	ret = aie4_get_npufw_time(ndev, &timestamp_ns);
+
+	amdxdna_pm_suspend_put(xdna);
+
+unlock:
+	mutex_unlock(&xdna->dev_lock);
+	drm_dev_exit(idx);
+
+	if (!ret)
+		*val = timestamp_ns;
+
+	return ret;
+}
+
+/* Current NPU firmware timestamp in nanoseconds (read-only). */
+DEFINE_DEBUGFS_ATTRIBUTE(aie4_npufw_time_fops, aie4_npufw_time_get, NULL, "%llu\n");
+
 void aie4_debugfs_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -2562,6 +2595,15 @@ void aie4_debugfs_init(struct amdxdna_dev *xdna)
 		debugfs_create_file_unsafe("ctx_switch_hysteresis_us", 0600,
 					   xdna->ddev.accel->debugfs_root, ndev,
 					   &aie4_ctx_hysteresis_fops);
+
+	/*
+	 * NPU firmware timestamp is fetched over the management channel, which
+	 * only the PF/classic paths drive; do not expose it on a VF.
+	 */
+	if (!to_pci_dev(xdna->ddev.dev)->is_virtfn)
+		debugfs_create_file_unsafe("npu_fw_time", 0400,
+					   xdna->ddev.accel->debugfs_root, ndev,
+					   &aie4_npufw_time_fops);
 }
 
 const struct amdxdna_dev_ops aie4_pf_ops = {
