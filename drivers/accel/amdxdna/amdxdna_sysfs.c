@@ -8,6 +8,7 @@
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
+#include <linux/dma-map-ops.h>
 #include <linux/types.h>
 
 #include "amdxdna_gem.h"
@@ -27,8 +28,17 @@ static DEVICE_ATTR_RO(vbnv);
 static ssize_t device_type_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct amdxdna_dev *xdna = dev_get_drvdata(dev);
+	int type = xdna->dev_info->device_type;
 
-	return sprintf(buf, "%d\n", xdna->dev_info->device_type);
+	/*
+	 * A UMQ part is DMA-coherent on x86 (PCIe) but not on the aarch64
+	 * platform; report the non-coherent variant so userspace can pick its
+	 * cache-maintenance policy from the device type alone.
+	 */
+	if (type == AMDXDNA_DEV_TYPE_UMQ && !dev_is_dma_coherent(xdna->ddev.dev))
+		type = AMDXDNA_DEV_TYPE_UMQ_NONCOHERENT;
+
+	return sprintf(buf, "%d\n", type);
 }
 static DEVICE_ATTR_RO(device_type);
 

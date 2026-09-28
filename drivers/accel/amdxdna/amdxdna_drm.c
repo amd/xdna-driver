@@ -51,9 +51,11 @@
  * 0.16: Expose auto core dump SET_STATE/GET_INFO ioctls
  * 0.17: Firmware log and trace reads report -ESTALE when the caller's
  *       cursor predates a ring restart
+ * 0.18: Report the non-coherent UMQ device type AMDXDNA_DEV_TYPE_UMQ_NONCOHERENT
+ *       via the device_type sysfs
  */
 #define AMDXDNA_DRIVER_MAJOR		0
-#define AMDXDNA_DRIVER_MINOR		17
+#define AMDXDNA_DRIVER_MINOR		18
 
 #ifndef AMDXDNA_NPU3A
 static int amdxdna_sva_init(struct amdxdna_client *client)
