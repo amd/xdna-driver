@@ -1092,36 +1092,6 @@ amdxdna_gem_create_ubuf_object(struct drm_device *dev,
 	return to_xdna_obj(gobj);
 }
 
-static struct amdxdna_gem_obj *
-amdxdna_gem_create_cbuf_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
-{
-	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	size_t size = PAGE_ALIGN(args->size);
-	struct drm_gem_object *gobj;
-	struct amdxdna_gem_obj *ret;
-	struct dma_buf *dma_buf;
-	u64 align;
-
-	if (!size) {
-		XDNA_ERR(xdna, "Invalid BO size 0x%llx", args->size);
-		return ERR_PTR(-EINVAL);
-	}
-
-	align = (args->type == AMDXDNA_BO_DEV_HEAP) ?  xdna->dev_info->dev_mem_size : 0;
-	dma_buf = amdxdna_get_cbuf(dev, size, align);
-	if (IS_ERR(dma_buf))
-		return ERR_CAST(dma_buf);
-
-	gobj = amdxdna_gem_prime_import(dev, dma_buf);
-	if (IS_ERR(gobj))
-		ret = ERR_CAST(gobj);
-	else
-		ret = to_xdna_obj(gobj);
-
-	dma_buf_put(dma_buf);
-	return ret;
-}
-
 struct drm_gem_object *
 amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 {
@@ -1180,7 +1150,7 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 	else if (amdxdna_use_cma(to_xdna_dev(dev)))
 		abo = amdxdna_get_cma_buf(dev, args);
 	else if (amdxdna_use_carveout(to_xdna_dev(dev)))
-		abo = amdxdna_gem_create_cbuf_object(dev, args);
+		abo = amdxdna_get_cbuf(dev, args);
 	else
 		abo = amdxdna_gem_create_shmem_object(dev, args);
 	if (IS_ERR(abo))
