@@ -142,6 +142,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx);
 /* Schedule a command on the host queue commit path. */
 int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 			  u64 command_index);
+int ve2_mgmt_recover_hwctx(struct amdxdna_hwctx *hwctx);
 
 int notify_fw_cmd_ready(struct amdxdna_mgmtctx *mgmtctx);
 
