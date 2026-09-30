@@ -24,6 +24,7 @@ obj-m	+= amdxdna.o
 # Only objects that have corresponding .c sources in this directory
 amdxdna-y := \
 	amdxdna_ctx.o \
+	amdxdna_solver.o \
 	amdxdna_drm.o \
 	amdxdna_gem.o \
 	amdxdna_iommu.o \
@@ -36,7 +37,7 @@ amdxdna-y := \
 	amdxdna_xen.o \
 	amdxdna_sensors.o
 
-amdxdna-y += \
+amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie.o \
 	aie4_ctx.o \
 	aie4_error.o \
@@ -52,7 +53,7 @@ amdxdna-y += \
 # aie2 driver, its PSP/SMU layer and its PCI register tables are not compiled
 # there. (aie.o is the shared mgmt-mailbox layer and stays in both builds.)
 ifeq ($(CONFIG_DRM_ACCEL_AMDXDNA_PLAT),)
-amdxdna-y += \
+amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie_psp.o \
 	aie_smu.o \
 	aie2_ctx.o \
@@ -60,7 +61,6 @@ amdxdna-y += \
 	aie2_message.o \
 	aie2_pci.o \
 	aie2_pm.o \
-	aie2_solver.o \
 	aie2_tdr.o \
 	npu1_regs.o \
 	npu4_regs.o \
@@ -85,7 +85,7 @@ amdxdna-$(CONFIG_DRM_ACCEL_AMDXDNA_PLAT) += \
 	npu12_regs.o
 
 ifeq ($(CONFIG_DRM_ACCEL_AMDXDNA_PLAT),)
-amdxdna-y += \
+amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie4_pci.o \
 	amdxdna_dpt_pci.o \
 	amdxdna_mailbox.o \
@@ -98,6 +98,10 @@ amdxdna-y += \
 amdxdna-$(CONFIG_PCI_IOV) += \
 	aie4_sriov.o
 endif
+
+# Auxiliary-bus attachment (VE2/Versal SoC) - selected by XDNA_BUS_TYPE=aux
+amdxdna-$(OFT_CONFIG_AMDXDNA_AUX) += \
+	amdxdna_aux_drv.o
 
 amdxdna-$(CONFIG_DEBUG_FS) += \
 	amdxdna_debugfs.o

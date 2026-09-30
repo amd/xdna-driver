@@ -1710,6 +1710,7 @@ int amdxdna_drm_get_bo_usage(struct drm_device *dev, struct amdxdna_drm_get_arra
 	return 0;
 }
 
+#ifndef AMDXDNA_AUX
 static int amdxdna_populate_range(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
@@ -1828,3 +1829,4 @@ int amdxdna_client_populate_ranges(struct amdxdna_client *client)
 
 	return ret;
 }
+#endif
