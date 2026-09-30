@@ -4,7 +4,23 @@
 #include "platform.h"
 #include "shim_debug.h"
 #include <sys/mman.h>
+#include <sys/ioctl.h>
 #include <fcntl.h>
+
+namespace {
+
+// The syncobj helpers below are the only ioctl callers in the base class, and
+// every derived platform has its own checking wrapper (platform_host.cpp,
+// platform_virtio.cpp). Keep the same contract here: an ioctl that fails must
+// raise, never return as if it had succeeded.
+void
+checked_ioctl(int dev_fd, unsigned long cmd, void* arg, const char* name)
+{
+  if (::ioctl(dev_fd, cmd, arg) == -1)
+    shim_err(-errno, "%s IOCTL failed", name);
+}
+
+}
 
 namespace shim_xdna {
 
@@ -106,7 +122,7 @@ create_syncobj(create_destroy_syncobj_arg& sobj_arg) const
   drm_syncobj_create arg = {};
   arg.handle = AMDXDNA_INVALID_FENCE_HANDLE;
   arg.flags = 0;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_CREATE, &arg);
+  checked_ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_CREATE, &arg, "DRM_IOCTL_SYNCOBJ_CREATE");
   sobj_arg.handle = arg.handle;
 }
 
@@ -116,7 +132,7 @@ destroy_syncobj(create_destroy_syncobj_arg& sobj_arg) const
 {
   drm_syncobj_destroy arg = {};
   arg.handle = sobj_arg.handle;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_DESTROY, &arg);
+  checked_ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_DESTROY, &arg, "DRM_IOCTL_SYNCOBJ_DESTROY");
 }
 
 void
@@ -127,7 +143,7 @@ export_syncobj(export_import_syncobj_arg& sobj_arg) const
   arg.handle = sobj_arg.handle;
   arg.flags = 0;
   arg.fd = -1;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD, &arg);
+  checked_ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD, &arg, "DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD");
   sobj_arg.fd = arg.fd;
 }
 
@@ -139,7 +155,7 @@ import_syncobj(export_import_syncobj_arg& sobj_arg) const
   arg.handle = AMDXDNA_INVALID_FENCE_HANDLE;
   arg.flags = 0;
   arg.fd = sobj_arg.fd;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE, &arg);
+  checked_ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE, &arg, "DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE");
   sobj_arg.handle = arg.handle;
 }
 
@@ -154,7 +170,7 @@ wait_syncobj(wait_syncobj_arg& sobj_arg) const
   arg.count_handles = 1;
   /* Keep waiting even if not submitted yet */
   arg.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &arg);
+  checked_ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &arg, "DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT");
 }
 
 void
@@ -165,7 +181,7 @@ signal_syncobj(signal_syncobj_arg& sobj_arg) const
   arg.handles = reinterpret_cast<uintptr_t>(&sobj_arg.handle);
   arg.points = reinterpret_cast<uintptr_t>(&sobj_arg.timepoint);
   arg.count_handles = 1;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, &arg);
+  checked_ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, &arg, "DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL");
 }
 
 void
