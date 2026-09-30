@@ -734,7 +734,6 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 	 * handled by the device layer. For here we can unlock SRCU.
 	 */
 	srcu_read_unlock(&client->hwctx_srcu, idx);
-	trace_amdxdna_debug_point(hwctx->name, *seq, "job pushed");
 
 	return 0;
 
