@@ -115,12 +115,19 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		/* No need to fail open since user may use pa + carveout later. */
 		if (amdxdna_sva_init(client)) {
 			XDNA_WARN(xdna, "PASID not available for pid %d", client->pid);
+#ifndef AMDXDNA_AUX
+			/*
+			 * PCI/NPU requires either PASID or a pre-configured
+			 * carveout. VE2 (aux) uses PA mode and may configure
+			 * carveout later, so open must not fail here.
+			 */
 			if (!amdxdna_use_carveout(xdna)) {
 				XDNA_ERR(xdna, "PASID unavailable and carveout not configured");
 				cleanup_srcu_struct(&client->hwctx_srcu);
 				kfree(client);
 				return -EINVAL;
 			}
+#endif
 		}
 	}
 #endif

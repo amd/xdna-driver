@@ -450,6 +450,7 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		break;
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT:
 		/* For those types that param_val is a value */
 		buf = NULL;
 		buf_size = 0;
@@ -733,6 +734,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 	 * handled by the device layer. For here we can unlock SRCU.
 	 */
 	srcu_read_unlock(&client->hwctx_srcu, idx);
+	trace_amdxdna_debug_point(hwctx->name, *seq, "job pushed");
 
 	return 0;
 
