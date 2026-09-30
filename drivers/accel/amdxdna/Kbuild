@@ -108,3 +108,5 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_AUX) += \
 
 amdxdna-$(CONFIG_DEBUG_FS) += \
 	amdxdna_debugfs.o
+
+endif
