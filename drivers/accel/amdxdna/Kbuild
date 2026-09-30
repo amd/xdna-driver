@@ -94,8 +94,10 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 
 # SR-IOV is PCI-only (to_pci_dev()/pci_enable_sriov()/PCI config space), so keep
 # it in the PCI-only branch: the platform module must not pull it in even when
-# CONFIG_PCI_IOV is set.
-amdxdna-$(CONFIG_PCI_IOV) += \
+# CONFIG_PCI_IOV is set. Additionally, SR-IOV requires aie4_message.o, so it must
+# be conditioned on both OFT_CONFIG_AMDXDNA_PCI and CONFIG_PCI_IOV to avoid
+# unresolved symbols in AUX builds.
+amdxdna-$(OFT_CONFIG_AMDXDNA_PCI)$(CONFIG_PCI_IOV) += \
 	aie4_sriov.o
 endif
 
