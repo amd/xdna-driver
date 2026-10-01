@@ -268,16 +268,16 @@ static int amdxdna_dpt_fetch_payload(struct amdxdna_dpt *dpt, u8 *buf,
 		size_t first = log_size - start;
 
 		/* First chunk: from start to end of log buffer */
-		drm_clflush_virt_range(to_cpu_addr(hdl, start), first);
+		amdxdna_cache_flush(to_cpu_addr(hdl, start), first);
 		if (cpy(buf, to_cpu_addr(hdl, start), first))
 			return -EFAULT;
 
 		/* Wrap-around chunk: from 0 to the remainder */
-		drm_clflush_virt_range(to_cpu_addr(hdl, 0), req_size - first);
+		amdxdna_cache_flush(to_cpu_addr(hdl, 0), req_size - first);
 		if (cpy(buf + first, to_cpu_addr(hdl, 0), req_size - first))
 			return -EFAULT;
 	} else {
-		drm_clflush_virt_range(to_cpu_addr(hdl, start), req_size);
+		amdxdna_cache_flush(to_cpu_addr(hdl, start), req_size);
 		if (cpy(buf, to_cpu_addr(hdl, start), req_size))
 			return -EFAULT;
 	}
@@ -296,7 +296,7 @@ static bool amdxdna_dpt_update_tail(struct amdxdna_dpt *dpt)
 	offset = to_buf_size(dpt->buf) - AMDXDNA_DPT_FOOTER_SIZE;
 	footer = to_cpu_addr(dpt->buf, offset);
 
-	drm_clflush_virt_range(footer, sizeof(*footer));
+	amdxdna_cache_flush(footer, sizeof(*footer));
 
 	/* Extend 32-bit firmware pointer to a 64-bit value to handle wrap. */
 	tail = (dpt->tail & ~GENMASK_ULL(31, 0)) | footer->tail;
@@ -323,7 +323,7 @@ static void amdxdna_dpt_read_metadata(struct amdxdna_dpt *dpt)
 	offset = to_buf_size(dpt->buf) - AMDXDNA_DPT_FOOTER_SIZE;
 	footer = to_cpu_addr(dpt->buf, offset);
 
-	drm_clflush_virt_range(footer, sizeof(*footer));
+	amdxdna_cache_flush(footer, sizeof(*footer));
 
 	dpt->payload_version = footer->payload_version;
 	dpt->minor = footer->minor;
@@ -585,7 +585,7 @@ amdxdna_dpt_publish(struct aie_device *aie, struct amdxdna_dpt_chan *chan,
 	dpt->size = to_buf_size(hdl);
 
 	memset(to_cpu_addr(hdl, 0), 0, to_buf_size(hdl));
-	drm_clflush_virt_range(to_cpu_addr(hdl, 0), to_buf_size(hdl));
+	amdxdna_cache_flush(to_cpu_addr(hdl, 0), to_buf_size(hdl));
 
 	mutex_init(&dpt->timer_lock);
 	refcount_set(&dpt->timer_refs, 0);
@@ -950,8 +950,7 @@ static int amdxdna_dpt_resume_chan(struct amdxdna_dev *xdna,
 	 */
 	if (fresh) {
 		memset(to_cpu_addr(dpt->buf, 0), 0, to_buf_size(dpt->buf));
-		drm_clflush_virt_range(to_cpu_addr(dpt->buf, 0),
-				       to_buf_size(dpt->buf));
+		amdxdna_cache_flush(to_cpu_addr(dpt->buf, 0), to_buf_size(dpt->buf));
 		WRITE_ONCE(dpt->tail, 0);
 		dpt->head = 0;
 	}

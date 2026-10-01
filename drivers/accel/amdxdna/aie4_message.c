@@ -596,7 +596,7 @@ static int aie4_query_telemetry(struct aie_device *aie, char __user *buf, u32 si
 	req.hw_context_id = 0;
 
 	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 
 	ret = aie4_send_mgmt_msg_wait(aie, &msg);
 	if (ret) {
@@ -604,7 +604,7 @@ static int aie4_query_telemetry(struct aie_device *aie, char __user *buf, u32 si
 		goto free_buf;
 	}
 
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 
 	size = min(size, to_buf_size(buf_hdl));
 	if (copy_to_user(buf, to_cpu_addr(buf_hdl, 0), size)) {
@@ -854,7 +854,7 @@ int aie4_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 	req.report_buff_size = to_buf_size(buf_hdl);
 
 	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret || resp.app_health_status != AIE4_APP_HEALTH_CHECK_SUCCESS) {
 		if (!ret)
@@ -882,7 +882,7 @@ int aie4_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 		goto free_buf;
 	}
 
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 	memcpy(report, to_cpu_addr(buf_hdl, 0), sizeof(*report));
 
 	if (report->context_id != context_id) {
