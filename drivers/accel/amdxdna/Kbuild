@@ -109,6 +109,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_AUX) += \
 	ve2_mgmt.o \
 	ve2_aux.o \
 	ve2_hwctx.o \
+	ve2_tdr.o \
 	ve2_debug.o
 
 amdxdna-$(CONFIG_DEBUG_FS) += \

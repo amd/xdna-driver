@@ -9,7 +9,9 @@
 #ifndef _VE2_AUX_H_
 #define _VE2_AUX_H_
 
+#include <linux/spinlock.h>
 #include <linux/types.h>
+#include <linux/workqueue.h>
 
 #include "amdxdna_pci_drv.h"
 #include "ve2_aie.h"
@@ -65,6 +67,12 @@ struct ve2_mem_topology {
 	struct ve2_mem_region	regions[MAX_MEM_REGIONS];
 };
 
+struct ve2_tdr {
+	struct delayed_work	work;
+	spinlock_t		lock;
+	bool			started;
+};
+
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
 	const struct amdxdna_dev_priv	*priv;
@@ -74,6 +82,7 @@ struct amdxdna_dev_hdl {
 	struct ve2_firmware_status	**fw_slots;	/* [cols] per-column FW status */
 	u32				hwctx_limit;	/* effective max hw contexts */
 	struct ve2_mem_topology		mem_topology;	/* parsed from DT aie-mem-topology */
+	struct ve2_tdr			tdr;
 };
 
 extern const struct amdxdna_dev_ops ve2_ops;
@@ -87,6 +96,10 @@ int ve2_probe(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl *hdl);
 void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx);
 void *ve2_alloc_cert_coherent(struct amdxdna_dev *xdna, u32 mem_bitmap, size_t size,
 			      dma_addr_t *dma_addr, struct device **alloc_dev);
+void ve2_tdr_start(struct amdxdna_dev *xdna);
+void ve2_tdr_stop(struct amdxdna_dev *xdna);
+void ve2_tdr_queue(struct amdxdna_dev *xdna);
+bool ve2_tdr_enabled(struct amdxdna_dev *xdna);
 
 /* Capture the per-column CERT firmware status for @hwctx's partition. */
 int ve2_get_firmware_status(struct amdxdna_hwctx *hwctx);
