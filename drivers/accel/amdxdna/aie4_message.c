@@ -411,6 +411,23 @@ int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode)
 	return ret;
 }
 
+int aie4_msg_set_power_hint(struct amdxdna_dev_hdl *ndev, u32 power_hint)
+{
+	DECLARE_AIE_MSG(aie4_msg_power_hint, AIE4_MSG_OP_POWER_HINT);
+	int ret;
+
+	req.power_hint = power_hint;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set power hint %u, ret %d", power_hint, ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "Power hint set to %u", power_hint);
+
+	return ret;
+}
+
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable)
 {
 	struct aie4_msg_runtime_config_force_preemption cfg = {

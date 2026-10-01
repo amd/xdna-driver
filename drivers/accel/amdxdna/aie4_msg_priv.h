@@ -41,6 +41,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_AIE_TILE_INFO                    = 0x30006,
 	AIE4_MSG_OP_AIE_VERSION_INFO                 = 0x30007,
 	AIE4_MSG_OP_AIE_COLUMN_INFO                  = 0x30008,
+	AIE4_MSG_OP_POWER_HINT                       = 0x3000A,
 	AIE4_MSG_OP_POWER_OVERRIDE                   = 0x3000B,
 	AIE4_MSG_OP_AIE_RW_ACCESS                    = 0x3000E,
 	AIE4_MSG_OP_GET_APP_HEALTH_STATUS            = 0x3000F,
@@ -328,6 +329,27 @@ struct aie4_msg_query_cert_firmware_version_resp {
 	__u8 build;
 	__u16 host_queue_major;
 	__u16 host_queue_minor;
+} __packed;
+
+/* Power slider hint for AIE4_MSG_OP_POWER_HINT; values match the firmware. */
+enum aie4_msg_power_hint {
+	AIE4_POWER_HINT_AC_PERF = 0x0,	/* AC: best performance */
+	AIE4_POWER_HINT_AC_BAL  = 0x1,	/* AC: balanced */
+	AIE4_POWER_HINT_AC_VSS  = 0x2,	/* AC: best efficiency */
+	AIE4_POWER_HINT_AC_NINT = 0x3,	/* AC: best efficiency (no interrupt) */
+	AIE4_POWER_HINT_DC_PERF = 0x4,	/* DC: best performance */
+	AIE4_POWER_HINT_DC_BAL  = 0x5,	/* DC: balanced */
+	AIE4_POWER_HINT_DC_VSS  = 0x6,	/* DC: best efficiency */
+	AIE4_POWER_HINT_DC_NINT = 0x7,	/* DC: best efficiency (no interrupt) */
+	AIE4_POWER_HINT_COUNT,
+};
+
+struct aie4_msg_power_hint_req {
+	__u32 power_hint;
+} __packed;
+
+struct aie4_msg_power_hint_resp {
+	enum aie4_msg_status status;
 } __packed;
 
 struct aie4_msg_power_override_req {

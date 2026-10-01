@@ -2543,6 +2543,52 @@ unlock:
 DEFINE_DEBUGFS_ATTRIBUTE(aie4_ctx_hysteresis_fops, aie4_ctx_hysteresis_get,
 			 aie4_ctx_hysteresis_set, "%llu\n");
 
+static int aie4_power_hint_get(void *data, u64 *val)
+{
+	struct amdxdna_dev_hdl *ndev = data;
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+
+	guard(mutex)(&xdna->dev_lock);
+	*val = ndev->power_hint;
+
+	return 0;
+}
+
+static int aie4_power_hint_set(void *data, u64 val)
+{
+	struct amdxdna_dev_hdl *ndev = data;
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret, idx;
+
+	if (val >= AIE4_POWER_HINT_COUNT)
+		return -EINVAL;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	mutex_lock(&xdna->dev_lock);
+
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto unlock;
+
+	ret = aie4_msg_set_power_hint(ndev, (u32)val);
+	if (!ret)
+		ndev->power_hint = (u32)val;
+
+	amdxdna_pm_suspend_put(xdna);
+
+unlock:
+	mutex_unlock(&xdna->dev_lock);
+	drm_dev_exit(idx);
+
+	return ret;
+}
+
+/* Power slider hint; see enum aie4_msg_power_hint (0 - best perf .. balanced/efficiency). */
+DEFINE_DEBUGFS_ATTRIBUTE(aie4_power_hint_fops, aie4_power_hint_get,
+			 aie4_power_hint_set, "%llu\n");
+
 void aie4_debugfs_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -2567,6 +2613,15 @@ void aie4_debugfs_init(struct amdxdna_dev *xdna)
 		debugfs_create_file_unsafe("ctx_switch_hysteresis_us", 0600,
 					   xdna->ddev.accel->debugfs_root, ndev,
 					   &aie4_ctx_hysteresis_fops);
+
+	/*
+	 * The power slider hint is a host/system-level power control, so only
+	 * expose it on the PF/classic paths, never on a VF.
+	 */
+	if (!to_pci_dev(xdna->ddev.dev)->is_virtfn)
+		debugfs_create_file_unsafe("power_hint", 0600,
+					   xdna->ddev.accel->debugfs_root, ndev,
+					   &aie4_power_hint_fops);
 }
 
 const struct amdxdna_dev_ops aie4_pf_ops = {

@@ -142,6 +142,9 @@ struct amdxdna_dev_hdl {
 
 	u8				pw_mode;
 
+	/* Last power slider hint pushed to firmware; tunable via debugfs. */
+	u32				power_hint;
+
 	/* aie4 kernel-mode submission default; tunable via debugfs. */
 	bool				kernel_submit;
 
@@ -227,6 +230,7 @@ int aie4_msg_get_ctx_restore_pool_size(struct amdxdna_dev_hdl *ndev, u32 *buff_s
 int aie4_msg_get_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 int aie4_msg_set_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
+int aie4_msg_set_power_hint(struct amdxdna_dev_hdl *ndev, u32 power_hint);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie4_configure_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u8 mode);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
