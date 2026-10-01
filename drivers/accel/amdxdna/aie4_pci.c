@@ -471,7 +471,7 @@ static int aie4_save_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
 	}
 
 	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 
 	ret = aie4_msg_get_ctx_restore_pool(ndev, to_dma_addr(buf_hdl, 0),
 					    to_buf_size(buf_hdl));
@@ -1415,7 +1415,7 @@ void aie4_zero_work_buffer(struct amdxdna_dev_hdl *ndev)
 	vaddr = to_cpu_addr(ndev->work_buf_hdl, 0);
 	size = to_buf_size(ndev->work_buf_hdl);
 	memset(vaddr, 0, size);
-	drm_clflush_virt_range(vaddr, size);
+	amdxdna_cache_flush(vaddr, size);
 }
 
 int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)

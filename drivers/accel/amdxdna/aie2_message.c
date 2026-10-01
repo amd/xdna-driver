@@ -525,7 +525,7 @@ int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 	req.buf_size = to_buf_size(buf_hdl);
 	req.type = header->type;
 
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Query telemetry failed, status %d", ret);
@@ -1144,7 +1144,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 
 	EXEC_MSG_OPS(xdna)->init_chain_req(&req, amdxdna_gem_dev_addr(cmdbuf_abo),
 					   offset, ccnt);
-	drm_clflush_virt_range(cmd_buf, offset);
+	amdxdna_cache_flush(cmd_buf, offset);
 
 	msg.handle = job;
 	msg.notify_cb = notify_cb;
@@ -1191,7 +1191,7 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
 		return -EOPNOTSUPP;
 
 	EXEC_MSG_OPS(xdna)->init_chain_req(&req, amdxdna_gem_dev_addr(cmdbuf_abo), size, 1);
-	drm_clflush_virt_range(cmd_buf, size);
+	amdxdna_cache_flush(cmd_buf, size);
 
 	msg.handle = job;
 	msg.notify_cb = notify_cb;
@@ -1296,7 +1296,7 @@ int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 	req.context_id = context_id;
 	req.buf_size = to_buf_size(buf_hdl);
 
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), sizeof(*report));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), sizeof(*report));
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Get app health failed, ret %d status 0x%x", ret, resp.status);

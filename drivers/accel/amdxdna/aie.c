@@ -250,7 +250,7 @@ int amdxdna_get_aie_status(struct amdxdna_client *client, struct amdxdna_drm_get
 		return PTR_ERR(buf_hdl);
 
 	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 
 	ret = aie->msg_ops.query_status(buf_hdl, &cols_filled, &resp_size);
 	if (ret) {
@@ -266,7 +266,7 @@ int amdxdna_get_aie_status(struct amdxdna_client *client, struct amdxdna_drm_get
 	}
 
 	/* Invalidate stale cache lines before reading FW-written data. */
-	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 
 	resp_size = min(status.buffer_size, resp_size);
 	if (copy_to_user(u64_to_user_ptr(status.buffer),
@@ -448,9 +448,14 @@ struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32
 		if (IS_ERR(hdl->vaddr))
 			goto free_hdl;
 	} else {
-		hdl->vaddr = dma_alloc_noncoherent(amdxdna_fw_dma_dev(xdna), hdl->size,
-						   &hdl->dma_addr,
-						   DMA_BIDIRECTIONAL, GFP_KERNEL);
+		/*
+		 * Coherent (non-cacheable on the non-coherent platform) so the
+		 * firmware and CPU stay in sync with no cache maintenance. On x86,
+		 * where the part is reported coherent, this is cacheable and still
+		 * needs amdxdna_cache_flush() around firmware access.
+		 */
+		hdl->vaddr = dma_alloc_coherent(amdxdna_fw_dma_dev(xdna), hdl->size,
+						&hdl->dma_addr, GFP_KERNEL);
 		if (!hdl->vaddr)
 			goto free_hdl;
 	}
@@ -471,9 +476,8 @@ void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl)
 		amdxdna_iommu_free(hdl->xdna, hdl->size, hdl->vaddr,
 				   hdl->dma_addr);
 	} else {
-		dma_free_noncoherent(amdxdna_fw_dma_dev(hdl->xdna), hdl->size,
-				     hdl->vaddr, hdl->dma_addr,
-				     DMA_BIDIRECTIONAL);
+		dma_free_coherent(amdxdna_fw_dma_dev(hdl->xdna), hdl->size,
+				  hdl->vaddr, hdl->dma_addr);
 	}
 
 	kfree(hdl);

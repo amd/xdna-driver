@@ -89,13 +89,13 @@ char *amdxdna_get_hwctx_coredump(struct amdxdna_hwctx *hwctx)
 		}
 
 		memset(to_cpu_addr(data_hdls[i], 0), 0, to_buf_size(data_hdls[i]));
-		drm_clflush_virt_range(to_cpu_addr(data_hdls[i], 0), to_buf_size(data_hdls[i]));
+		amdxdna_cache_flush(to_cpu_addr(data_hdls[i], 0), to_buf_size(data_hdls[i]));
 
 		buf_list[i].buf_addr = to_dma_addr(data_hdls[i], 0);
 		buf_list[i].buf_size = coredump_data_chunk_size;
 	}
 
-	drm_clflush_virt_range(buf_list, to_buf_size(list_hdl));
+	amdxdna_cache_flush(buf_list, to_buf_size(list_hdl));
 
 	ret = aie->msg_ops.get_coredump(hwctx, list_hdl, num_bufs);
 	if (ret) {

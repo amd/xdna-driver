@@ -7,6 +7,7 @@
 
 #include "amdxdna_drv.h"
 #include "amdxdna_mailbox.h"
+#include <drm/drm_cache.h>
 
 #define AIE_INTERVAL	20000	/* us */
 #define AIE_TIMEOUT	1000000	/* us */
@@ -189,6 +190,19 @@ struct amdxdna_msg_buf_hdl {
 #define to_cpu_addr(hdl, offset)  ((void *)((u8 *)(hdl)->vaddr + (offset)))
 #define to_dma_addr(hdl, offset)  ((hdl)->dma_addr + (offset))
 #define to_buf_size(hdl)          ((hdl)->size)
+
+/*
+ * Cache-flush a driver DMA buffer. The x86 NPU parts are non-coherent DMA
+ * masters the kernel treats as coherent (so dma_sync_*() no-ops), so their
+ * cacheable buffers need an explicit flush. On the non-coherent platform these
+ * buffers are allocated coherent (non-cacheable) and need no cache maintenance
+ * -- and drm_clflush_virt_range() only WARNs there, so gate it to x86.
+ */
+static inline void amdxdna_cache_flush(void *addr, size_t len)
+{
+	if (IS_ENABLED(CONFIG_X86))
+		drm_clflush_virt_range(addr, len);
+}
 
 struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32 size);
 void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl);
