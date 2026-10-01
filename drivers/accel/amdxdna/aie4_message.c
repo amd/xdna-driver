@@ -47,6 +47,7 @@ static const struct aie4_role_allow aie4_opcode_allow[] = {
 	{ AIE4_MSG_OP_STOP_FW_TRACE,			AIE4_OP_CP },
 	{ AIE4_MSG_OP_SET_FW_TRACE_CATEGORIES,		AIE4_OP_CP },
 	{ AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION,	AIE4_OP_ALL },
+	{ AIE4_MSG_OP_GET_NPUFW_TIME,			AIE4_OP_ALL },
 	{ AIE4_MSG_OP_SET_RUNTIME_CONFIG,		AIE4_OP_ALL },
 
 	/* 0x2xxxx */
@@ -282,6 +283,20 @@ int aie4_query_dpm_level(struct amdxdna_dev_hdl *ndev,
 
 	XDNA_DBG(xdna, "Current DPM level - aieclk: %u npuhclk: %u",
 		 resp.aieclk_dpm_level, resp.npuhclk_dpm_level);
+
+	return 0;
+}
+
+int aie4_get_npufw_time(struct amdxdna_dev_hdl *ndev, u64 *timestamp_ns)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_npufw_time, AIE4_MSG_OP_GET_NPUFW_TIME);
+	int ret;
+
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		return ret;
+
+	*timestamp_ns = resp.timestamp_ns;
 
 	return 0;
 }
