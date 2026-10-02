@@ -10,27 +10,6 @@
 
 namespace shim_xdna {
 
-void
-pdev_umq::
-on_first_open() const
-{
-  // do nothing
-}
-
-void
-pdev_umq::
-on_last_close() const
-{
-  // do nothing
-}
-
-bool
-pdev_umq::
-is_cache_coherent() const
-{
-  return true;
-}
-
 void *
 pdev_umq::
 get_heap_vaddr() const

@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
+#include "buffer.h"
 #include "device.h"
 #include "pcidev.h"
 #include "pcidrv.h"
 #include "shim_debug.h"
+#include "core/common/config_reader.h"
 #include "core/common/trace.h"
+#if defined(__x86_64__) || defined(_M_X64)
+#include <x86intrin.h>
+#include <unistd.h>
+#endif
 
 namespace shim_xdna {
 
@@ -246,6 +252,72 @@ find_bo_by_handle(uint64_t handle) const
   if (it == m_bo_map.end())
     shim_err(EINVAL, "BO handle %d is not found in BO map", handle);
   return m_bo_map[handle];
+}
+
+// Userspace cache maintenance is x86-only: aarch64 routes every BO cache op
+// through the driver (SYNC_BO), because EL0 cache maintenance (DC CIVAC) may be
+// disabled and silently dropped.
+#if defined(__x86_64__) || defined(_M_X64)
+namespace {
+
+const long cacheline_size = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+
+void
+clflush_data(const void *base, size_t offset, size_t len)
+{
+  const char *cur = static_cast<const char *>(base) + offset;
+  uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
+  // x86 CLFLUSH is not ordered vs younger loads; fence so the flush is globally
+  // observed before the host reads the line back (cf. kernel clflush_cache_range).
+  _mm_mfence();
+  do {
+    _mm_clflush(cur);
+    cur += cacheline_size;
+  } while (cur <= (const char *)lastline);
+  _mm_mfence();
+}
+
+}
+#endif
+
+void
+pdev::
+driver_sync_bo(const buffer& bo, xrt_core::buffer_handle::direction dir,
+               size_t size, size_t offset) const
+{
+  // Validate at the SYNC_BO choke point so no caller (e.g. dbg_buffer's direct
+  // device2host path, which bypasses buffer::sync) can issue an out-of-range ioctl.
+  if (offset > bo.size() || size > bo.size() - offset)
+    shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, size);
+
+  sync_bo_arg arg = {
+    .bo = bo.id(),
+    .direction = dir,
+    .offset = offset,
+    .size = size,
+  };
+  drv_ioctl(drv_ioctl_cmd::sync_bo, &arg);
+}
+
+void
+pdev::
+cache_sync(const buffer& bo, xrt_core::buffer_handle::direction dir,
+           size_t size, size_t offset) const
+{
+  // How to maintain caches is an architecture property: x86 flushes in user
+  // space (CLFLUSH); aarch64 must go through the driver because EL0 cache
+  // maintenance (DC CIVAC) may be disabled and silently dropped.
+  // Debug.force_driver_sync also routes x86 through the driver, for testing.
+#if defined(__x86_64__) || defined(_M_X64)
+  static bool force_driver_sync =
+    xrt_core::config::detail::get_bool_value("Debug.force_driver_sync", false);
+  if (force_driver_sync)
+    driver_sync_bo(bo, dir, size, offset);
+  else
+    clflush_data(bo.vaddr(), offset, size);
+#else
+  driver_sync_bo(bo, dir, size, offset);
+#endif
 }
 
 }

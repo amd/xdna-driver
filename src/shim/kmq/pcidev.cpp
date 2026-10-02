@@ -41,11 +41,14 @@ on_last_close() const
   m_dev_heap_bo.reset();
 }
 
-bool
+void
 pdev_kmq::
-is_cache_coherent() const
+sync_bo(buffer& bo, xrt_core::buffer_handle::direction dir,
+        size_t size, size_t offset) const
 {
-  return false;
+  // x86 NPU: the DMA layer may mislabel the device as coherent, so it always
+  // needs cache maintenance; cache_sync() picks the arch-appropriate mechanism.
+  cache_sync(bo, dir, size, offset);
 }
 
 uint64_t

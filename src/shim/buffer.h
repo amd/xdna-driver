@@ -124,9 +124,6 @@ public:
 protected:
   const pdev& m_pdev;
 
-  void
-  sync_by_driver(direction dir, size_t size, size_t offset);
-
 private:
   std::string
   describe() const;
