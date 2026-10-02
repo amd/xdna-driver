@@ -720,7 +720,7 @@ put_obj:
 }
 
 static const struct dma_buf_ops amdxdna_dmabuf_ops = {
-#ifdef HAVE_cache_sgt_mapping
+#ifdef HAVE_6_15_cache_sgt_mapping
 	.cache_sgt_mapping = true,
 #endif
 	.attach = drm_gem_map_attach,

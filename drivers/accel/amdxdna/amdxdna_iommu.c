@@ -8,7 +8,7 @@
 #include <linux/bits.h>
 #include <linux/iommu.h>
 #include <linux/iova.h>
-#ifdef HAVE_iommu_paging_domain_alloc_flags
+#ifdef HAVE_6_13_iommu_paging_domain_alloc_flags
 /* IOMMU_HWPT_ALLOC_PASID is defined in uiommufd.h */
 #include <uapi/linux/iommufd.h>
 #endif
@@ -28,7 +28,7 @@ static struct iova *amdxdna_iommu_alloc_iova(struct amdxdna_dev *xdna,
 	unsigned long shift, end;
 	struct iova *iova;
 
-#ifdef HAVE_iommu_paging_domain_alloc_flags
+#ifdef HAVE_6_13_iommu_paging_domain_alloc_flags
 #ifdef HAVE_xen_phy_dma_ops
 	/*
 	 * Under Xen (HAVE_xen_phy_dma_ops), the Xen PV-IOMMU advertises a 48-bit
@@ -212,10 +212,10 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 	}
 
 	XDNA_WARN(xdna, "Enabled force_iova mode.");
-#ifdef HAVE_iommu_paging_domain_alloc_flags
+#ifdef HAVE_6_13_iommu_paging_domain_alloc_flags
 	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev,
 						       IOMMU_HWPT_ALLOC_PASID);
-#if defined(HAVE_xen_phy_dma_ops) && defined(HAVE_iommu_paging_domain_alloc)
+#if defined(HAVE_xen_phy_dma_ops) && defined(HAVE_6_13_iommu_paging_domain_alloc)
 	/*
 	 * force_iova is the non-PASID fallback path, so a PASID-capable domain
 	 * is not required. IOMMUs that only implement domain_alloc_paging (e.g.
@@ -227,7 +227,7 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 		xdna->domain = iommu_paging_domain_alloc(xdna->ddev.dev);
 	}
 #endif
-#elif defined(HAVE_iommu_paging_domain_alloc)
+#elif defined(HAVE_6_13_iommu_paging_domain_alloc)
 	xdna->domain = iommu_paging_domain_alloc(xdna->ddev.dev);
 #else
 	xdna->domain = iommu_domain_alloc(xdna->ddev.dev->bus);
