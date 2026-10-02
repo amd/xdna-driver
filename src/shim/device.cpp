@@ -2769,6 +2769,7 @@ std::unique_ptr<xrt_core::buffer_handle>
 device::
 import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
 {
+  get_pdev().warn_imported_bo();
   return std::make_unique<buffer>(get_pdev(), import_fd(pid, ehdl));
 }
 

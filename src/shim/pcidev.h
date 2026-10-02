@@ -88,6 +88,12 @@ public:
   driver_sync_bo(const buffer& bo, xrt_core::buffer_handle::direction dir,
                  size_t size, size_t offset) const;
 
+  // Hook run when a BO is imported on this device. The non-coherent part warns
+  // that xrt::bo::sync() is a no-op for an imported cacheable dmabuf (the kernel
+  // cannot maintain its caches); coherent parts do nothing.
+  virtual void
+  warn_imported_bo() const { }
+
   virtual uint64_t
   get_heap_paddr() const = 0;
 

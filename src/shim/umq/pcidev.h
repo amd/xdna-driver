@@ -56,6 +56,12 @@ class pdev_umq_nc : public pdev_umq
 {
 public:
   using pdev_umq::pdev_umq;
+
+  // Non-coherent: the kernel cannot maintain caches for an imported cacheable
+  // dmabuf, so xrt::bo::sync() on an imported BO is a no-op. Warn once per
+  // imported BO unless XRT_NO_WARN_IMPORT_BO_CREATION is set.
+  void
+  warn_imported_bo() const override;
 };
 
 class pdev_pf : public pdev_umq
