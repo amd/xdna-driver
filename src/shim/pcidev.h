@@ -6,9 +6,12 @@
 
 #include "platform.h"
 #include "core/pcie/linux/pcidev.h"
+#include "core/common/shim/buffer_handle.h"
 #include <shared_mutex>
 
 namespace shim_xdna {
+
+class buffer;
 
 class pdev : public xrt_core::pci::dev
 {
@@ -70,8 +73,20 @@ public:
   void
   drv_ioctl(drv_ioctl_cmd cmd, void* arg) const;
 
-  virtual bool
-  is_cache_coherent() const = 0;
+  // Cache-maintain @bo's [offset, offset+size) for @dir. The concrete device
+  // class knows whether and how: coherent devices no-op, x86 non-coherent
+  // devices flush from user space, the non-coherent aarch64 platform routes it
+  // through the driver (SYNC_BO).
+  virtual void
+  sync_bo(buffer& bo, xrt_core::buffer_handle::direction dir,
+          size_t size, size_t offset) const = 0;
+
+  // Maintain @bo's caches through the driver (SYNC_BO ioctl). Const: it only
+  // reads @bo (id) and issues a device ioctl, mutating neither. Used by
+  // cache_sync() on aarch64 and by dbg_buffer's always-through-the-driver path.
+  void
+  driver_sync_bo(const buffer& bo, xrt_core::buffer_handle::direction dir,
+                 size_t size, size_t offset) const;
 
   virtual uint64_t
   get_heap_paddr() const = 0;
@@ -94,6 +109,14 @@ public:
   remove_bo_handle(uint64_t handle) const;
   xrt_core::buffer_handle *
   find_bo_by_handle(uint64_t handle) const;
+
+protected:
+  // Arch-gated cache maintenance for a non-coherent device: x86 flushes from
+  // user space (CLFLUSH), the aarch64 platform routes through driver_sync_bo().
+  // The concrete class's sync_bo() calls this when the device is not coherent.
+  void
+  cache_sync(const buffer& bo, xrt_core::buffer_handle::direction dir,
+             size_t size, size_t offset) const;
 
 private:
   virtual void

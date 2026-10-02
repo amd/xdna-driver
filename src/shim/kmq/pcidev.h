@@ -16,8 +16,9 @@ public:
   using pdev::pdev;
 
 public:
-  bool
-  is_cache_coherent() const override;
+  void
+  sync_bo(buffer& bo, xrt_core::buffer_handle::direction dir,
+          size_t size, size_t offset) const override;
 
   uint64_t
   get_heap_paddr() const override;
