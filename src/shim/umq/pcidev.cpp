@@ -3,12 +3,26 @@
 
 #include "pcidev.h"
 #include "../shim_debug.h"
+#include "core/common/message.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <dirent.h>
 #include <memory>
 
 namespace shim_xdna {
+
+void
+pdev_umq_nc::
+warn_imported_bo() const
+{
+  if (::getenv("XRT_NO_WARN_IMPORT_BO_CREATION"))
+    return;
+  xrt_core::message::send(xrt_core::message::severity_level::warning, "XRT",
+    "Importing a dmabuf BO on a non-coherent device: xrt::bo::sync() on it is a "
+    "no-op because the kernel cannot maintain its caches. Set "
+    "XRT_NO_WARN_IMPORT_BO_CREATION to silence this warning.");
+}
 
 void *
 pdev_umq::
