@@ -6,7 +6,6 @@
 #include "pcidev.h"
 #include "pcidrv.h"
 #include "shim_debug.h"
-#include "core/common/config_reader.h"
 #include "core/common/trace.h"
 #if defined(__x86_64__) || defined(_M_X64)
 #include <x86intrin.h>
@@ -307,14 +306,8 @@ cache_sync(const buffer& bo, xrt_core::buffer_handle::direction dir,
   // How to maintain caches is an architecture property: x86 flushes in user
   // space (CLFLUSH); aarch64 must go through the driver because EL0 cache
   // maintenance (DC CIVAC) may be disabled and silently dropped.
-  // Debug.force_driver_sync also routes x86 through the driver, for testing.
 #if defined(__x86_64__) || defined(_M_X64)
-  static bool force_driver_sync =
-    xrt_core::config::detail::get_bool_value("Debug.force_driver_sync", false);
-  if (force_driver_sync)
-    driver_sync_bo(bo, dir, size, offset);
-  else
-    clflush_data(bo.vaddr(), offset, size);
+  clflush_data(bo.vaddr(), offset, size);
 #else
   driver_sync_bo(bo, dir, size, offset);
 #endif
