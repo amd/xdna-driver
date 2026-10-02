@@ -179,7 +179,7 @@ EOF
 
 # Test system_percpu_wq in 6.17+:
 # struct workqueue_struct *system_percpu_wq
-try_compile HAVE_system_percpu_wq << 'EOF'
+try_compile HAVE_6_17_system_percpu_wq << 'EOF'
 #include <linux/workqueue.h>
 int main(void)
 {
@@ -190,7 +190,7 @@ int main(void)
 }
 EOF
 cat >> "$OUT" <<'EOF'
-#ifndef HAVE_system_percpu_wq
+#ifndef HAVE_6_17_system_percpu_wq
 #define system_percpu_wq	system_wq
 #endif
 EOF
@@ -238,7 +238,7 @@ EOF
 #         bool cache_sgt_mapping;
 #         ...
 # }
-try_compile HAVE_cache_sgt_mapping << 'EOF'
+try_compile HAVE_6_15_cache_sgt_mapping << 'EOF'
 #include <linux/dma-buf.h>
 int main(void)
 {
@@ -252,7 +252,7 @@ EOF
 
 # Test iommu_paging_domain_alloc_flags() signature in 6.13+:
 # struct iommu_domain *iommu_paging_domain_alloc_flags(struct device *dev, unsigned long flags)
-try_compile HAVE_iommu_paging_domain_alloc_flags << 'EOF'
+try_compile HAVE_6_13_iommu_paging_domain_alloc_flags << 'EOF'
 #include <linux/iommu.h>
 int main(void)
 {
@@ -265,7 +265,7 @@ EOF
 
 # Test iommu_paging_domain_alloc() signature in 6.13+:
 # struct iommu_domain *iommu_paging_domain_alloc(struct device *dev)
-try_compile HAVE_iommu_paging_domain_alloc << 'EOF'
+try_compile HAVE_6_13_iommu_paging_domain_alloc << 'EOF'
 #include <linux/iommu.h>
 int main(void)
 {
