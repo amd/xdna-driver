@@ -112,6 +112,7 @@ void TEST_certlog_num_ucs_overflow(device::id_type, std::shared_ptr<device>&, ar
 void TEST_certlog_invalid_uc_index(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_certlog_payload_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_df_bw(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_ctx_hysteresis_set_get(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_aie4_flr(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_aie4_pf_flr(device::id_type, std::shared_ptr<device>&,
                       std::shared_ptr<device>&);
@@ -1803,8 +1804,11 @@ std::vector<test_case> test_list {
     TEST_NEGATIVE, {npu1, npu4, npu3, npu3vf}, {amdxdna}, TEST_write_to_readonly_uptr_bo, {}
   },
   test_case{ "df_bw 1GB shim DMA loopback", {},
-    TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_df_bw, {}
-  },
+     TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_df_bw, {}
+   },
+  test_case{ "ctx_switch_hysteresis_us: set/get round-trip", {},
+     TEST_POSITIVE, {npu3}, {}, TEST_ctx_hysteresis_set_get, {}
+   },
   // Disable until fw FLR bug is fixed
   // test_case{ "AIE4 Classic/VF FLR then recovers hwctx", {},
     // TEST_POSITIVE, {npu3, npu3vf}, {amdxdna}, TEST_aie4_flr, {}
