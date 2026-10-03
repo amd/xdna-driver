@@ -2501,8 +2501,30 @@ static int aie4_ctx_hysteresis_get(void *data, u64 *val)
 {
 	struct amdxdna_dev_hdl *ndev = data;
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	u32 timeout_us;
+	int ret, idx;
 
-	guard(mutex)(&xdna->dev_lock);
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	mutex_lock(&xdna->dev_lock);
+
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto unlock;
+
+	/* Read back from firmware and keep the cache in sync on success. */
+	ret = aie4_get_ctx_hysteresis(ndev, &timeout_us);
+	if (!ret)
+		ndev->ctx_switch_hysteresis_us = timeout_us;
+
+	amdxdna_pm_suspend_put(xdna);
+
+unlock:
+	mutex_unlock(&xdna->dev_lock);
+	drm_dev_exit(idx);
+
+	/* Fall back to the last value the driver programmed on any failure. */
 	*val = ndev->ctx_switch_hysteresis_us;
 
 	return 0;
