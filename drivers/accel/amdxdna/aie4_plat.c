@@ -284,7 +284,6 @@ static void aie4_plat_fini(struct amdxdna_dev *xdna)
 	/* Mirror the PCI aie4_xdna_fini(); dpt_fini needs the mailbox still up. */
 	amdxdna_pm_fini(xdna);
 	amdxdna_dpt_fini(&ndev->aie);
-	aie4_partition_fini(ndev);
 
 	/*
 	 * Suspend the firmware while the mailbox is still alive, mirroring the PCI

@@ -505,34 +505,36 @@ static void aie4_restore_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
 	aie4_free_ctx_restore_pool(ndev);
 }
 
-int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
+int aie4_partition_create(struct amdxdna_dev_hdl *ndev, u32 col_start,
+			  u32 col_count, u32 *part_id)
 {
 	DECLARE_AIE_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	int ret;
 
-	req.partition_col_start = 0;
-	req.partition_col_count = AIE4_TOTAL_COLUMN;
+	req.partition_col_start = col_start;
+	req.partition_col_count = col_count;
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
-		XDNA_ERR(xdna, "partition init failed: %d", ret);
+		XDNA_ERR(xdna, "create partition failed: col_start %u, col_count %u, ret %d",
+			 col_start, col_count, ret);
 		return ret;
 	}
 
-	ndev->partition_id = resp.partition_id;
+	*part_id = resp.partition_id;
 	return 0;
 }
 
-void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
+void aie4_partition_destroy(struct amdxdna_dev_hdl *ndev, u32 part_id)
 {
 	DECLARE_AIE_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	int ret;
 
-	req.partition_id = ndev->partition_id;
+	req.partition_id = part_id;
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
-		XDNA_ERR(xdna, "partition fini failed: %d", ret);
+		XDNA_ERR(xdna, "destroy partition %u failed: %d", part_id, ret);
 }
 
 /*
@@ -689,9 +691,13 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 		/* if query dpm from fw failed, using default value */
 		(void)ndev->priv->hw_ops->set_dpm(&ndev->aie, 0);
 
-	ret = aie4_partition_init(ndev);
-	if (ret)
-		return ret;
+	/* Parts that partition per hwctx make their own; see aie4_hwctx_create(). */
+	if (!AIE4_PART_PER_HWCTX(ndev->aie.xdna)) {
+		ret = aie4_partition_create(ndev, 0, AIE4_TOTAL_COLUMN,
+					    &ndev->partition_id);
+		if (ret)
+			return ret;
+	}
 
 	ret = amdxdna_async_events_alloc(&ndev->aie, AMDXDNA_MAX_ASYNC_EVENT_BUFS);
 	if (ret) {
@@ -702,7 +708,8 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 	return 0;
 
 partition_fini:
-	aie4_partition_fini(ndev);
+	if (!AIE4_PART_PER_HWCTX(ndev->aie.xdna))
+		aie4_partition_destroy(ndev, ndev->partition_id);
 	return ret;
 }
 
@@ -793,7 +800,8 @@ static void aie4_vf_hw_stop(struct amdxdna_dev_hdl *ndev)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
-	aie4_partition_fini(ndev);
+	if (!AIE4_PART_PER_HWCTX(xdna))
+		aie4_partition_destroy(ndev, ndev->partition_id);
 	aie4_mailbox_fini(ndev);
 	/*
 	 * Free the async pool after the mailbox is torn down so channel teardown
@@ -854,7 +862,8 @@ static void aie4_classic_hw_stop(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	aie4_partition_fini(ndev);
+	if (!AIE4_PART_PER_HWCTX(xdna))
+		aie4_partition_destroy(ndev, ndev->partition_id);
 	aie4_teardown_fw(ndev);
 	/*
 	 * Free the async pool after the mailbox is torn down so channel teardown

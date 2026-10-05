@@ -27,34 +27,44 @@
 #include "amdxdna_sensors.h"
 #include "amdxdna_tile_read_write.h"
 
-int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
+int aie4_partition_create(struct amdxdna_dev_hdl *ndev, u32 col_start,
+			  u32 col_count, u32 *part_id)
 {
 	DECLARE_AIE_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	int ret;
 
-	req.partition_col_start = 0;
-	req.partition_col_count = ndev->total_col;
+	req.partition_col_start = col_start;
+	req.partition_col_count = col_count;
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
-		XDNA_ERR(xdna, "partition init failed: %d", ret);
+		XDNA_ERR(xdna, "create partition failed: col_start %u, col_count %u, ret %d",
+			 col_start, col_count, ret);
 		return ret;
 	}
 
-	ndev->partition_id = resp.partition_id;
+	*part_id = resp.partition_id;
+	XDNA_DBG(xdna, "partition %u, %u columns", *part_id, col_count);
+
 	return 0;
 }
 
-void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
+void aie4_partition_destroy(struct amdxdna_dev_hdl *ndev, u32 part_id)
 {
 	DECLARE_AIE_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	int ret;
 
-	req.partition_id = ndev->partition_id;
+	req.partition_id = part_id;
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	/*
+	 * Firmware also refuses this while another context still shares the
+	 * partition, which is the common case once partitions are handed out
+	 * per context. It reports that with the same status as a real failure,
+	 * and there is nothing to unwind either way, so this only traces.
+	 */
 	if (ret)
-		XDNA_ERR(xdna, "partition fini failed: %d", ret);
+		XDNA_DBG(xdna, "destroy partition %u failed: %d", part_id, ret);
 }
 
 /*
@@ -180,21 +190,18 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 		/* if query dpm from fw failed, using default value */
 		(void)aie4_set_dpm(ndev, 0);
 
-	ret = aie4_partition_init(ndev);
-	if (ret)
-		return ret;
-
+	/*
+	 * No device-wide partition here: on this transport each hardware
+	 * context creates the partition it runs in (aie4_hwctx_create), so
+	 * there is nothing to set up until one is asked for.
+	 */
 	ret = amdxdna_async_events_alloc(&ndev->aie, AMDXDNA_MAX_ASYNC_EVENT_BUFS);
 	if (ret) {
 		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
-		goto partition_fini;
+		return ret;
 	}
 
 	return 0;
-
-partition_fini:
-	aie4_partition_fini(ndev);
-	return ret;
 }
 
 static int aie4_get_power_mode(struct amdxdna_client *client,
