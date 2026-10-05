@@ -467,7 +467,6 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 		vp->misc_intrpt_flag = false;
 		vp->misc_status_latched = 0;
 	}
-	ve2_hwctx_tdr_signal(hwctx);
 	ret = 0;
 
 release_hs_data:
@@ -1423,8 +1422,6 @@ int ve2_mgmt_recover_hwctx(struct amdxdna_hwctx *hwctx)
 	if (cert_stopped) {
 		WRITE_ONCE(vp->tdr_timeout_reported, false);
 		WRITE_ONCE(vp->tdr_reset_pending, false);
-		if (!ret)
-			ve2_hwctx_tdr_signal(hwctx);
 		ve2_hwctx_tdr_release(hwctx);
 		wake_up_interruptible_all(&vp->waitq);
 	}

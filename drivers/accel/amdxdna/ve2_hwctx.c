@@ -109,27 +109,21 @@ static void ve2_job_put(struct amdxdna_sched_job *job)
 	kref_put(&job->refcnt, ve2_job_release);
 }
 
-void ve2_hwctx_tdr_signal(struct amdxdna_hwctx *hwctx)
+static void ve2_tdr_on_fw_timeout(struct amdxdna_hwctx *hwctx, enum ert_cmd_state state)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
 
-	if (vp)
-		WRITE_ONCE(vp->tdr_last_progress, jiffies);
-}
+	if (state != ERT_CMD_STATE_TIMEOUT || !vp)
+		return;
+	if (!ve2_tdr_enabled(hwctx->client->xdna))
+		return;
 
-bool ve2_hwctx_tdr_pending(struct amdxdna_hwctx *hwctx)
-{
-	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
-	bool pending;
-
-	if (!vp)
-		return false;
-
-	mutex_lock(&vp->privctx_lock);
-	pending = vp->submitted != vp->completed;
-	mutex_unlock(&vp->privctx_lock);
-
-	return pending;
+	/*
+	 * Firmware already identified this command. Recovery must abort the
+	 * commands behind it instead of selecting another one as the fault.
+	 */
+	WRITE_ONCE(vp->tdr_timeout_reported, true);
+	WRITE_ONCE(vp->tdr_reset_pending, true);
 }
 
 static int ve2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
@@ -1075,7 +1069,6 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	init_waitqueue_head(&vp->waitq);
 	INIT_WORK(&vp->completion_work, ve2_completion_work);
 	atomic_set(&vp->nwaiters, 0);
-	vp->tdr_last_progress = jiffies;
 
 	/* VE2: num_tiles is the number of AIE columns (not a 2D tile count). */
 	if (!hwctx->num_tiles) {
@@ -1403,7 +1396,6 @@ int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u
 	}
 
 	atomic64_inc(&hwctx->job_submit_cnt);
-	ve2_hwctx_tdr_signal(hwctx);
 	return 0;
 }
 
@@ -1478,8 +1470,6 @@ static void ve2_process_hqc_completion(struct amdxdna_hwctx *hwctx, struct amdxd
 		return;
 	}
 
-	ve2_hwctx_tdr_signal(hwctx);
-
 	/*
 	 * For a failed command chain, the last sub-command's slot reflects the
 	 * chain result but not where it failed. When a runlist fails at command
@@ -1499,6 +1489,7 @@ static void ve2_process_hqc_completion(struct amdxdna_hwctx *hwctx, struct amdxd
 		if (!cc) {
 			XDNA_WARN(xdna, "Failed to get chain payload, seq %llu", seq);
 			amdxdna_cmd_set_state(job->cmd_bo, state);
+			ve2_tdr_on_fw_timeout(hwctx, state);
 			return;
 		}
 
@@ -1525,10 +1516,12 @@ static void ve2_process_hqc_completion(struct amdxdna_hwctx *hwctx, struct amdxd
 			 fail_cmd_idx, (start_slot + fail_cmd_idx) % capacity, slot_state,
 			 slot_state == ERT_CMD_STATE_ERROR ? (comp >> 4) : 0);
 		amdxdna_cmd_set_state(job->cmd_bo, slot_state);
+		ve2_tdr_on_fw_timeout(hwctx, slot_state);
 		return;
 	}
 
 	amdxdna_cmd_set_state(job->cmd_bo, state);
+	ve2_tdr_on_fw_timeout(hwctx, state);
 }
 
 /*
@@ -1579,6 +1572,13 @@ static void ve2_completion_work(struct work_struct *work)
 		ve2_job_put(job);
 	}
 	mutex_unlock(&queue->hq_lock);
+
+	/*
+	 * Queue recovery only after dropping hq_lock. Recovery cancels this
+	 * worker and then takes the same lock.
+	 */
+	if (READ_ONCE(vp->tdr_reset_pending))
+		ve2_tdr_queue(hwctx->client->xdna);
 }
 
 /*

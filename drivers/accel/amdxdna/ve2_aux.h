@@ -68,7 +68,7 @@ struct ve2_mem_topology {
 };
 
 struct ve2_tdr {
-	struct delayed_work	work;
+	struct work_struct	work;
 	spinlock_t		lock;
 	bool			started;
 };

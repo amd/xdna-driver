@@ -99,7 +99,6 @@ struct amdxdna_ctx_priv {
 	struct timer_list		event_timer;
 	struct work_struct		completion_work;
 	atomic_t			nwaiters;	/* threads inside ve2_cmd_wait() */
-	unsigned long			tdr_last_progress;
 	bool				tdr_reset_pending;
 	bool				tdr_timeout_reported;
 
@@ -138,8 +137,6 @@ int ve2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf
 int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms);
 void ve2_hwctx_queue_completion(struct amdxdna_hwctx *hwctx);
-void ve2_hwctx_tdr_signal(struct amdxdna_hwctx *hwctx);
-bool ve2_hwctx_tdr_pending(struct amdxdna_hwctx *hwctx);
 void ve2_hwctx_tdr_mark(struct amdxdna_hwctx *hwctx, bool timeout_first);
 void ve2_hwctx_tdr_release(struct amdxdna_hwctx *hwctx);
 void ve2_hwctx_tdr_reset_queue(struct amdxdna_hwctx *hwctx);
