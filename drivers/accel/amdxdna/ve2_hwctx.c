@@ -109,6 +109,23 @@ static void ve2_job_put(struct amdxdna_sched_job *job)
 	kref_put(&job->refcnt, ve2_job_release);
 }
 
+static void ve2_tdr_on_fw_timeout(struct amdxdna_hwctx *hwctx, enum ert_cmd_state state)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+
+	if (state != ERT_CMD_STATE_TIMEOUT || !vp)
+		return;
+	if (!ve2_tdr_enabled(hwctx->client->xdna))
+		return;
+
+	/*
+	 * Firmware already identified this command. Recovery must abort the
+	 * commands behind it instead of selecting another one as the fault.
+	 */
+	WRITE_ONCE(vp->tdr_timeout_reported, true);
+	WRITE_ONCE(vp->tdr_reset_pending, true);
+}
+
 static int ve2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 			     u64 seq, u32 cmd_cnt)
 {
@@ -1047,6 +1064,7 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	init_waitqueue_head(&priv->job_free_wq);
 	mutex_init(&vp->privctx_lock);
+	mutex_init(&vp->submit_lock);
 	mutex_init(&vp->coredump_cache.lock);
 	init_waitqueue_head(&vp->waitq);
 	INIT_WORK(&vp->completion_work, ve2_completion_work);
@@ -1148,6 +1166,7 @@ destroy_partition:
 	ve2_mgmt_destroy_partition(hwctx);
 free_priv:
 	mutex_destroy(&vp->coredump_cache.lock);
+	mutex_destroy(&vp->submit_lock);
 	mutex_destroy(&vp->privctx_lock);
 	kfree(vp);
 	kfree(priv);
@@ -1210,6 +1229,7 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		vp->hwctx_config = NULL;
 		vfree(vp->coredump_cache.buf);
 		mutex_destroy(&vp->coredump_cache.lock);
+		mutex_destroy(&vp->submit_lock);
 		mutex_destroy(&vp->privctx_lock);
 		kfree(vp);
 		priv->hw_priv = NULL;
@@ -1306,6 +1326,11 @@ int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u
 		return -EINVAL;
 	}
 
+	guard(mutex)(&vp->submit_lock);
+
+	if (READ_ONCE(vp->tdr_reset_pending))
+		return -EAGAIN;
+
 	/*
 	 * The context latched a firmware MISC/exception condition. It stays
 	 * unusable until the partition is re-initialized for it (see
@@ -1370,16 +1395,24 @@ int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u
 		return ret;
 	}
 
+	atomic64_inc(&hwctx->job_submit_cnt);
 	return 0;
 }
 
 static bool check_read_index(struct amdxdna_hwctx *hwctx, u64 seq)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	bool pending;
 	u64 read_index;
 
 	if (!vp)
 		return false;
+
+	mutex_lock(&vp->privctx_lock);
+	pending = !!ve2_hwctx_get_job(hwctx, seq);
+	mutex_unlock(&vp->privctx_lock);
+	if (!pending)
+		return true;
 
 	if (vp->misc_intrpt_flag)
 		return true;
@@ -1456,6 +1489,7 @@ static void ve2_process_hqc_completion(struct amdxdna_hwctx *hwctx, struct amdxd
 		if (!cc) {
 			XDNA_WARN(xdna, "Failed to get chain payload, seq %llu", seq);
 			amdxdna_cmd_set_state(job->cmd_bo, state);
+			ve2_tdr_on_fw_timeout(hwctx, state);
 			return;
 		}
 
@@ -1482,10 +1516,12 @@ static void ve2_process_hqc_completion(struct amdxdna_hwctx *hwctx, struct amdxd
 			 fail_cmd_idx, (start_slot + fail_cmd_idx) % capacity, slot_state,
 			 slot_state == ERT_CMD_STATE_ERROR ? (comp >> 4) : 0);
 		amdxdna_cmd_set_state(job->cmd_bo, slot_state);
+		ve2_tdr_on_fw_timeout(hwctx, slot_state);
 		return;
 	}
 
 	amdxdna_cmd_set_state(job->cmd_bo, state);
+	ve2_tdr_on_fw_timeout(hwctx, state);
 }
 
 /*
@@ -1536,6 +1572,13 @@ static void ve2_completion_work(struct work_struct *work)
 		ve2_job_put(job);
 	}
 	mutex_unlock(&queue->hq_lock);
+
+	/*
+	 * Queue recovery only after dropping hq_lock. Recovery cancels this
+	 * worker and then takes the same lock.
+	 */
+	if (READ_ONCE(vp->tdr_reset_pending))
+		ve2_tdr_queue(hwctx->client->xdna);
 }
 
 /*
@@ -1740,6 +1783,142 @@ static void ve2_handle_timeout(struct amdxdna_hwctx *hwctx, struct amdxdna_sched
 	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 }
 
+static struct amdxdna_sched_job *ve2_oldest_pending_job(struct amdxdna_ctx_priv *vp)
+{
+	struct amdxdna_sched_job *oldest = NULL;
+	int i;
+
+	mutex_lock(&vp->privctx_lock);
+	for (i = 0; i < HWCTX_MAX_CMDS; i++) {
+		struct amdxdna_sched_job *job = vp->pending[i];
+
+		if (job && (!oldest || job->seq < oldest->seq))
+			oldest = job;
+	}
+	if (oldest)
+		kref_get(&oldest->refcnt);
+	mutex_unlock(&vp->privctx_lock);
+
+	return oldest;
+}
+
+void ve2_hwctx_tdr_reset_queue(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_hsa_queue *queue = &vp->hsa_queue;
+	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
+	size_t alloc_size = sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY;
+	int slot;
+
+	mutex_lock(&queue->hq_lock);
+	header->read_index = 0;
+	header->write_index = 0;
+	queue->reserved_write_index = 0;
+	bitmap_zero(queue->slot_ready, HOST_QUEUE_ENTRY);
+	memset(queue->hq_complete.hqc_mem, 0, sizeof(u64) * HOST_QUEUE_ENTRY);
+	for (slot = 0; slot < HOST_QUEUE_ENTRY; slot++)
+		hsa_queue_pkt_set_invalid(hsa_queue_get_pkt(queue->hsa_queue_p, slot));
+
+	dma_sync_single_for_device(queue->alloc_dev, queue->hsa_queue_dma_addr,
+				   alloc_size, DMA_TO_DEVICE);
+	mutex_unlock(&queue->hq_lock);
+}
+
+static struct amdxdna_sched_job *ve2_next_pending_job(struct amdxdna_ctx_priv *vp, u64 after,
+						      bool have_after)
+{
+	struct amdxdna_sched_job *next = NULL;
+	int i;
+
+	mutex_lock(&vp->privctx_lock);
+	for (i = 0; i < HWCTX_MAX_CMDS; i++) {
+		struct amdxdna_sched_job *job = vp->pending[i];
+
+		if (!job || (have_after && job->seq <= after))
+			continue;
+		if (!next || job->seq < next->seq)
+			next = job;
+	}
+	if (next)
+		kref_get(&next->refcnt);
+	mutex_unlock(&vp->privctx_lock);
+
+	return next;
+}
+
+void ve2_hwctx_tdr_mark(struct amdxdna_hwctx *hwctx, bool timeout_first)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_hsa_queue *queue;
+	bool have_seq = false;
+	u64 read_index;
+	u64 seq = 0;
+
+	if (!vp || !vp->hsa_queue.hsa_queue_p)
+		return;
+
+	/*
+	 * Record completions while CERT is still in the faulted state, but
+	 * leave the jobs pending. Waiters must not reuse these command buffers
+	 * until the caller has halted the microcontroller.
+	 */
+	WRITE_ONCE(vp->tdr_reset_pending, true);
+	cancel_work_sync(&vp->completion_work);
+
+	queue = &vp->hsa_queue;
+	mutex_lock(&queue->hq_lock);
+	hsa_queue_sync_read_index_for_read(queue);
+	read_index = queue->hsa_queue_p->hq_header.read_index;
+
+	while (true) {
+		struct amdxdna_sched_job *job = ve2_next_pending_job(vp, seq, have_seq);
+
+		if (!job)
+			break;
+
+		seq = job->seq;
+		have_seq = true;
+		if (job->seq < read_index) {
+			ve2_process_hqc_completion(hwctx, job, job->seq);
+		} else if (timeout_first) {
+			job->job_timeout = true;
+			ve2_handle_timeout(hwctx, job, job->seq);
+			timeout_first = false;
+		} else {
+			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_ABORT);
+		}
+
+		trace_amdxdna_debug_point(hwctx->name, job->seq, "job complete");
+		trace_xdna_cmd_complete(hwctx->name, hwctx->id, job->seq,
+					amdxdna_cmd_get_state(job->cmd_bo));
+		ve2_job_put(job);
+	}
+
+	mutex_unlock(&queue->hq_lock);
+}
+
+void ve2_hwctx_tdr_release(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_hsa_queue *queue;
+
+	if (!vp || !vp->hsa_queue.hsa_queue_p)
+		return;
+
+	queue = &vp->hsa_queue;
+	mutex_lock(&queue->hq_lock);
+	while (true) {
+		struct amdxdna_sched_job *job = ve2_oldest_pending_job(vp);
+
+		if (!job)
+			break;
+
+		ve2_hwctx_job_release(hwctx, job);
+		ve2_job_put(job);
+	}
+	mutex_unlock(&queue->hq_lock);
+}
+
 int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
@@ -1807,10 +1986,15 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 	 * interrupt woke us but CERT has not written a terminal completion
 	 * state (a stall). Otherwise process the (possibly errored) completion.
 	 */
-	if (timed_out || (vp->misc_intrpt_flag && !ve2_hqc_has_terminal_state(vp, seq)))
+	if (timed_out || (vp->misc_intrpt_flag && !ve2_hqc_has_terminal_state(vp, seq))) {
 		ve2_handle_timeout(hwctx, job, seq);
-	else
+		if (ve2_tdr_enabled(hwctx->client->xdna)) {
+			WRITE_ONCE(vp->tdr_timeout_reported, true);
+			WRITE_ONCE(vp->tdr_reset_pending, true);
+		}
+	} else {
 		ve2_process_hqc_completion(hwctx, job, seq);
+	}
 
 	/*
 	 * Mirrors aie4_ctx.c's job_worker() trace_amdxdna_debug_point(...,
@@ -1826,6 +2010,9 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 
 	ve2_queue_completion_if_unreaped(hwctx);
 	mutex_unlock(&vp->hsa_queue.hq_lock);
+
+	if (READ_ONCE(vp->tdr_reset_pending))
+		ve2_tdr_queue(hwctx->client->xdna);
 
 	trace_xdna_cmd_wait_done(hwctx->name, hwctx->id, seq, 0);
 	return 0;

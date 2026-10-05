@@ -74,6 +74,7 @@ struct ve2_coredump_cache {
 struct amdxdna_ctx_priv {
 	struct amdxdna_hwctx		*hwctx;
 	struct mutex			privctx_lock;	/* protect VE2 hwctx state */
+	struct mutex			submit_lock;	/* serialize submit with TDR reset */
 	u32				state;
 	u32				submitted;
 	u32				completed;
@@ -98,6 +99,8 @@ struct amdxdna_ctx_priv {
 	struct timer_list		event_timer;
 	struct work_struct		completion_work;
 	atomic_t			nwaiters;	/* threads inside ve2_cmd_wait() */
+	bool				tdr_reset_pending;
+	bool				tdr_timeout_reported;
 
 	/* AIE partition management context backend. */
 	struct amdxdna_mgmtctx		*mgmtctx;
@@ -134,6 +137,9 @@ int ve2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf
 int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms);
 void ve2_hwctx_queue_completion(struct amdxdna_hwctx *hwctx);
+void ve2_hwctx_tdr_mark(struct amdxdna_hwctx *hwctx, bool timeout_first);
+void ve2_hwctx_tdr_release(struct amdxdna_hwctx *hwctx);
+void ve2_hwctx_tdr_reset_queue(struct amdxdna_hwctx *hwctx);
 
 /* verbosity >= this level enables extra VE2 debug dumps (packets, FW state). */
 #define VERBOSITY_LEVEL_DBG	2
