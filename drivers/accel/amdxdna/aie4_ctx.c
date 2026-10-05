@@ -174,6 +174,73 @@ static u32 aie4_parse_priority_to_dev(u32 priority)
 	}
 }
 
+/*
+ * Resolve the partition this context runs in. Parts that partition per hwctx
+ * create one sized to the context's own tile request and let firmware place
+ * it; the rest adopt the device-wide partition made at probe.
+ */
+static int aie4_hwctx_partition_get(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	u32 core_rows = ndev->aie.metadata.core.row_count;
+	u32 col_count;
+
+	/*
+	 * Firmware never reports a context's column range, so hwctx->num_col is
+	 * set here from the span of whatever partition the context ends up in.
+	 * It feeds the aie-partitions view and bounds the tile read/write
+	 * ioctls, so it has to shrink to the context's own partition rather
+	 * than stay at the device width.
+	 */
+	if (!xdna->dev_info->partition_per_hwctx) {
+		hwctx->priv->partition_id = ndev->partition_id;
+		hwctx->num_col = ndev->total_col;
+		return 0;
+	}
+
+	if (!core_rows) {
+		XDNA_ERR(xdna, "core tile row count is zero");
+		return -EINVAL;
+	}
+
+	/*
+	 * Firmware takes column counts in multiples of AIE4_PART_COL_ALIGN, and
+	 * that is also the smallest it will create, so rounding a non-zero
+	 * request up satisfies both rules. Round up rather than down so a
+	 * context never ends up with fewer columns than its tiles need.
+	 */
+	col_count = round_up(DIV_ROUND_UP(hwctx->num_tiles, core_rows),
+			     AIE4_PART_COL_ALIGN);
+	if (col_count > ndev->total_col) {
+		XDNA_ERR(xdna, "ctx needs %u columns, device has %u",
+			 col_count, ndev->total_col);
+		return -EINVAL;
+	}
+
+	hwctx->num_col = col_count;
+
+	return aie4_partition_create(ndev, AIE4_PART_AUTO_COL, col_count,
+				     &hwctx->priv->partition_id);
+}
+
+/*
+ * Release the partition taken by aie4_hwctx_partition_get(). Only a per-hwctx
+ * partition is destroyed; a device-wide one outlives every context. Pass
+ * @notify_fw false when firmware state is being discarded anyway (a reset),
+ * so only the driver's reference is dropped.
+ */
+static void aie4_hwctx_partition_put(struct amdxdna_hwctx *hwctx, bool notify_fw)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	if (notify_fw && xdna->dev_info->partition_per_hwctx && priv->partition_id)
+		aie4_partition_destroy(xdna->dev_handle, priv->partition_id);
+
+	priv->partition_id = 0;
+}
+
 int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 {
 	DECLARE_AIE_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
@@ -186,13 +253,21 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
-	if (!ndev->partition_id || !hwctx->num_tiles) {
-		XDNA_ERR(xdna, "invalid request partition_id %u, num_tiles %d",
-			 ndev->partition_id, hwctx->num_tiles);
+	if (!hwctx->num_tiles) {
+		XDNA_ERR(xdna, "invalid request, num_tiles %d", hwctx->num_tiles);
 		return -EINVAL;
 	}
 
-	req.partition_id = ndev->partition_id;
+	ret = aie4_hwctx_partition_get(hwctx);
+	if (ret)
+		return ret;
+
+	if (!priv->partition_id) {
+		XDNA_ERR(xdna, "invalid request partition_id %u", priv->partition_id);
+		return -EINVAL;
+	}
+
+	req.partition_id = priv->partition_id;
 	req.request_num_tiles = hwctx->num_tiles;
 	req.pasid = aie4_msg_pasid(client);
 	req.priority_band = aie4_parse_priority_to_dev(hwctx->qos.priority);
@@ -212,7 +287,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	priv->restore_state = AIE4_CTX_RESTORE_NONE;
 	if (ret) {
 		XDNA_ERR(xdna, "create ctx failed: %d", ret);
-		return ret;
+		goto err_partition;
 	}
 
 	XDNA_DBG(xdna, "resp msix: %d, ctx id: %d, doorbell: %d",
@@ -223,22 +298,22 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	cert_comp = aie4_lookup_cert_comp(ndev, resp.job_complete_msix_idx);
 	if (IS_ERR(cert_comp)) {
 		aie4_msg_destroy_context(ndev, resp.hw_context_id, false);
-		return PTR_ERR(cert_comp);
+		ret = PTR_ERR(cert_comp);
+		goto err_partition;
 	}
 
 	priv->hw_ctx_id = resp.hw_context_id;
 
 	/*
 	 * Mirror the firmware hardware context id onto the common hwctx so the
-	 * shared status/telemetry paths can key on it. Unlike AIE2, firmware
-	 * does not hand back a per-context column range; every context runs in
-	 * the single device-wide partition, which the firmware time-shares, so
-	 * report that partition span. This gives amdxdna_drm_hwctx_entry a real
-	 * hwctx_id and a non-empty column list for the aie-partitions view.
+	 * shared status/telemetry paths can key on it, which gives
+	 * amdxdna_drm_hwctx_entry a real hwctx_id. The column span that goes
+	 * with it was set alongside the partition in aie4_hwctx_partition_get().
+	 * start_col stays 0: firmware places an auto-allocated partition itself
+	 * and never reports where, so the only honest span is a width.
 	 */
 	hwctx->fw_ctx_id = resp.hw_context_id;
 	hwctx->start_col = 0;
-	hwctx->num_col = ndev->total_col;
 
 	if (priv->kernel_submit) {
 		/*
@@ -263,7 +338,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 			/* Match a clean teardown so a later fini does not re-destroy. */
 			priv->hw_ctx_id = CTX_INVALID_ID;
 			hwctx->fw_ctx_id = -1;
-			return ret;
+			goto err_partition;
 		}
 		WRITE_ONCE(priv->has_reset, false);
 		/*
@@ -289,6 +364,10 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	}
 
 	return 0;
+
+err_partition:
+	aie4_hwctx_partition_put(hwctx, true);
+	return ret;
 }
 
 /*
@@ -435,6 +514,14 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags
 	priv->hw_ctx_id = CTX_INVALID_ID;
 	hwctx->fw_ctx_id = -1;
 	hwctx->doorbell_offset = CTX_INVALID_DOORBELL;
+
+	/*
+	 * Firmware refuses to destroy a partition that still has contexts, so
+	 * this has to follow the context destroy above. A disconnect never sent
+	 * that destroy because the reset discards firmware state anyway, so it
+	 * drops the reference without a message.
+	 */
+	aie4_hwctx_partition_put(hwctx, flags != AIE4_HWCTX_DISCONNECT);
 
 	/*
 	 * On a non-reset teardown (NORMAL suspend / fini), quiesce the worker so

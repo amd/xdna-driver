@@ -67,6 +67,13 @@ struct amdxdna_hwctx_priv {
 
 	struct cert_comp                *cert_comp;
 	u32                             hw_ctx_id;
+	/*
+	 * Partition this ctx runs in: its own when
+	 * dev_info->partition_per_hwctx is set, otherwise a copy of the
+	 * device-wide partition_id. 0 means none, which is also what firmware
+	 * reserves as an invalid partition id.
+	 */
+	u32                             partition_id;
 	/* restore_id from a graceful destroy; consumed on the next create (0 = none) */
 	u16                             restore_id;
 	/* Outcome of that destroy, read by the suspend once it returns. */
@@ -279,9 +286,22 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
 			struct amdxdna_msg_buf_hdl *buf_hdl, size_t size,
 			u32 categories, u32 *msi_idx, u32 *msi_address);
 
+/*
+ * Partition geometry required by the npu12 platform firmware: a column count
+ * must be a multiple of AIE4_PART_COL_ALIGN, which is also the smallest
+ * partition it will create. These do not describe the PCI parts, which size
+ * their device-wide partition with their own AIE4_TOTAL_COLUMN.
+ *
+ * AIE4_PART_AUTO_COL as the start column asks firmware to place the partition
+ * itself, the only workable choice once more than one can be live at a time.
+ */
+#define AIE4_PART_AUTO_COL	0xFF
+#define AIE4_PART_COL_ALIGN	4U
+
 /* aie4.c transport-independent query/policy helpers. */
-int aie4_partition_init(struct amdxdna_dev_hdl *ndev);
-void aie4_partition_fini(struct amdxdna_dev_hdl *ndev);
+int aie4_partition_create(struct amdxdna_dev_hdl *ndev, u32 col_start,
+			  u32 col_count, u32 *part_id);
+void aie4_partition_destroy(struct amdxdna_dev_hdl *ndev, u32 part_id);
 void aie4_restore_power_mode(struct amdxdna_dev_hdl *ndev);
 void aie4_restore_force_preemption(struct amdxdna_dev_hdl *ndev);
 void aie4_restore_hws_debug_mode(struct amdxdna_dev_hdl *ndev);
