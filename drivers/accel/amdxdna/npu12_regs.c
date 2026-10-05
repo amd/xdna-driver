@@ -53,6 +53,7 @@ const struct amdxdna_dev_info dev_npu12_info = {
 	.default_vbnv	= "RyzenAI-npu12-aie2ps",
 	.device_type	= AMDXDNA_DEV_TYPE_UMQ,
 	.ops		= &aie4_plat_ops,
+	.partition_per_hwctx = true,
 	.fw_feature_tbl	= npu12_fw_feature_table,
 	.cert_feature_tbl = npu12_cert_feature_table,
 	.luts			= &aie4_error_luts,
