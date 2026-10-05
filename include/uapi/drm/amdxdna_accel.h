@@ -55,6 +55,9 @@ enum amdxdna_drm_ioctl_id {
 	DRM_AMDXDNA_GET_ARRAY = 10,
 };
 
+/* user start column request or not */
+#define	USER_START_COL_NOT_REQUESTED	0xFF
+
 /**
  * struct qos_info - QoS information for driver.
  * @gops: Giga operations per second.
@@ -63,6 +66,9 @@ enum amdxdna_drm_ioctl_id {
  * @latency: Frame response latency.
  * @frame_exec_time: Frame execution time.
  * @priority: Request priority.
+ * @user_start_col: Column the partition must start at, or
+ *                  USER_START_COL_NOT_REQUESTED to leave placement to the driver.
+ * @reserved: Reserved for future use.
  *
  * User program can provide QoS hints to driver.
  */
@@ -73,6 +79,8 @@ struct amdxdna_qos_info {
 	__u32 latency;
 	__u32 frame_exec_time;
 	__u32 priority;
+	__u32 user_start_col;
+	__u32 reserved;
 };
 
 /**

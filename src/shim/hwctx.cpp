@@ -242,6 +242,10 @@ void
 hwctx::
 init_qos_info(const qos_type& qos)
 {
+  // Zero is a valid start column, so the "no preference" case needs the
+  // sentinel rather than the default-constructed 0.
+  m_qos.user_start_col = USER_START_COL_NOT_REQUESTED;
+
   for (auto& [key, value] : qos) {
     if (key == "gops" && value && !m_qos.gops)
       m_qos.gops = value;
@@ -257,6 +261,8 @@ init_qos_info(const qos_type& qos)
       m_qos.frame_exec_time = value;
     else if (key == "priority")
       m_qos.priority = value;
+    else if (key == "start_col")
+      m_qos.user_start_col = value;
   }
 }
 
