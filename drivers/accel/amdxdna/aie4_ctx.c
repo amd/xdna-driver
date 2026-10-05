@@ -176,15 +176,26 @@ static u32 aie4_parse_priority_to_dev(u32 priority)
 
 /*
  * Resolve the partition this context runs in. Parts that partition per hwctx
- * create one sized to the context's own tile request and let firmware place
- * it; the rest adopt the device-wide partition made at probe.
+ * create one sized to the context's own tile request, at the column userspace
+ * asked for or wherever firmware chooses when it asked for none; the rest
+ * adopt the device-wide partition made at probe.
  */
 static int aie4_hwctx_partition_get(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	u32 core_rows = ndev->aie.metadata.core.row_count;
+	u32 col_start = hwctx->qos.user_start_col;
 	u32 col_count;
+
+	/*
+	 * The device-wide partition really does start at column 0, and an
+	 * auto-placed one has no start to report, so 0 serves both; only an
+	 * explicit request overrides it below. Assigned rather than left at
+	 * the initial value, because a reset or resume calls
+	 * aie4_hwctx_create() again on a context that already ran.
+	 */
+	hwctx->start_col = 0;
 
 	if (!AIE4_PART_PER_HWCTX(xdna)) {
 		hwctx->priv->partition_id = ndev->partition_id;
@@ -217,13 +228,29 @@ static int aie4_hwctx_partition_get(struct amdxdna_hwctx *hwctx)
 	}
 
 	/*
-	 * hwctx->num_col feeds the aie-partitions view and bounds the tile
-	 * read/write ioctls. Firmware places the partition and never reports
-	 * where, so the requested width is the only span to record.
+	 * A start column asked for by userspace is a hard requirement, not a
+	 * hint: firmware places the partition there or fails the request. The
+	 * bound is checked in two steps so the sum cannot wrap. Firmware has
+	 * no alignment requirement on the start column, unlike the width, so
+	 * none is imposed here either.
 	 */
+	if (col_start == USER_START_COL_NOT_REQUESTED) {
+		col_start = AIE4_PART_AUTO_COL;
+	} else {
+		if (col_start >= ndev->total_col ||
+		    col_count > ndev->total_col - col_start) {
+			XDNA_ERR(xdna, "ctx wants columns %u..%u, device has %u",
+				 col_start, col_start + col_count - 1,
+				 ndev->total_col);
+			return -ERANGE;
+		}
+		hwctx->start_col = col_start;
+	}
+
+	/* Feeds the aie-partitions view and bounds the tile read/write ioctls. */
 	hwctx->num_col = col_count;
 
-	return aie4_partition_create(ndev, AIE4_PART_AUTO_COL, col_count,
+	return aie4_partition_create(ndev, col_start, col_count,
 				     &hwctx->priv->partition_id);
 }
 
@@ -311,12 +338,10 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	 * Mirror the firmware hardware context id onto the common hwctx so the
 	 * shared status/telemetry paths can key on it, which gives
 	 * amdxdna_drm_hwctx_entry a real hwctx_id. The column span that goes
-	 * with it was set alongside the partition in aie4_hwctx_partition_get().
-	 * start_col stays 0: firmware places an auto-allocated partition itself
-	 * and never reports where, so the only honest span is a width.
+	 * with it was set alongside the partition in aie4_hwctx_partition_get(),
+	 * which owns start_col too, so do not touch it here.
 	 */
 	hwctx->fw_ctx_id = resp.hw_context_id;
-	hwctx->start_col = 0;
 
 	if (priv->kernel_submit) {
 		/*
