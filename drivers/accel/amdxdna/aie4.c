@@ -27,8 +27,6 @@
 #include "amdxdna_sensors.h"
 #include "amdxdna_tile_read_write.h"
 
-#define AIE4_TOTAL_COLUMN	3
-
 int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
@@ -36,7 +34,7 @@ int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 	int ret;
 
 	req.partition_col_start = 0;
-	req.partition_col_count = AIE4_TOTAL_COLUMN;
+	req.partition_col_count = ndev->total_col;
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "partition init failed: %d", ret);
@@ -174,7 +172,7 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 	 * probe-time default is set in aie4m_pcidev_init(), and the cached
 	 * override is re-applied to firmware by aie4_restore_power_mode().
 	 */
-	ndev->total_col = min(AIE4_TOTAL_COLUMN, ndev->aie.metadata.cols);
+	ndev->total_col = ndev->aie.metadata.cols;
 	ndev->aie.frame_boundary_preempt_enabled = 1;
 
 	ret = aie4_init_dpm_freq_table(ndev);
@@ -296,7 +294,7 @@ int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *ar
 		ret = aie4_query_clock_metadata(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
-		ret = amdxdna_query_sensors(args, AIE4_TOTAL_COLUMN);
+		ret = amdxdna_query_sensors(args, ndev->total_col);
 		break;
 	case DRM_AMDXDNA_QUERY_FIRMWARE_VERSION:
 		ret = amdxdna_get_firmware_version(client, args, &xdna->fw_ver);
