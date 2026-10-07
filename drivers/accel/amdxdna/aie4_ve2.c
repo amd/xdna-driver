@@ -27,10 +27,6 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_pm.h"
 
-void ve2_mbox_release(struct mailbox *mb);
-int ve2_cert_bind(struct amdxdna_hwctx *hwctx);
-int ve2_cert_kick(struct amdxdna_hwctx *hwctx);
-
 int aie4_doorbell_setup(struct amdxdna_hwctx *hwctx,
 			const struct aie4_msg_create_hw_context_resp *resp)
 {
