@@ -9,10 +9,10 @@
  * npu12 DRAM work-buffer attach is not used: VE2 CERT has no such buffer, and
  * that opcode stays unimplemented.
  *
- * The ops below are the attachment to the shared aie4 core. Partition,
- * hardware-context, and command opcodes are not implemented yet, so those
- * calls return -EOPNOTSUPP. The doorbell hooks are present because aie4_ctx.c
- * calls them; they do nothing until the command path is added.
+ * The doorbell is not a ring and not an IPI. aie4_doorbell_ring() writes the
+ * CERT user-event register through the AIE driver. Completion is the AIE
+ * user-event callback waking cert_comp, so there is no MSI-X and no IPI to
+ * request.
  */
 
 #include <drm/drm_drv.h>
@@ -28,24 +28,34 @@
 #include "amdxdna_pm.h"
 
 void ve2_mbox_release(struct mailbox *mb);
+int ve2_cert_bind(struct amdxdna_hwctx *hwctx);
+int ve2_cert_kick(struct amdxdna_hwctx *hwctx);
 
 int aie4_doorbell_setup(struct amdxdna_hwctx *hwctx,
 			const struct aie4_msg_create_hw_context_resp *resp)
 {
-	(void)hwctx;
-	(void)resp;
-	return 0;
+	return ve2_cert_bind(hwctx);
 }
 
 void aie4_doorbell_ring(struct amdxdna_hwctx *hwctx)
 {
-	(void)hwctx;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	int ret;
+
+	ret = ve2_cert_kick(hwctx);
+	if (ret)
+		XDNA_ERR(xdna, "VE2 CERT kick failed, ret %d", ret);
 }
 
 int aie4_request_notification(struct cert_comp *comp)
 {
-	/* No MSI-X or IPI on VE2. Completion is added with the command path. */
-	(void)comp;
+	/*
+	 * No interrupt to allocate. CREATE_PARTITION already registered the
+	 * AIE user-event callback, and that callback wakes every cert_comp
+	 * on the device. This runs before the comp is stored in the xarray,
+	 * which is fine: the callback walks whatever is registered at event
+	 * time.
+	 */
 	return 0;
 }
 
