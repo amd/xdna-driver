@@ -210,9 +210,23 @@ platform_device_id(const std::shared_ptr<xrt_core::pci::dev>& pdev)
     std::strtoul(compat.c_str() + pos + prefix.size(), nullptr, 16));
 }
 
+/*
+ * VE2 aie2ps is the auxiliary device xilinx_aie.amdxdna. It has no PCI id and
+ * no amd,xdna-<id> compatible. 0xb052:0x01 is the id XRT already maps to
+ * hardware_type::aie2ps, so examine can report the architecture.
+ */
+static constexpr uint16_t ve2_aie2ps_device_id = 0xb052;
+static constexpr uint8_t ve2_aie2ps_revision_id = 0x01;
+
+static bool
+is_ve2_aie2ps(const std::shared_ptr<xrt_core::pci::dev>& pdev)
+{
+  return pdev->m_sysfs_name.find("xilinx_aie.amdxdna") != std::string::npos;
+}
+
 // Device-aware is_aie4: a PCI part is matched by its device id; a platform
-// (non-PCI) part has no "device" sysfs node, so identify it by its device-tree
-// compatible instead.  Every amdxdna part on the platform bus is an aie4 part.
+// part is matched by its device-tree compatible. VE2 uses the same aie4
+// ioctls, including the CERT version query, so it is included here too.
 static bool
 is_aie4(const xrt_core::device* device)
 {
@@ -221,7 +235,7 @@ is_aie4(const xrt_core::device* device)
     return is_aie4(sysfs_fcn<uint16_t>::get(pdev, "", "device"));
   }
   catch (const xrt_core::query::sysfs_error&) {
-    return platform_device_id(pdev) != 0;
+    return platform_device_id(pdev) != 0 || is_ve2_aie2ps(pdev);
   }
 }
 
@@ -856,13 +870,19 @@ struct pcie_id
       pcie_id.revision_id = sysfs_fcn<uint8_t>::get(pdev, "", "revision");
     }
     catch (const xrt_core::query::sysfs_error&) {
-      // A platform (non-PCI) device has no "device"/"revision" sysfs nodes.
-      // Identify it by its device-tree compatible instead; re-throw otherwise.
+      // A platform device has no "device"/"revision" sysfs nodes. Identify
+      // npu12 by its device-tree compatible. VE2 has neither, so publish the
+      // aie2ps id examine already understands.
       auto id = platform_device_id(pdev);
-      if (!id)
+      if (id) {
+        pcie_id.device_id = id;
+        pcie_id.revision_id = 0;
+      } else if (is_ve2_aie2ps(pdev)) {
+        pcie_id.device_id = ve2_aie2ps_device_id;
+        pcie_id.revision_id = ve2_aie2ps_revision_id;
+      } else {
         throw;
-      pcie_id.device_id = id;
-      pcie_id.revision_id = 0;
+      }
     }
 
     return pcie_id;

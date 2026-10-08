@@ -321,9 +321,14 @@ static int amdxdna_async_error_cb(void *handle, void __iomem *data, size_t size)
 
 static int amdxdna_async_event_send(struct amdxdna_async_event *e)
 {
+	const struct amdxdna_dev_ops *ops = e->aie->xdna->dev_info->ops;
+
+	if (!ops->register_async_event)
+		return -EOPNOTSUPP;
+
 	amdxdna_cache_flush(e->buf, e->size); /* device can access */
-	return e->aie->xdna->dev_info->ops->register_async_event(e->aie, e->addr, e->size,
-								 e, amdxdna_async_error_cb);
+	return ops->register_async_event(e->aie, e->addr, e->size,
+					 e, amdxdna_async_error_cb);
 }
 
 static void amdxdna_async_error_worker(struct work_struct *err_work)
