@@ -13,6 +13,7 @@ struct mailbox;
 extern const struct amdxdna_dev_ops aie4_ve2_ops;
 
 void ve2_mbox_release(struct mailbox *mb);
+int ve2_mbox_load_fw(struct mailbox *mb);
 int ve2_cert_bind(struct amdxdna_hwctx *hwctx);
 int ve2_cert_kick(struct amdxdna_hwctx *hwctx);
 

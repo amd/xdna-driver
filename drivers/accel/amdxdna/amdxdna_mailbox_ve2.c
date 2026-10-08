@@ -663,6 +663,25 @@ static int ve2_ensure_cert(struct mailbox *mb)
 	return ve2_load_cert(mb);
 }
 
+/*
+ * Probe-time load, in the product driver's order: AIE geometry first, then
+ * CERT. Runs before the mailbox has users, so mb->lock is not taken across the
+ * CERT broadcast wait. The IDENTIFY and CERT version opcodes then answer from
+ * the cached results.
+ */
+int ve2_mbox_load_fw(struct mailbox *mb)
+{
+	int ret;
+
+	ret = ve2_ensure_dev_info(mb);
+	if (ret == -ENODEV)
+		return -EPROBE_DEFER;
+	if (ret)
+		return ret;
+
+	return ve2_ensure_cert(mb);
+}
+
 static int ve2_op_identify(struct mailbox *mb, const struct xdna_mailbox_msg *msg)
 {
 	struct aie4_msg_identify_resp resp = { };

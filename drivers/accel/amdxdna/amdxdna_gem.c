@@ -1685,7 +1685,12 @@ again:
 
 	mapp->range.notifier_seq = mmu_interval_read_begin(&mapp->notifier);
 	mmap_read_lock(mm);
+#if IS_ENABLED(CONFIG_HMM_MIRROR)
 	ret = hmm_range_fault(&mapp->range);
+#else
+	ret = -EOPNOTSUPP;
+	XDNA_ERR(xdna, "HMM mirror is disabled; userptr population is unavailable");
+#endif
 	mmap_read_unlock(mm);
 	if (ret) {
 		if (ret == -EBUSY) {

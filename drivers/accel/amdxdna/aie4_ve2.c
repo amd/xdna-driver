@@ -133,6 +133,10 @@ static int aie4_ve2_init(struct amdxdna_dev *xdna)
 	if (ret)
 		goto xa_fini;
 
+	ret = ve2_mbox_load_fw(ndev->mbox);
+	if (ret)
+		goto mbox_fini;
+
 	/*
 	 * Same feature negotiation as the platform path: IDENTIFY plus the
 	 * CERT version turn on AIE4_HSA_COMMAND, which aie4_hwctx_init()
@@ -222,4 +226,6 @@ const struct amdxdna_dev_ops aie4_ve2_ops = {
 	.suspend		= aie4_ve2_suspend,
 	.runtime_resume		= aie4_ve2_resume,
 	.runtime_suspend	= aie4_ve2_suspend,
+	.register_async_event	= aie4_async_event_register,
+	.handle_dev_async_event	= aie4_handle_dev_event,
 };

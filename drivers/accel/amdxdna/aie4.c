@@ -193,7 +193,15 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 	 * there is nothing to set up until one is asked for.
 	 */
 	ret = amdxdna_async_events_alloc(&ndev->aie, AMDXDNA_MAX_ASYNC_EVENT_BUFS);
-	if (ret) {
+	if (ret == -EOPNOTSUPP) {
+		/*
+		 * VE2's mailbox has no ASYNC_EVENT_REPORT opcode yet, so
+		 * registration returns -EOPNOTSUPP. Drop the unused pool and
+		 * keep probing; tile-error reports stay unavailable.
+		 */
+		XDNA_WARN(ndev->aie.xdna, "Async event registration is not supported");
+		amdxdna_async_events_free(&ndev->aie);
+	} else if (ret) {
 		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
 		return ret;
 	}
