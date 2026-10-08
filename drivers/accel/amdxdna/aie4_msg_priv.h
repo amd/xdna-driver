@@ -23,6 +23,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_ASYNC_EVENT_REPORT               = 0x10004,
 	AIE4_MSG_OP_GET_TELEMETRY                    = 0x10006,
 	AIE4_MSG_OP_SET_RUNTIME_CONFIG               = 0x10007,
+	AIE4_MSG_OP_GET_RUNTIME_CONFIG               = 0x10008,
 	AIE4_MSG_OP_START_FW_TRACE                   = 0x1000A,
 	AIE4_MSG_OP_STOP_FW_TRACE                    = 0x1000B,
 	AIE4_MSG_OP_SET_FW_TRACE_CATEGORIES          = 0x1000C,
@@ -695,6 +696,24 @@ struct aie4_msg_stop_fw_log_resp {
  * at 12 bytes. Rounded up to leave headroom for future configs.
  */
 #define AIE4_RUNTIME_CFG_MAX_DATA_SIZE 16
+
+/*
+ * AIE4_MSG_OP_GET_RUNTIME_CONFIG
+ *
+ * Firmware returns @status immediately followed by the payload of the config
+ * struct selected by @type, so the reply size is type-specific. The mailbox
+ * layer rejects any reply whose size differs from the declared response, so
+ * each queried config is modeled with a dedicated response struct rather than
+ * a generic data buffer.
+ */
+struct aie4_msg_get_ctx_hysteresis_req {
+	__u32 type;
+} __packed;
+
+struct aie4_msg_get_ctx_hysteresis_resp {
+	enum aie4_msg_status status;
+	__u32 timeout_us;
+} __packed;
 
 struct aie4_msg_runtime_config_fw_log_level {
 	__u32 log_level;

@@ -722,6 +722,24 @@ void aie4_restore_hws_debug_mode(struct amdxdna_dev_hdl *ndev)
 			  "Failed to restore HWS debug mode; auto coredump remains enabled");
 }
 
+int aie4_get_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 *timeout_us)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_ctx_hysteresis, AIE4_MSG_OP_GET_RUNTIME_CONFIG);
+	int ret;
+
+	req.type = AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS;
+
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Failed to get ctx switch hysteresis: %d", ret);
+		return ret;
+	}
+
+	*timeout_us = resp.timeout_us;
+
+	return 0;
+}
+
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
 		      struct amdxdna_msg_buf_hdl *buf_hdl, u8 level,
 		      size_t size, u32 *msi_idx, u32 *msi_address)
