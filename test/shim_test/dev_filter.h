@@ -26,7 +26,7 @@ enum hw_type {
   npu3,     // AIE4 classic, device_id 0x17f1 / 0x1b0a (classic only)
   npu3vf,   // AIE4 VF, device_id 0x17f3 / 0x1b0c (SRIOV VF only)
   ve2,      // VE2 edge, device_id 0xb052
-  npu12,    // UMQ (kernel submission) on platform aie2ps, device_id 0x1234 (from DT compatible)
+  npu12,    // UMQ (kernel submission) on platform aie2ps; T50/T20/T10 SKUs by device_id_str
 };
 
 enum drv_type {
@@ -48,26 +48,26 @@ struct drv_filter_entry {
 inline bool
 dev_filter_is_npu1(device::id_type id, device* dev)
 {
-  return device_query<query::pcie_device>(dev) == npu1_device_id;
+  return test_device_id(dev) == npu1_device_id;
 }
 
 inline bool
 dev_filter_is_npu4(device::id_type id, device* dev)
 {
-  return device_query<query::pcie_device>(dev) == npu4_device_id;
+  return test_device_id(dev) == npu4_device_id;
 }
 
 inline bool
 dev_filter_is_npu3(device::id_type id, device* dev)
 {
-  auto device_id = device_query<query::pcie_device>(dev);
+  auto device_id = test_device_id(dev);
   return device_id == npu3_device_id || device_id == npu3a_device_id;
 }
 
 inline bool
 dev_filter_is_npu3vf(device::id_type id, device* dev)
 {
-  auto device_id = device_query<query::pcie_device>(dev);
+  auto device_id = test_device_id(dev);
   return device_id == npu3_device_id1 || device_id == npu3a_device_id1;
 }
 
@@ -81,13 +81,13 @@ dev_filter_is_aie4(device::id_type id, device* dev)
 inline bool
 dev_filter_is_ve2(device::id_type id, device* dev)
 {
-  return device_query<query::pcie_device>(dev) == npu_ve2_device_id;
+  return test_device_id(dev) == npu_ve2_device_id;
 }
 
 inline bool
 dev_filter_is_npu12(device::id_type id, device* dev)
 {
-  return device_query<query::pcie_device>(dev) == npu12_device_id;
+  return is_npu12(dev);
 }
 
 // hw_filter_table: non_npu is entry 0 with nullptr check (special case handled by

@@ -24,7 +24,8 @@ enum flow_type {
 
 struct binary_info {
   const char* tag;  /* tag for test lookup, e.g. "nop", "bad", "good" */
-  const uint16_t device;
+  const uint16_t device;     /* PCI parts: pcie device id (0 for a platform part) */
+  const bool platform = false;  /* true: npu12-family (platform) entry; false: PCI */
   const uint16_t revision_id;
   const std::map<const char*, cuidx_type> ip_name2idx;
   const std::string path;
@@ -41,11 +42,11 @@ const uint16_t npu3_device_id1 = 0x17f3;
 const uint16_t npu3a_device_id = 0x1b0a;
 const uint16_t npu3a_pf_device_id = 0x1b0b;
 const uint16_t npu3a_device_id1 = 0x1b0c;
-// npu12: platform (non-PCI) aie2ps part. Its device id comes from the device-tree
-// compatible "amd,xdna-<hex-id>", which the shim parses. 0x1234 is the current
-// bring-up id and must match the deployed device tree's compatible; replace it
-// (here and in the DT) once a real aie2ps device id is allocated.
-const uint16_t npu12_device_id = 0x1234;
+// npu12: platform (non-PCI) aie2ps part. It has no PCI device id; the shim
+// identifies it by the "amd,xdna-<part>" device-tree compatible, exposed as
+// query::device_id_str. The aie2ps/npu12 SKUs (T50/T20/T10) share the same
+// shim-test ELFs, so the shim test treats them as one family (see is_npu12) and
+// marks their ELF entries with binary_info::platform instead of a PCI device id.
 const uint16_t npu_ve2_device_id = 0xb052;
 const uint16_t npu4_device_id = 0x17f0;
 const uint16_t npu_any_revision_id = 0xffff;
@@ -67,6 +68,54 @@ aie4_binary_device_id(uint16_t device_id)
   default:
     return device_id;
   }
+}
+
+// Any platform (non-PCI) part reports a device-tree part string (query::
+// device_id_str) and has no PCI id. This covers every aie2ps/npu12 SKU, not just
+// the one the shim test has binaries for.
+inline bool
+is_platform_part(device* dev)
+{
+  return !device_query_default<query::device_id_str>(dev, std::string{}).empty();
+}
+
+// The aie2ps/npu12 SKUs the shim test ships ELF binaries for, identified by their
+// device-tree part string. All three SKUs share the same ELFs, so they are one
+// family here.
+inline bool
+is_npu12(device* dev)
+{
+  const auto part = device_query_default<query::device_id_str>(dev, std::string{});
+  return part == "xc2ve3858"   // T50
+      || part == "xc2ve3558"   // T20
+      || part == "xc2ve3358";  // T10
+}
+
+// Real pcie device id used for ELF lookup and hw filtering, or 0 for a part that
+// legitimately has none: a device whose pcie_device query is unsupported (non-xdna
+// edge device) or any platform part (which has no "device" sysfs node). A sysfs
+// read failure on an actual PCI device is a real error and propagates.
+inline uint16_t
+test_device_id(device* dev)
+{
+  try {
+    return device_query<query::pcie_device>(dev);
+  }
+  catch (const query::no_such_key&) {
+    return 0;
+  }
+  catch (const query::sysfs_error&) {
+    if (is_platform_part(dev))
+      return 0;
+    throw;
+  }
+}
+
+// A device is a shim_test target if it has a known PCI id or is the npu12 part.
+inline bool
+is_shimtest_target(device* dev)
+{
+  return test_device_id(dev) != 0 || is_npu12(dev);
 }
 
 const binary_info& get_binary_info(device* dev, const char* tag = nullptr, const flow_type* flow = nullptr);
