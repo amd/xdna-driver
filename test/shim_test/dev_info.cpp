@@ -245,7 +245,7 @@ binary_info binary_infos[] = {
   // binaries exercised by that test are listed; add more tags as coverage grows.
   {
     .tag = "good",
-    .device = npu12_device_id,
+    .platform = true,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
@@ -255,7 +255,7 @@ binary_info binary_infos[] = {
   },
   {
     .tag = "nop",
-    .device = npu12_device_id,
+    .platform = true,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
@@ -265,7 +265,7 @@ binary_info binary_infos[] = {
   },
   {
     .tag = "bad_timeout",
-    .device = npu12_device_id,
+    .platform = true,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
@@ -488,13 +488,24 @@ binary_info binary_infos[] = {
 const binary_info&
 get_binary_info(device* dev, const char* tag, const flow_type* flow)
 {
-  auto pci_dev_id = aie4_binary_device_id(device_query<query::pcie_device>(dev));
-  auto revision_id = device_query<query::pcie_id>(dev).revision_id;
+  auto pci_dev_id = aie4_binary_device_id(test_device_id(dev));
+  const bool npu12 = is_npu12(dev);
+  // A platform (non-PCI) part has no PCI revision; its ELF entries use
+  // npu_any_revision_id, so leave it 0. For a PCI part, query the revision and let
+  // a failure propagate rather than masking it as revision 0.
+  uint16_t revision_id = 0;
+  if (!is_platform_part(dev))
+    revision_id = device_query<query::pcie_id>(dev).revision_id;
   bool match_tag = (tag == nullptr || tag[0] == '\0');
   bool match_flow = (flow == nullptr);
   for (auto& bin : binary_infos) {
-    if ((bin.device == pci_dev_id) &&
-        ((bin.revision_id == revision_id) || (bin.revision_id == npu_any_revision_id)) &&
+    // Platform entries match any npu12-family SKU (shared ELFs); PCI entries match
+    // on pcie device id plus revision.
+    bool dev_match = bin.platform
+        ? npu12
+        : ((bin.device == pci_dev_id) &&
+           ((bin.revision_id == revision_id) || (bin.revision_id == npu_any_revision_id)));
+    if (dev_match &&
         (match_tag || (bin.tag && !strcmp(bin.tag, tag))) &&
         (match_flow || (bin.flow == *flow)))
       return bin;

@@ -546,14 +546,16 @@ TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device>&
     auto bdf = bdf_info2str(info);
     std::cout << "device[" << i << "]: " << bdf << std::endl;
     auto dev = is_user ? get_userpf_device(i) : get_mgmtpf_device(i);
-    try {
-      auto devid = device_query<query::pcie_device>(dev);
-      std::cout << "device[" << bdf << "]: 0x" << std::hex << devid << std::dec << std::endl;
-    }
-    catch (const query::no_such_key&) {
-      // VE2 zocl edge device — not a shim_test xdna target.
+    // Skip non-targets (e.g. VE2 zocl edge device). The platform npu12 part has no
+    // pcie_device; it is identified by its device-tree part string, so report that.
+    if (!is_shimtest_target(dev.get()))
       continue;
-    }
+    auto devid = test_device_id(dev.get());
+    if (devid)
+      std::cout << "device[" << bdf << "]: 0x" << std::hex << devid << std::dec << std::endl;
+    else
+      std::cout << "device[" << bdf << "]: "
+                << device_query_default<query::device_id_str>(dev.get(), std::string{}) << std::endl;
   }
 }
 
@@ -1856,13 +1858,11 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
     } else { // per user device test
       for (device::id_type i = 0; i < num_of_devices; i++) {
         auto dev = get_userpf_device(i);
-        // Skip userpf devices without pcie_device (e.g. VE2 zocl edge device).
-        try {
-          device_query<query::pcie_device>(dev.get());
-        }
-        catch (const query::no_such_key&) {
+        // Skip userpf devices that are not a recognized shim_test target (e.g. the
+        // VE2 zocl edge device). The platform npu12 part has no pcie_device but is
+        // identified by its device-tree part string (is_shimtest_target covers it).
+        if (!is_shimtest_target(dev.get()))
           continue;
-        }
         if (!force && !(match_hw(test.hw_list, i, dev.get()) && match_drv(test.drv_list, i, dev.get())))
           continue;
         skipped = false;
