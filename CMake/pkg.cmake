@@ -85,6 +85,21 @@ install(FILES ${VTD_ARCHIVES}
   COMPONENT ${XDNA_COMPONENT}
   )
 
+# VE2/aie2ps ships a per-SKU validate archive; the shim's archive_path returns
+# amdxdna/bins/<sku>/xrt_smi_ve2.a, so install each SKU archive under its subdir.
+set(VTD_VE2_SKUS t50 t20 t10)
+foreach(VTD_VE2_SKU ${VTD_VE2_SKUS})
+  set(VTD_VE2_ARCHIVE "${VTD_ARCHIVE_ROOT}/ve2/${VTD_VE2_SKU}/xrt_smi_ve2.a")
+  if(NOT EXISTS "${VTD_VE2_ARCHIVE}")
+    message(FATAL_ERROR "VTD archive not found: ${VTD_VE2_ARCHIVE}\n"
+      "Run: git submodule update --init vtd")
+  endif()
+  install(FILES "${VTD_VE2_ARCHIVE}"
+    DESTINATION ${XDNA_PKG_DATA_DIR}/bins/${VTD_VE2_SKU}
+    COMPONENT ${XDNA_COMPONENT}
+    )
+endforeach()
+
 if(NOT SKIP_KMOD)
 
 # Install both the versioned firmware files (e.g. 1.8_npu.sbin.2.5.0.172) and
