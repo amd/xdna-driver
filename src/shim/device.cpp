@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <optional>
@@ -187,43 +188,83 @@ struct sysfs_fcn<std::string>
   }
 };
 
+// VE2 is the auxiliary device xilinx_aie.amdxdna. It has no PCI id and no
+// of_node, so it cannot carry an amd,xdna-<part> compatible. The board
+// device tree publishes the silicon part at /device_id.
+static bool
+is_ve2_aux(const std::shared_ptr<xrt_core::pci::dev>& pdev)
+{
+  return pdev->m_sysfs_name.find("xilinx_aie.amdxdna") != std::string::npos;
+}
+
+// Part numbers from the aie2ps/npu12 binding: T50, T20, and T10. XRT maps the
+// "xc2ve" prefix to hardware_type::aie2ps, so examine does not need a PCI id.
+static std::string
+ve2_board_part()
+{
+  std::ifstream ifs("/sys/firmware/devicetree/base/device_id");
+  if (!ifs)
+    return {};
+
+  std::string part;
+  std::getline(ifs, part, '\0');
+  static constexpr std::array<std::string_view, 3> parts{
+    "xc2ve3858", // T50
+    "xc2ve3558", // T20
+    "xc2ve3358", // T10
+  };
+  for (const auto known : parts) {
+    if (part == known)
+      return part;
+  }
+  return {};
+}
+
 // A platform (non-PCI) amdxdna part is identified by its device-tree compatible
 // (exposed at <dev>/of_node/compatible), which carries a part-specific
 // "amd,xdna-<part>" entry (e.g. "amd,xdna-xc2ve3858" for the aie2ps/npu12 T50
 // part) alongside the generic "amd,xdna".  Return the <part> suffix, or empty if
 // no such entry is present (e.g. a PCI part, which has no of_node/compatible).
 // The sysfs node is a NUL-separated list; scan every entry so the result does not
-// depend on the order the compatibles are listed in.
+// depend on the order the compatibles are listed in. VE2 has no such node; its
+// part string is the board device_id instead.
 static std::string
 platform_device_id_str(const std::shared_ptr<xrt_core::pci::dev>& pdev)
 {
   std::string compat;
+  bool have_compat = true;
   try {
     compat = sysfs_fcn<std::string>::get(pdev, "", "of_node/compatible");
   }
   catch (const xrt_core::query::sysfs_error&) {
-    return {};
+    have_compat = false;
   }
 
-  static const std::string prefix = "amd,xdna-";
-  size_t start = 0;
-  while (start < compat.size()) {
-    auto end = compat.find('\0', start);
-    if (end == std::string::npos)
-      end = compat.size();
-    std::string token = compat.substr(start, end - start);
-    start = end + 1;
+  if (have_compat) {
+    static const std::string prefix = "amd,xdna-";
+    size_t start = 0;
+    while (start < compat.size()) {
+      auto end = compat.find('\0', start);
+      if (end == std::string::npos)
+        end = compat.size();
+      std::string token = compat.substr(start, end - start);
+      start = end + 1;
 
-    if (token.rfind(prefix, 0) == 0)
-      return token.substr(prefix.size());
+      if (token.rfind(prefix, 0) == 0)
+        return token.substr(prefix.size());
+    }
   }
+
+  if (is_ve2_aux(pdev))
+    return ve2_board_part();
 
   return {};
 }
 
 // Device-aware is_aie4: a PCI part is matched by its device id; a platform
-// (non-PCI) part has no "device" sysfs node, so identify it by its device-tree
-// compatible instead.  Every amdxdna part on the platform bus is an aie4 part.
+// (non-PCI) part has no "device" sysfs node, so identify it by its part
+// string. That covers an amd,xdna-<part> compatible and the VE2 auxiliary
+// device, whose part string is the board device_id.
 static bool
 is_aie4(const xrt_core::device* device)
 {
@@ -232,7 +273,9 @@ is_aie4(const xrt_core::device* device)
     return is_aie4(sysfs_fcn<uint16_t>::get(pdev, "", "device"));
   }
   catch (const xrt_core::query::sysfs_error&) {
-    return !platform_device_id_str(pdev).empty();
+    // VE2 has no PCI "device" node. It is still an aie4 ioctl client when the
+    // board part string is missing or not one of the known SKUs.
+    return !platform_device_id_str(pdev).empty() || is_ve2_aux(pdev);
   }
 }
 
@@ -885,9 +928,9 @@ struct pcie_device
   }
 };
 
-// query::device_id_str is the human-readable part number sourced from the
-// device-tree compatible.  Empty for parts that don't carry one (PCI parts),
-// letting XRT fall back to the numeric device id.
+// query::device_id_str is the human-readable part number: the amd,xdna-<part>
+// compatible, or the board device_id for the VE2 auxiliary device. Empty for
+// PCI parts, so XRT falls back to the numeric device id.
 struct device_id_str
 {
   using result_type = query::device_id_str::result_type;

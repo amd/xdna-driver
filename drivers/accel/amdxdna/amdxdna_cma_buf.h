@@ -19,7 +19,8 @@ static inline bool amdxdna_use_cma(struct amdxdna_dev *xdna)
 #ifdef AMDXDNA_NPU3A
 	return true;
 #endif
-	return IS_ENABLED(CONFIG_DRM_ACCEL_AMDXDNA_PLAT);
+	return IS_ENABLED(CONFIG_DRM_ACCEL_AMDXDNA_PLAT) ||
+	       IS_ENABLED(CONFIG_DRM_ACCEL_AMDXDNA_VE2);
 }
 
 struct amdxdna_gem_obj *

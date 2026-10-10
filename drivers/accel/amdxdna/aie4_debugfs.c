@@ -78,14 +78,15 @@ void aie4_debugfs_init(struct amdxdna_dev *xdna)
 
 	/*
 	 * kernel_mode_submission (0 - user space, 1 - driver): the platform
-	 * (_PLAT) transport supports only kernel-mode submission -- user-mode
-	 * submission needs user-space host-queue cache maintenance that is not
-	 * implemented.  Expose it read-only there (a NULL debugfs set, so writes
-	 * fail with -EACCES even for root) so it reports the fixed mode and
-	 * cannot be flipped to an unsupported config.  The coherent PCI
-	 * transport supports UMS, so keep the knob writable.
+	 * and VE2 transports support only kernel-mode submission. User-mode
+	 * submission needs a user-mappable doorbell, which neither the npu12
+	 * shared-memory doorbell nor the VE2 AIE-driver kick provides. Expose
+	 * it read-only there (a NULL debugfs set, so writes fail with -EACCES
+	 * even for root). The coherent PCI transport supports UMS, so keep the
+	 * knob writable.
 	 */
-	if (IS_ENABLED(CONFIG_DRM_ACCEL_AMDXDNA_PLAT)) {
+	if (IS_ENABLED(CONFIG_DRM_ACCEL_AMDXDNA_PLAT) ||
+	    IS_ENABLED(CONFIG_DRM_ACCEL_AMDXDNA_VE2)) {
 		debugfs_create_file_unsafe("kernel_mode_submission", 0400,
 					   xdna->ddev.accel->debugfs_root, ndev,
 					   &aie4_kernel_submit_fops);

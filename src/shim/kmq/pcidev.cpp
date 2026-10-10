@@ -29,6 +29,13 @@ void
 pdev_kmq::
 on_first_open() const
 {
+  /*
+   * VE2 has no device-heap aperture. The kernel owns its HSA queue, so the
+   * PCI KMQ heap is not created. Examine only needs the common info ioctls.
+   */
+  if (m_sysfs_name.find("xilinx_aie.amdxdna") != std::string::npos)
+    return;
+
   const size_t max_heap_sz = 512UL << 20;
   auto heap_sz = std::min(heap_page_size * get_heap_num_pages(), max_heap_sz);
   m_dev_heap_bo = std::make_unique<buffer>(*this, heap_sz, max_heap_sz, AMDXDNA_BO_DEV_HEAP, heap_page_size);
@@ -55,14 +62,14 @@ uint64_t
 pdev_kmq::
 get_heap_paddr() const
 {
-  return m_dev_heap_bo->paddr();
+  return m_dev_heap_bo ? m_dev_heap_bo->paddr() : AMDXDNA_INVALID_ADDR;
 }
 
 void *
 pdev_kmq::
 get_heap_vaddr() const
 {
-  return m_dev_heap_bo->vaddr();
+  return m_dev_heap_bo ? m_dev_heap_bo->vaddr() : nullptr;
 }
 
 bool
@@ -95,7 +102,7 @@ create_drm_bo(bo_info *arg) const
       drv_ioctl(drv_ioctl_cmd::create_bo, arg);
       return;
     } catch (const xrt_core::system_error& ex) {
-      if (ex.get_code() != EAGAIN)
+      if (ex.get_code() != EAGAIN || !m_dev_heap_bo)
         throw;
       m_dev_heap_bo->expand(heap_page_size);
     }

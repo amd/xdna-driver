@@ -489,6 +489,9 @@ const binary_info&
 get_binary_info(device* dev, const char* tag, const flow_type* flow)
 {
   auto pci_dev_id = aie4_binary_device_id(test_device_id(dev));
+  // VE2 no longer publishes a PCI id. Its ELFs stay keyed by 0xb052.
+  if (is_ve2_aux(dev))
+    pci_dev_id = npu_ve2_device_id;
   const bool npu12 = is_npu12(dev);
   // A platform (non-PCI) part has no PCI revision; its ELF entries use
   // npu_any_revision_id, so leave it 0. For a PCI part, query the revision and let

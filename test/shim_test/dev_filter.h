@@ -25,7 +25,7 @@ enum hw_type {
   npu4,     // AIE2, device_id 0x17f0
   npu3,     // AIE4 classic, device_id 0x17f1 / 0x1b0a (classic only)
   npu3vf,   // AIE4 VF, device_id 0x17f3 / 0x1b0c (SRIOV VF only)
-  ve2,      // VE2 edge, device_id 0xb052
+  ve2,      // VE2 auxiliary device xilinx_aie.amdxdna
   npu12,    // UMQ (kernel submission) on platform aie2ps; T50/T20/T10 SKUs by device_id_str
 };
 
@@ -81,7 +81,7 @@ dev_filter_is_aie4(device::id_type id, device* dev)
 inline bool
 dev_filter_is_ve2(device::id_type id, device* dev)
 {
-  return test_device_id(dev) == npu_ve2_device_id;
+  return is_ve2_aux(dev) || test_device_id(dev) == npu_ve2_device_id;
 }
 
 inline bool
