@@ -70,9 +70,25 @@ aie4_binary_device_id(uint16_t device_id)
   }
 }
 
+// VE2 is the auxiliary device xilinx_aie.amdxdna. It reports the same board
+// part string as an npu12 SKU, but it is not the platform npu12 device.
+inline bool
+is_ve2_aux(device* dev)
+{
+  try {
+    query::sub_device_path::args query_arg = {std::string(""), 0};
+    auto sysfs = device_query<query::sub_device_path>(dev, query_arg);
+    return sysfs.find("xilinx_aie.amdxdna") != std::string::npos;
+  }
+  catch (const query::exception&) {
+    return false;
+  }
+}
+
 // Any platform (non-PCI) part reports a device-tree part string (query::
 // device_id_str) and has no PCI id. This covers every aie2ps/npu12 SKU, not just
-// the one the shim test has binaries for.
+// the one the shim test has binaries for. The VE2 auxiliary device also reports
+// a part string; callers that mean the platform npu12 part use is_npu12.
 inline bool
 is_platform_part(device* dev)
 {
@@ -85,6 +101,8 @@ is_platform_part(device* dev)
 inline bool
 is_npu12(device* dev)
 {
+  if (is_ve2_aux(dev))
+    return false;
   const auto part = device_query_default<query::device_id_str>(dev, std::string{});
   return part == "xc2ve3858"   // T50
       || part == "xc2ve3558"   // T20
@@ -111,11 +129,12 @@ test_device_id(device* dev)
   }
 }
 
-// A device is a shim_test target if it has a known PCI id or is the npu12 part.
+// A device is a shim_test target if it has a known PCI id, is the npu12 part,
+// or is the VE2 auxiliary device.
 inline bool
 is_shimtest_target(device* dev)
 {
-  return test_device_id(dev) != 0 || is_npu12(dev);
+  return test_device_id(dev) != 0 || is_npu12(dev) || is_ve2_aux(dev);
 }
 
 const binary_info& get_binary_info(device* dev, const char* tag = nullptr, const flow_type* flow = nullptr);
