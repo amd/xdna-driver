@@ -32,11 +32,20 @@ description: |
 
 properties:
   compatible:
-    const: amd,xdna-1234
+    items:
+      - enum:
+          - amd,xdna-xc2ve3858
+          - amd,xdna-xc2ve3558
+          - amd,xdna-xc2ve3358
+      - const: amd,xdna
     description: |
-      The amdxdna part id, "amd,xdna-<id>", where <id> is the 16-bit device id in
-      lower-case hex (amd,xdna-1234 for the aie2ps/npu12 part).  The driver binds
-      on it and userspace reads the id from it.
+      A part-specific "amd,xdna-<part>" string followed by the generic "amd,xdna".
+      Supported parts are the aie2ps/npu12 SKUs: amd,xdna-xc2ve3858 (T50),
+      amd,xdna-xc2ve3558 (T20) and amd,xdna-xc2ve3358 (T10).  The driver binds on
+      the generic "amd,xdna".  Userspace reads the part-specific string both to
+      display the part and to select the matching per-SKU xrt-smi validation
+      archive, so the part string is functional: an incorrect value changes runtime
+      behaviour (archive selection), not just the displayed name.
 
   mboxes:
     minItems: 2
@@ -127,7 +136,7 @@ examples:
 
     /* amdxdna platform (shared-memory + IPI) transport node */
     amdxdna {
-        compatible = "amd,xdna-1234";
+        compatible = "amd,xdna-xc2ve3858", "amd,xdna";
         mboxes = <&ipi_aie 0>, <&ipi_aie 1>;
         mbox-names = "tx", "rx";
         memory-region = <&mgmt_shmem>, <&doorbell_shmem>, <&rpu_cma>, <&aie_cma>;

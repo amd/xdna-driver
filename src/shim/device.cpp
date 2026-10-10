@@ -18,6 +18,7 @@
 #include <sys/syscall.h>
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cstddef>
 #include <cstdio>
@@ -28,6 +29,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -185,48 +187,43 @@ struct sysfs_fcn<std::string>
   }
 };
 
-// A non-PCI amdxdna part carries its device id in the device-tree compatible,
-// as "amd,xdna-<hex-id>" (exposed at <dev>/of_node/compatible); this is the
-// device's own id, not an XRT invention.  Parse and return it, or 0 if no such
-// compatible is present.  The sysfs node is a NUL-separated list, so the id
-// token ends at the following NUL.
-static uint16_t
-platform_device_id(const std::shared_ptr<xrt_core::pci::dev>& pdev)
+// A platform (non-PCI) amdxdna part is identified by its device-tree compatible
+// (exposed at <dev>/of_node/compatible), which carries a part-specific
+// "amd,xdna-<part>" entry (e.g. "amd,xdna-xc2ve3858" for the aie2ps/npu12 T50
+// part) alongside the generic "amd,xdna".  Return the <part> suffix, or empty if
+// no such entry is present (e.g. a PCI part, which has no of_node/compatible).
+// The sysfs node is a NUL-separated list; scan every entry so the result does not
+// depend on the order the compatibles are listed in.
+static std::string
+platform_device_id_str(const std::shared_ptr<xrt_core::pci::dev>& pdev)
 {
   std::string compat;
   try {
     compat = sysfs_fcn<std::string>::get(pdev, "", "of_node/compatible");
   }
   catch (const xrt_core::query::sysfs_error&) {
-    return 0;
+    return {};
   }
 
   static const std::string prefix = "amd,xdna-";
-  auto pos = compat.find(prefix);
-  if (pos == std::string::npos)
-    return 0;
+  size_t start = 0;
+  while (start < compat.size()) {
+    auto end = compat.find('\0', start);
+    if (end == std::string::npos)
+      end = compat.size();
+    std::string token = compat.substr(start, end - start);
+    start = end + 1;
 
-  return static_cast<uint16_t>(
-    std::strtoul(compat.c_str() + pos + prefix.size(), nullptr, 16));
-}
+    if (token.rfind(prefix, 0) == 0)
+      return token.substr(prefix.size());
+  }
 
-/*
- * VE2 aie2ps is the auxiliary device xilinx_aie.amdxdna. It has no PCI id and
- * no amd,xdna-<id> compatible. 0xb052:0x01 is the id XRT already maps to
- * hardware_type::aie2ps, so examine can report the architecture.
- */
-static constexpr uint16_t ve2_aie2ps_device_id = 0xb052;
-static constexpr uint8_t ve2_aie2ps_revision_id = 0x01;
-
-static bool
-is_ve2_aie2ps(const std::shared_ptr<xrt_core::pci::dev>& pdev)
-{
-  return pdev->m_sysfs_name.find("xilinx_aie.amdxdna") != std::string::npos;
+  return {};
 }
 
 // Device-aware is_aie4: a PCI part is matched by its device id; a platform
-// part is matched by its device-tree compatible. VE2 uses the same aie4
-// ioctls, including the CERT version query, so it is included here too.
+// (non-PCI) part has no "device" sysfs node, so identify it by its device-tree
+// compatible instead.  Every amdxdna part on the platform bus is an aie4 part.
 static bool
 is_aie4(const xrt_core::device* device)
 {
@@ -235,7 +232,7 @@ is_aie4(const xrt_core::device* device)
     return is_aie4(sysfs_fcn<uint16_t>::get(pdev, "", "device"));
   }
   catch (const xrt_core::query::sysfs_error&) {
-    return platform_device_id(pdev) != 0 || is_ve2_aie2ps(pdev);
+    return !platform_device_id_str(pdev).empty();
   }
 }
 
@@ -865,33 +862,18 @@ struct pcie_id
 
     const auto pdev = get_pcidev(device);
 
-    try {
-      pcie_id.device_id = sysfs_fcn<uint16_t>::get(pdev, "", "device");
-      pcie_id.revision_id = sysfs_fcn<uint8_t>::get(pdev, "", "revision");
-    }
-    catch (const xrt_core::query::sysfs_error&) {
-      // A platform device has no "device"/"revision" sysfs nodes. Identify
-      // npu12 by its device-tree compatible. VE2 has neither, so publish the
-      // aie2ps id examine already understands.
-      auto id = platform_device_id(pdev);
-      if (id) {
-        pcie_id.device_id = id;
-        pcie_id.revision_id = 0;
-      } else if (is_ve2_aie2ps(pdev)) {
-        pcie_id.device_id = ve2_aie2ps_device_id;
-        pcie_id.revision_id = ve2_aie2ps_revision_id;
-      } else {
-        throw;
-      }
-    }
+    // A platform (non-PCI) part has no "device"/"revision" sysfs nodes and no PCI
+    // id; let the sysfs_error propagate.  Such parts are identified by their
+    // device-tree compatible via query::device_id_str, not by a PCI id.
+    pcie_id.device_id = sysfs_fcn<uint16_t>::get(pdev, "", "device");
+    pcie_id.revision_id = sysfs_fcn<uint8_t>::get(pdev, "", "revision");
 
     return pcie_id;
   }
 };
 
-// query::pcie_device is the raw PCI device id.  Route it through pcie_id so the
-// platform npu12 (which lacks the "device" sysfs node) resolves via its
-// device-tree compatible instead of throwing.
+// query::pcie_device is the raw PCI device id.  Route it through pcie_id; it
+// throws for a platform (non-PCI) part, which has no PCI id.
 struct pcie_device
 {
   using result_type = query::pcie_device::result_type;
@@ -900,6 +882,20 @@ struct pcie_device
   get(const xrt_core::device* device, key_type key)
   {
     return pcie_id::get(device, key).device_id;
+  }
+};
+
+// query::device_id_str is the human-readable part number sourced from the
+// device-tree compatible.  Empty for parts that don't carry one (PCI parts),
+// letting XRT fall back to the numeric device id.
+struct device_id_str
+{
+  using result_type = query::device_id_str::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    return platform_device_id_str(get_pcidev(device));
   }
 };
 
@@ -1246,15 +1242,33 @@ struct archive_path
     switch (key) {
     case key_type::archive_path:
     {
-      const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
       xrt_core::smi::smi_hardware_config smi_hrdw;
-      switch (smi_hrdw.get_family(pcie_id)) {
+      switch (smi_hrdw.get_family(device)) {
       case xrt_core::smi::smi_hardware_config::hardware_family::phoenix:
         return std::string("amdxdna/bins/xrt_smi_phx.a");
       case xrt_core::smi::smi_hardware_config::hardware_family::strix:
         return std::string("amdxdna/bins/xrt_smi_strx.a");
       case xrt_core::smi::smi_hardware_config::hardware_family::npu3:
         return std::string("amdxdna/bins/xrt_smi_npu3.a");
+      case xrt_core::smi::smi_hardware_config::hardware_family::aie2ps:
+      {
+        // VE2/aie2ps parts each ship their own validate archive, so select the
+        // per-SKU subdir from the device-tree part string (query::device_id_str).
+        static constexpr std::array<std::pair<std::string_view, std::string_view>, 3>
+        ve2_part_sku{{
+          { "xc2ve3858", "t50" },
+          { "xc2ve3558", "t20" },
+          { "xc2ve3358", "t10" },
+        }};
+        const auto part =
+          xrt_core::device_query_default<query::device_id_str>(device, std::string{});
+        const auto it = std::find_if(ve2_part_sku.begin(), ve2_part_sku.end(),
+          [&part](const auto& e) { return e.first == part; });
+        if (it == ve2_part_sku.end())
+          throw xrt_core::generic_error(ENOTSUP,
+            "No smi archive for VE2/aie2ps part '" + part + "'");
+        return std::string("amdxdna/bins/").append(it->second).append("/xrt_smi_ve2.a");
+      }
       default:
         throw xrt_core::generic_error(ENOTSUP, "Unsupported hardware type");
       }
@@ -2577,6 +2591,7 @@ initialize_query_table()
   emplace_func0_request<query::pcie_bdf,                       bdf>();
   emplace_func0_request<query::pcie_id,                        pcie_id>();
   emplace_func0_request<query::pcie_device,                    pcie_device>();
+  emplace_func0_request<query::device_id_str,                  device_id_str>();
   emplace_func0_request<query::total_cols,                     total_cols>();
   emplace_sysfs_get<query::pcie_express_lane_width>            ("", "link_width");
   emplace_sysfs_get<query::pcie_express_lane_width_max>        ("", "link_width_max");
