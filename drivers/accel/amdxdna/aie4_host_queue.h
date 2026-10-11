@@ -70,6 +70,8 @@ struct host_indirect_packet_entry {
 #define HIPE_HOST_ADDR_HIGH_MASK	GENMASK(24, 0)
 #define HIPE_UC_INDEX_SHIFT		25
 #define HIPE_UC_INDEX_MASK		GENMASK(31, 25)
+/* Largest uc index the entry can carry; a bigger one would be truncated. */
+#define HIPE_UC_INDEX_MAX		(HIPE_UC_INDEX_MASK >> HIPE_UC_INDEX_SHIFT)
 
 static inline void hipe_set_host_addr_high(u32 *val, u32 addr_hi)
 {
