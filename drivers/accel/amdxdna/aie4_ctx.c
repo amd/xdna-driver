@@ -1084,8 +1084,7 @@ static int wait_till_connected_hsa_not_full(struct amdxdna_hwctx *hwctx,
 }
 
 static int fill_indirect_pkt(struct amdxdna_hwctx_priv *priv, u64 slot_idx,
-			     u32 total_slots, struct amdxdna_cmd_start_dpu *dpu,
-			     u16 entries)
+			     struct amdxdna_cmd_start_dpu *dpu, u16 entries)
 {
 	struct host_queue_packet *pkt = &priv->umq_pkts[slot_idx];
 	struct host_indirect_packet_entry *hipe =
@@ -1099,17 +1098,25 @@ static int fill_indirect_pkt(struct amdxdna_hwctx_priv *priv, u64 slot_idx,
 		u32 idx;
 
 		/*
-		 * dpu is the user-shared cmd_abo payload, so uc_index is read at
-		 * use time here and indexes priv->umq_indirect_pkts[].  Reject an
-		 * out-of-range value: the slot is reused, so skipping the entry
-		 * would leave a stale one that count still advertises to CERT.
-		 * Abort before the packet is published.
+		 * uc_index is the column this entry targets, so the only bound
+		 * that applies is what the entry can encode - a wider value is
+		 * truncated by hipe_set_uc_index() and would silently target the
+		 * wrong column.  dpu is the user-shared cmd_abo payload, so read
+		 * it once and check before use, and reject rather than skip: the
+		 * slot is reused, so a skipped entry would leave a stale one that
+		 * count still advertises to CERT.
 		 */
-		if (uci >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
-			XDNA_ERR(priv->hwctx->client->xdna, "Invalid uc index %d", uci);
+		if (uci > HIPE_UC_INDEX_MAX) {
+			XDNA_ERR(priv->hwctx->client->xdna, "Invalid uc index %u", uci);
 			return -EINVAL;
 		}
-		idx = uci * total_slots + slot_idx;
+		/*
+		 * Which leaf an entry points at is host-private - CERT follows
+		 * the pointer below and takes the column from the entry - so
+		 * index the pool by position in the chain.  Indexing it by
+		 * uc_index would tie the pool's width to the column number.
+		 */
+		idx = slot_idx * HSA_MAX_LEVEL1_INDIRECT_ENTRIES + i;
 		hipd = &priv->umq_indirect_pkts[idx];
 		indirect_pkt_dev_addr = priv->umq_indirect_pkts_dev_addr +
 			sizeof(struct host_indirect_packet_data) * idx;
@@ -1192,7 +1199,8 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 	 */
 	chained = dpu->chained;
 	if (chained >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
-		XDNA_ERR(xdna, "Invalid DPU data");
+		XDNA_ERR(xdna, "DPU chain of %u exceeds the %u entries a packet holds",
+			 chained + 1, HSA_MAX_LEVEL1_INDIRECT_ENTRIES);
 		return -EINVAL;
 	}
 	if (payload_size < (u32)(chained + 1) * sizeof(*dpu)) {
@@ -1214,7 +1222,7 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 
 	slot_idx = priv->write_index & (CTX_MAX_CMDS - 1);
 	if (chained) {
-		ret = fill_indirect_pkt(priv, slot_idx, CTX_MAX_CMDS, dpu, chained + 1);
+		ret = fill_indirect_pkt(priv, slot_idx, dpu, chained + 1);
 		if (ret)
 			return ret;
 	} else {
