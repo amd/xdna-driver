@@ -402,6 +402,8 @@ aie2_sched_drvcmd_resp_handler(void *handle, void __iomem *data, size_t size)
 	struct amdxdna_sched_job *job = handle;
 	int ret = 0;
 
+	amdxdna_io_stats_job_done(job->hwctx->client);
+
 	if (unlikely(!data || size != sizeof(u32))) {
 		job->drv_cmd->result = U32_MAX;
 		ret = -EINVAL;
@@ -479,6 +481,7 @@ static void aie2_job_run(struct amdxdna_sched_job *job)
 		goto fail;
 	}
 
+	amdxdna_io_stats_job_start(job->hwctx->client);
 	if (job->drv_cmd) {
 		switch (job->drv_cmd->opcode) {
 		case SYNC_DEBUG_BO:
@@ -510,13 +513,13 @@ static void aie2_job_run(struct amdxdna_sched_job *job)
 	}
 	/* job is submitted to device, do not access it after this point */
 	aie2_tdr_signal(hwctx->client->xdna);
-	amdxdna_io_stats_job_start(hwctx->client);
 	trace_xdna_job_queue(hwctx->name, seq,
 			     atomic64_read(&hwctx->job_submit_cnt) -
 			     atomic64_read(&hwctx->job_free_cnt) + 1, "sent to device");
 	return;
 
 fail:
+	amdxdna_io_stats_job_done(job->hwctx->client);
 	if (job->drv_cmd)
 		job->drv_cmd->result = U32_MAX;
 	else
