@@ -149,11 +149,10 @@ void xdna_mailbox_drain_channel(struct mailbox_channel *mailbox_chann);
  *
  * @mailbox_chann: Mailbox channel handle
  * @msg: message struct for message information
- * @tx_timeout_ms: the timeout value for sending the message in ms.
  *
  * Return: If success return 0, otherwise, return error code
  */
 int xdna_mailbox_send_msg(struct mailbox_channel *mailbox_chann,
-			  const struct xdna_mailbox_msg *msg, u64 tx_timeout_ms);
+			  const struct xdna_mailbox_msg *msg);
 
 #endif /* _AIE_MAILBOX_ */

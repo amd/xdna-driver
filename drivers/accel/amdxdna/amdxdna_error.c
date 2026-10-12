@@ -371,7 +371,7 @@ reregister:
 }
 
 int amdxdna_async_events_alloc(struct aie_device *aie,
-			       u32 total_col)
+			       u32 num_events)
 {
 	struct amdxdna_dev *xdna = aie->xdna;
 	struct amdxdna_async_events *events;
@@ -379,11 +379,11 @@ int amdxdna_async_events_alloc(struct aie_device *aie,
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
-	events = kzalloc_flex(*events, event, total_col);
+	events = kzalloc_flex(*events, event, num_events);
 	if (!events)
 		return -ENOMEM;
 
-	events->event_cnt = total_col;
+	events->event_cnt = num_events;
 
 	events->wq = alloc_ordered_workqueue(AMDXDNA_ASYNC_ERR_WQ_NAME, 0);
 	if (!events->wq) {
