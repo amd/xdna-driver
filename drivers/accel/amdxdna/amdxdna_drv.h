@@ -147,6 +147,9 @@ struct amdxdna_dev_info {
 	 */
 	bool				partition_per_hwctx;
 
+	/* Use two-level HSA indirect packets for distributed commands. */
+	bool				hsa_level2_indirect;
+
 	/* Asynchronous error reporting data (per AIE generation). */
 	const struct aie_error_lut_set	*luts;
 	u32				async_max_status_code;
