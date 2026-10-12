@@ -478,7 +478,7 @@ int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 		XDNA_DBG(ndev->aie.xdna, "opcode 0x%x not allowed", msg.opcode);
 		return -EOPNOTSUPP;
 	}
-	return xdna_mailbox_send_msg(ndev->aie.mgmt_chann, &msg, TX_TIMEOUT);
+	return xdna_mailbox_send_msg(ndev->aie.mgmt_chann, &msg);
 }
 
 int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
