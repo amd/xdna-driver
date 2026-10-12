@@ -22,6 +22,7 @@
 #include "amdxdna_mailbox.h"
 
 struct host_queue_packet;
+struct host_queue_indirect_hdr;
 struct host_indirect_packet_data;
 struct amdxdna_hwctx;
 struct amdxdna_dev_priv;
@@ -102,6 +103,8 @@ struct amdxdna_hwctx_priv {
 	 */
 	u64                             write_index;
 	struct host_queue_packet        *umq_pkts;
+	struct host_queue_indirect_hdr  *umq_indirect_hdrs;
+	u64                             umq_indirect_hdrs_dev_addr;
 	struct host_indirect_packet_data *umq_indirect_pkts;
 	u64                             umq_indirect_pkts_dev_addr;
 	/*
@@ -303,6 +306,7 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
  * one made at probe.
  */
 #define AIE4_PART_PER_HWCTX(xdna) ((xdna)->dev_info->partition_per_hwctx)
+#define AIE4_HSA_LEVEL2_INDIRECT(xdna) ((xdna)->dev_info->hsa_level2_indirect)
 
 /* aie4.c transport-independent query/policy helpers. */
 int aie4_partition_create(struct amdxdna_dev_hdl *ndev, u32 col_start,
