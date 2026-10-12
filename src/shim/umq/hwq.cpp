@@ -39,18 +39,20 @@ namespace shim_xdna {
 hwq_umq::
 hwq_umq(const device& dev, size_t nslots) : hwq(dev)
 {
-  // host queue layout:
-  //   host_queue_header_t
-  //   host_queue_packet_t [nslots]
-  //   indirect [HSA_MAX_LEVEL1_INDIRECT_ENTRIES * indirect_buffer * nslots]
+  // Reserve enough space for either kernel layout. The driver selects level 1
+  // or level 2 from its per-device information and initializes that layout.
+  // User-mode submission remains level 1 and uses the pool directly after the
+  // packet ring, so the shim does not need to identify the device capability.
   const size_t header_sz = sizeof(struct host_queue_header);
   const size_t queue_sz = sizeof(struct host_queue_packet) * nslots;
-  const size_t indirect_sz = sizeof(struct host_indirect_data) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES * nslots;
+  const size_t level2_hdrs_sz = sizeof(struct host_queue_indirect_hdr) * nslots;
+  const size_t level2_indirect_sz = sizeof(struct host_indirect_data) *
+    HSA_MAX_LEVEL2_INDIRECT_ENTRIES * nslots;
 
 #ifdef UMQ_HELLO_TEST
   const size_t umq_sz = 0x200000;
 #else
-  const size_t umq_sz = header_sz + queue_sz + indirect_sz;
+  const size_t umq_sz = header_sz + queue_sz + level2_hdrs_sz + level2_indirect_sz;
 #endif
   shim_debug("Creating UMQ HW queue of size %ld", umq_sz);
 
@@ -64,7 +66,7 @@ hwq_umq(const device& dev, size_t nslots) : hwq(dev)
   m_umq_indirect_buf = reinterpret_cast<volatile struct host_indirect_data *>
     (reinterpret_cast<uintptr_t>(m_umq_bo_buf) + header_sz + queue_sz);
 
-  // init slots and indirect buf
+  // Initialize the level-1 pool used by user-mode submission.
   for (size_t i = 0; i < nslots; i++)
     init_indirect_buf(&m_umq_indirect_buf[i * HSA_MAX_LEVEL1_INDIRECT_ENTRIES], HSA_MAX_LEVEL1_INDIRECT_ENTRIES);
 

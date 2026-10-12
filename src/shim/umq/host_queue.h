@@ -35,6 +35,7 @@ enum hsa_cmd_state
 #define HSA_INVALID_PAGE          HSA_ERR(self_id * 100 + 5)
 #define HSA_PKT_TIMEOUT           HSA_ERR(self_id * 100 + 6)
 #define HSA_MAX_LEVEL1_INDIRECT_ENTRIES (6)
+#define HSA_MAX_LEVEL2_INDIRECT_ENTRIES (36)
 
 #define LAST_CMD (0)
 #define NOT_LAST_CMD (1)
@@ -251,6 +252,11 @@ struct host_queue_packet
 struct host_indirect_data {
   struct common_header header;
   struct exec_buf  payload;
+};
+
+struct host_queue_indirect_hdr {
+  struct common_header header;
+  struct host_indirect_packet_entry data[HSA_MAX_LEVEL2_INDIRECT_ENTRIES];
 };
 
 #endif
