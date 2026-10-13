@@ -50,6 +50,16 @@ void
 xdna_hwq::
 submit_command(xrt_core::buffer_handle *cmd_bo)
 {
+  // Runtime pipeline check: the build still compiles, but the command is
+  // never submitted, so xrt-smi validate fails.
+  if (cmd_bo) {
+    auto boh = static_cast<shim_xdna_edge::xdna_bo*>(cmd_bo);
+    auto cmdpkt = reinterpret_cast<volatile ert_packet *>(boh->vaddr());
+    if (cmdpkt)
+      cmdpkt->state = ERT_CMD_STATE_ERROR;
+  }
+  return;
+
   if (!cmd_bo)
     shim_err(EINVAL, "submit_command: cmd_bo is NULL");
 
