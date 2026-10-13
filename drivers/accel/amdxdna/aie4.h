@@ -233,10 +233,17 @@ int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 s
 int aie4_msg_get_ctx_restore_pool_size(struct amdxdna_dev_hdl *ndev, u32 *buff_size);
 int aie4_msg_get_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 int aie4_msg_set_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+void aie4_msg_set_power_hint(struct amdxdna_dev_hdl *ndev, u8 power_hint);
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie4_configure_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u8 mode);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
+void aie4_set_dpm_cap_percent_table(struct amdxdna_dev_hdl *ndev);
+void aie4_set_dpm_compute_params(struct amdxdna_dev_hdl *ndev);
+void aie4_set_dpm_pwr_ovr_percent_table(struct amdxdna_dev_hdl *ndev);
+void aie4_set_dpm_bw_busyness(struct amdxdna_dev_hdl *ndev);
+void aie4_configure_hw_context_dpm(struct amdxdna_dev_hdl *ndev, u32 hw_context_id,
+				   const struct amdxdna_qos_info *qos);
 int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 				       u32 hw_context_id, u32 property,
 				       const struct aie4_msg_context_config_cert_logging *cl);
@@ -263,6 +270,12 @@ enum aie4_fw_feature {
 	AIE4_CALIBRATE_CLOCK,
 	AIE4_HSA_COMMAND,
 	AIE4_APP_HEALTH,
+	AIE4_POWER_HINT,
+	AIE4_DPM_CAP_TABLE,
+	AIE4_CONFIGURE_DPM,
+	AIE4_CTX_DPM_QOS,
+	AIE4_DPM_BW_BUSYNESS,
+	AIE4_DPM_PWR_OVR_TABLE,
 	AIE4_FEATURE_MAX
 };
 

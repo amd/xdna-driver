@@ -41,6 +41,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_AIE_TILE_INFO                    = 0x30006,
 	AIE4_MSG_OP_AIE_VERSION_INFO                 = 0x30007,
 	AIE4_MSG_OP_AIE_COLUMN_INFO                  = 0x30008,
+	AIE4_MSG_OP_POWER_HINT                       = 0x3000A,
 	AIE4_MSG_OP_POWER_OVERRIDE                   = 0x3000B,
 	AIE4_MSG_OP_AIE_RW_ACCESS                    = 0x3000E,
 	AIE4_MSG_OP_GET_APP_HEALTH_STATUS            = 0x3000F,
@@ -122,8 +123,77 @@ enum aie4_msg_runtime_config_type {
 	AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL		= 0x5,
 	AIE4_RUNTIME_CONFIG_HWS_DEBUG_MODE		= 0xB,
 	AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS	= 0xD,
+	AIE4_RUNTIME_CONFIG_CONFIGURE_DPM		= 0xF,
+	AIE4_RUNTIME_CONFIG_DPM_BW_BUSYNESS_ENABLE	= 0x15,
+	AIE4_RUNTIME_CONFIG_CONFIGURE_DPM_BW		= 0x16,
+	AIE4_RUNTIME_CONFIG_DPM_CAP_PERCENT_TABLE	= 0x18,
+	AIE4_RUNTIME_CONFIG_DPM_PWR_OVR_PERCENT_TABLE	= 0x19,
 	AIE4_MAX_RUNTIME_CONFIG
 };
+
+#define AIE4_DPM_CAP_LEVEL_COUNT		3
+#define AIE4_DPM_CAP_PRIORITY_COUNT	4
+
+struct aie4_msg_dpm_cap_percent_entry {
+	__u8 compute_percent;
+	__u8 bandwidth_percent;
+} __packed;
+
+/*
+ * DPM cap percent table indexed by [efficiency_level][priority_band].
+ * The three efficiency levels run from Best Efficiency (0) to Best
+ * Performance (2). Firmware maps the active power hint to a row internally;
+ * the row index does not correspond directly to aie4_msg_power_hint enum
+ * values. Percent values are 0-100 targets into the DPM frequency range.
+ * The full table is replaced atomically. Only Classic and PF devices
+ * program this table (AIE4_OP_CP); VF firmware rejects the command.
+ */
+struct aie4_msg_runtime_config_dpm_cap_percent_table {
+	struct aie4_msg_dpm_cap_percent_entry
+		data[AIE4_DPM_CAP_LEVEL_COUNT][AIE4_DPM_CAP_PRIORITY_COUNT];
+} __packed;
+
+#define AIE4_DPM_PWR_OVR_MODE_COUNT	5
+
+struct aie4_msg_dpm_pwr_ovr_percent_entry {
+	__u8 compute_percent;
+	__u8 bandwidth_percent;
+} __packed;
+
+/*
+ * DPM power override percent table indexed by power mode:
+ * DEFAULT=0, LOW=1, MEDIUM=2, HIGH=3, TURBO=4.
+ * DEFAULT must remain {0, 0}. Percent values are targets into
+ * the DPM frequency range (0=Fmin, 100=Fmax).
+ */
+struct aie4_msg_runtime_config_dpm_pwr_ovr_percent_table {
+	struct aie4_msg_dpm_pwr_ovr_percent_entry data[AIE4_DPM_PWR_OVR_MODE_COUNT];
+	__u8 reserved[2];
+} __packed;
+
+struct aie4_msg_runtime_config_dpm_bw_busyness_enable {
+	__u32 state; /* 1 = enable, 0 = disable */
+} __packed;
+
+struct aie4_msg_runtime_config_configure_dpm_bw {
+	__u32 bw_high_cac_threshold;
+	__u32 bw_low_cac_threshold;
+	__u32 bw_sampling_window_ms;
+} __packed;
+
+/*
+ * DPM activity monitor configuration. Per firmware ABI, setting a field to 0
+ * is a "keep firmware default" sentinel; it does not mean zero. Only non-zero
+ * fields are applied by firmware.
+ */
+struct aie4_msg_runtime_config_configure_dpm {
+	__u32 active_hysteresis_ms;		/* 0 = keep firmware default */
+	__u32 sampling_window_ms;
+	__u8  up_threshold;
+	__u8  down_threshold;
+	__u8  compute_sys_efficiency_percent;	/* 0 = keep firmware default */
+	__u8  bw_sys_efficiency_percent;	/* 0 = keep firmware default */
+} __packed;
 
 /* HWS debug mode control: 0 = disable, 2 = arm on error. */
 enum aie4_msg_hws_debug_mode {
@@ -261,10 +331,20 @@ struct aie4_msg_context_config_cert_logging {
 	struct aie4_msg_context_config_cert_logging_info info[AIE4_MAX_NUM_CERTS];
 } __packed;
 
+struct aie4_msg_context_config_dpm {
+	__u32 egops;
+	__u32 fps;
+	__u32 data_movement;
+	__u32 latency_in_us;
+} __packed;
+
 struct aie4_msg_configure_hw_context_req {
 	__u32 hw_context_id;
 	__u32 property;
-	struct aie4_msg_context_config_cert_logging cert_logging;
+	union {
+		struct aie4_msg_context_config_cert_logging cert_logging;
+		struct aie4_msg_context_config_dpm dpm;
+	};
 } __packed;
 
 struct aie4_msg_configure_hw_context_resp {
@@ -328,6 +408,26 @@ struct aie4_msg_query_cert_firmware_version_resp {
 	__u8 build;
 	__u16 host_queue_major;
 	__u16 host_queue_minor;
+} __packed;
+
+enum aie4_msg_power_hint {
+	AIE4_NPU_AC_PERF = 0x0, /* Best Performance */
+	AIE4_NPU_AC_BAL  = 0x1, /* Balanced */
+	AIE4_NPU_AC_VSS  = 0x2, /* Best Efficiency */
+	AIE4_NPU_AC_NINT = 0x3, /* Non-interactive */
+	AIE4_NPU_DC_PERF = 0x4, /* Best Performance */
+	AIE4_NPU_DC_BAL  = 0x5, /* Balanced */
+	AIE4_NPU_DC_VSS  = 0x6, /* Best Efficiency */
+	AIE4_NPU_DC_NINT = 0x7, /* Non-interactive */
+	AIE4_NPU_POWER_HINT_COUNT,
+};
+
+struct aie4_msg_power_hint_req {
+	__u32 power_hint;
+} __packed;
+
+struct aie4_msg_power_hint_resp {
+	enum aie4_msg_status status;
 } __packed;
 
 struct aie4_msg_power_override_req {
@@ -690,11 +790,11 @@ struct aie4_msg_stop_fw_log_resp {
 	enum aie4_msg_status status;
 } __packed;
 
-/* Maximum trailing per-type payload (struct npu_msg_runtime_config_*) in the
- * firmware ABI; today the largest is npu_msg_runtime_config_event_trace_status
- * at 12 bytes. Rounded up to leave headroom for future configs.
+/* Maximum trailing per-type payload (struct aie4_msg_runtime_config_*) in the
+ * firmware ABI; today the largest is aie4_msg_runtime_config_dpm_cap_percent_table
+ * at 24 bytes (3 efficiency levels x 4 priority bands x 2 bytes).
  */
-#define AIE4_RUNTIME_CFG_MAX_DATA_SIZE 16
+#define AIE4_RUNTIME_CFG_MAX_DATA_SIZE 24
 
 struct aie4_msg_runtime_config_fw_log_level {
 	__u32 log_level;
