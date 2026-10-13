@@ -271,6 +271,23 @@ static void aie4_hwctx_partition_put(struct amdxdna_hwctx *hwctx, bool notify_fw
 	priv->partition_id = 0;
 }
 
+/*
+ * Firmware uses priority_level to determine the priority band for DPM cap
+ * table lookup. The ranges are: IDLE=0, NORMAL=1-15, FOCUS=16-29,
+ * REAL_TIME=30-31. Without setting this, priority_level=0 causes firmware
+ * to treat the context as IDLE band for DPM, regardless of priority_band.
+ */
+static u8 aie4_band_to_priority_level(u32 band)
+{
+	switch (band) {
+	case AIE4_CONTEXT_PRIORITY_BAND_IDLE:		return 0;
+	case AIE4_CONTEXT_PRIORITY_BAND_NORMAL:		return 1;
+	case AIE4_CONTEXT_PRIORITY_BAND_FOCUS:		return 16;
+	case AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME:	return 30;
+	default:					return 1;
+	}
+}
+
 int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 {
 	DECLARE_AIE_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
@@ -301,6 +318,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	req.request_num_tiles = hwctx->num_tiles;
 	req.pasid = aie4_msg_pasid(client);
 	req.priority_band = aie4_parse_priority_to_dev(hwctx->qos.priority);
+	req.priority_level = aie4_band_to_priority_level(req.priority_band);
 	req.restore_id = priv->restore_id;
 	req.hsa_addr_high = upper_32_bits(amdxdna_gem_dev_addr(priv->umq_bo));
 	req.hsa_addr_low = lower_32_bits(amdxdna_gem_dev_addr(priv->umq_bo));
@@ -323,6 +341,9 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	XDNA_DBG(xdna, "resp msix: %d, ctx id: %d, doorbell: %d",
 		 resp.job_complete_msix_idx, resp.hw_context_id,
 		 resp.doorbell_offset);
+
+	/* Send per-context DPM QoS parameters to firmware before publishing the ctx. */
+	aie4_configure_hw_context_dpm(ndev, resp.hw_context_id, &hwctx->qos);
 
 	/* setup interrupt completion per msix index */
 	cert_comp = aie4_lookup_cert_comp(ndev, resp.job_complete_msix_idx);

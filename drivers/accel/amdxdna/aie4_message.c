@@ -62,6 +62,7 @@ static const struct aie4_role_allow aie4_opcode_allow[] = {
 	{ AIE4_MSG_OP_AIE_TILE_INFO,			AIE4_OP_CV },
 	{ AIE4_MSG_OP_AIE_VERSION_INFO,			AIE4_OP_CV },
 	{ AIE4_MSG_OP_AIE_COLUMN_INFO,			AIE4_OP_CV },
+	{ AIE4_MSG_OP_POWER_HINT,			AIE4_OP_CV },
 	{ AIE4_MSG_OP_POWER_OVERRIDE,			AIE4_OP_CV },
 	{ AIE4_MSG_OP_AIE_RW_ACCESS,			AIE4_OP_CV },
 	{ AIE4_MSG_OP_GET_APP_HEALTH_STATUS,		AIE4_OP_CV },
@@ -90,6 +91,11 @@ static const struct aie4_role_allow aie4_runtime_cfg_allow[] = {
 	{ AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL,		AIE4_OP_CP },
 	{ AIE4_RUNTIME_CONFIG_HWS_DEBUG_MODE,		AIE4_OP_CP },
 	{ AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS,	AIE4_OP_CP },
+	{ AIE4_RUNTIME_CONFIG_CONFIGURE_DPM,		AIE4_OP_CP },
+	{ AIE4_RUNTIME_CONFIG_DPM_BW_BUSYNESS_ENABLE,	AIE4_OP_CP },
+	{ AIE4_RUNTIME_CONFIG_CONFIGURE_DPM_BW,		AIE4_OP_CP },
+	{ AIE4_RUNTIME_CONFIG_DPM_CAP_PERCENT_TABLE,	AIE4_OP_CP },
+	{ AIE4_RUNTIME_CONFIG_DPM_PWR_OVR_PERCENT_TABLE, AIE4_OP_CP },
 };
 
 static u32 aie4_dev_role(struct aie_device *aie)
@@ -394,6 +400,27 @@ int aie4_msg_set_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
 	return ret;
 }
 
+void aie4_msg_set_power_hint(struct amdxdna_dev_hdl *ndev, u8 power_hint)
+{
+	DECLARE_AIE_MSG(aie4_msg_power_hint, AIE4_MSG_OP_POWER_HINT);
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_POWER_HINT)) {
+		XDNA_DBG(ndev->aie.xdna, "Power hint not supported, skipped");
+		return;
+	}
+
+	req.power_hint = power_hint;
+
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set power hint %u, ret %d", (u32)power_hint, ret);
+	} else {
+		XDNA_DBG(ndev->aie.xdna, "Power hint set to %u", (u32)power_hint);
+	}
+}
+
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode)
 {
 	DECLARE_AIE_MSG(aie4_msg_power_override, AIE4_MSG_OP_POWER_OVERRIDE);
@@ -447,6 +474,40 @@ int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 			 hw_context_id, property, ret);
 
 	return ret;
+}
+
+void aie4_configure_hw_context_dpm(struct amdxdna_dev_hdl *ndev, u32 hw_context_id,
+				   const struct amdxdna_qos_info *qos)
+{
+	DECLARE_AIE_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_CTX_DPM_QOS)) {
+		XDNA_DBG(xdna, "ctx DPM QoS not supported, skipped");
+		return;
+	}
+
+	/*
+	 * Forward QoS hints directly to firmware, matching MCDM behavior.
+	 * Zero values (the common default) are valid "no hint" inputs;
+	 * firmware applies its own defaults for any zero field.
+	 */
+	req.hw_context_id = hw_context_id;
+	req.property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_DPM;
+	req.dpm.egops = qos->gops;
+	req.dpm.fps = qos->fps;
+	req.dpm.data_movement = 0; /* not supported yet; always zero */
+	req.dpm.latency_in_us = qos->latency;
+
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_WARN(xdna, "DPM configure failed, ctx %u ret %d",
+			  hw_context_id, ret);
+	} else {
+		XDNA_DBG(xdna, "DPM configured, ctx %u gops %u fps %u latency %u us",
+			 hw_context_id, qos->gops, qos->fps, qos->latency);
+	}
 }
 
 int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
@@ -675,6 +736,153 @@ int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us)
 		XDNA_DBG(ndev->aie.xdna, "Context switch hysteresis set to %u us", timeout_us);
 
 	return ret;
+}
+
+void aie4_set_dpm_compute_params(struct amdxdna_dev_hdl *ndev)
+{
+	/*
+	 * Match MCDM defaults: aggressive thresholds (25/10 vs fw default 80/50)
+	 * allow the activity monitor to raise compute DPM faster, improving
+	 * latency for short-burst workloads that don't sustain high AIE4 busyness.
+	 * Other fields are set to 0 (firmware ignore/keep-default), matching MCDM.
+	 */
+	struct aie4_msg_runtime_config_configure_dpm cfg = {
+		.active_hysteresis_ms		= 0,
+		.sampling_window_ms		= 5,
+		.up_threshold			= 25,
+		.down_threshold			= 10,
+		.compute_sys_efficiency_percent	= 0,
+		.bw_sys_efficiency_percent	= 0,
+	};
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_CONFIGURE_DPM)) {
+		XDNA_DBG(ndev->aie.xdna, "DPM compute params not supported, skipped");
+		return;
+	}
+
+	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_CONFIGURE_DPM,
+				   &cfg, sizeof(cfg));
+	if (ret) {
+		XDNA_WARN(ndev->aie.xdna, "Failed to set DPM compute params, ret %d", ret);
+	} else {
+		XDNA_DBG(ndev->aie.xdna,
+			 "DPM compute params set: window=%u ms up=%u%% down=%u%%",
+			 cfg.sampling_window_ms, cfg.up_threshold, cfg.down_threshold);
+	}
+}
+
+void aie4_set_dpm_bw_busyness(struct amdxdna_dev_hdl *ndev)
+{
+	/*
+	 * CAC thresholds are absolute hardware counter values (not percentages).
+	 * Values match MCDM DEFAULT_DPM_BW_HIGH/LOW_CAC_THRESHOLD defaults;
+	 * sampling window matches the compute DPM window.
+	 */
+	struct aie4_msg_runtime_config_configure_dpm_bw bw = {
+		.bw_high_cac_threshold  = 5000,
+		.bw_low_cac_threshold   = 2500,
+		.bw_sampling_window_ms  = 5,
+	};
+	struct aie4_msg_runtime_config_dpm_bw_busyness_enable en = {
+		.state = 1,
+	};
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_DPM_BW_BUSYNESS)) {
+		XDNA_DBG(xdna, "DPM BW busyness not supported, skipped");
+		return;
+	}
+
+	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_CONFIGURE_DPM_BW,
+				   &bw, sizeof(bw));
+	if (ret) {
+		XDNA_WARN(xdna, "Failed to configure DPM BW params, ret %d", ret);
+		return;
+	}
+
+	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_DPM_BW_BUSYNESS_ENABLE,
+				   &en, sizeof(en));
+	if (ret)
+		XDNA_WARN(xdna, "Failed to enable DPM BW busyness, ret %d", ret);
+	else
+		XDNA_DBG(xdna, "DPM BW busyness enabled");
+}
+
+/*
+ * Default DPM power override percent table matching MCDM
+ * DefaultDpmPowerOverridePercentTable. Indexed by power mode:
+ * DEFAULT=0 (reserved, must be {0,0}), LOW=1, MEDIUM=2, HIGH=3, TURBO=4.
+ */
+static const struct aie4_msg_runtime_config_dpm_pwr_ovr_percent_table
+aie4_default_dpm_pwr_ovr = {
+	.data = {
+		{ 0,   0   }, /* DEFAULT - reserved */
+		{ 0,   0   }, /* LOW     -> Fmin    */
+		{ 50,  50  }, /* MEDIUM  -> 50%     */
+		{ 100, 100 }, /* HIGH    -> Fmax    */
+		{ 100, 100 }, /* TURBO   -> Fmax    */
+	},
+};
+
+void aie4_set_dpm_pwr_ovr_percent_table(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_DPM_PWR_OVR_TABLE)) {
+		XDNA_DBG(ndev->aie.xdna, "DPM power override percent table not supported, skipped");
+		return;
+	}
+
+	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_DPM_PWR_OVR_PERCENT_TABLE,
+				   &aie4_default_dpm_pwr_ovr,
+				   sizeof(aie4_default_dpm_pwr_ovr));
+	if (ret) {
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set DPM power override percent table, ret %d", ret);
+	} else {
+		XDNA_DBG(ndev->aie.xdna, "DPM power override percent table set");
+	}
+}
+
+/*
+ * Default DPM cap percent table matching MCDM DefaultDpmCapPercentTable.
+ * Indexed by [row][priority_band]. The three rows represent efficiency levels
+ * from Best Efficiency (row 0) to Best Performance (row 2). Firmware maps
+ * the active power hint to a row internally — the row index does NOT
+ * correspond directly to aie4_msg_power_hint enum values. Firmware log
+ * confirms that sending AIE4_NPU_AC_PERF (0x0) selects row 2 (Best
+ * Performance). Priority bands are IDLE, NORMAL, FOCUS, REAL_TIME. IDLE
+ * is at Fmin (0%), REAL_TIME always at Fmax (100%). NORMAL and FOCUS are
+ * capped per row:
+ *   compute (AIE clk): 20 / 50 / 100%
+ *   bandwidth (H clk): 33 / 66 / 100%
+ */
+static const struct aie4_msg_runtime_config_dpm_cap_percent_table aie4_default_dpm_cap = {
+	.data = {
+		/* row 0: Best Efficiency */
+		{ {0, 0}, {20, 33}, {20, 33}, {100, 100} },
+		/* row 1: Balanced       */
+		{ {0, 0}, {50, 66}, {50, 66}, {100, 100} },
+		/* row 2: Best Performance */
+		{ {0, 0}, {100, 100}, {100, 100}, {100, 100} },
+	},
+};
+
+void aie4_set_dpm_cap_percent_table(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_DPM_CAP_TABLE)) {
+		XDNA_DBG(ndev->aie.xdna, "DPM cap percent table not supported, skipped");
+		return;
+	}
+
+	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_DPM_CAP_PERCENT_TABLE,
+				   &aie4_default_dpm_cap, sizeof(aie4_default_dpm_cap));
+	if (ret)
+		XDNA_WARN(ndev->aie.xdna, "Failed to set DPM cap percent table, ret %d", ret);
 }
 
 int aie4_configure_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u8 mode)
