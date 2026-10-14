@@ -1105,7 +1105,19 @@ static int fill_indirect_pkt_level1(struct amdxdna_hwctx_priv *priv, u64 slot_id
 	struct host_queue_packet *pkt = &priv->umq_pkts[slot_idx];
 	struct host_indirect_packet_entry *hipe =
 		(struct host_indirect_packet_entry *)(pkt->data);
+	size_t max_entries = sizeof(pkt->data) / sizeof(*hipe);
 	u16 i;
+
+	/*
+	 * pkt->data holds the level-1 entries inline. A longer chain is a
+	 * level-2 header, so reject it before hipe walks off the packet.
+	 */
+	if (entries > max_entries) {
+		XDNA_ERR(priv->hwctx->client->xdna,
+			 "DPU chain of %u exceeds the %zu entries a level-1 packet holds",
+			 entries, max_entries);
+		return -EINVAL;
+	}
 
 	for (i = 0; i < entries; i++, dpu++, hipe++) {
 		struct host_indirect_packet_data *hipd;
@@ -1171,6 +1183,14 @@ static int fill_indirect_pkt_level2(struct amdxdna_hwctx_priv *priv, u64 slot_id
 	u64 hdr_dev_addr;
 	u16 i;
 
+	/* hdr->data is the out-of-line chain; the inline packet holds only l1. */
+	if (entries > ARRAY_SIZE(hdr->data)) {
+		XDNA_ERR(xdna,
+			 "DPU chain of %u exceeds the %zu entries a level-2 header holds",
+			 entries, ARRAY_SIZE(hdr->data));
+		return -EINVAL;
+	}
+
 	/* Level-1: a single inline entry pointing at this slot's level-2 header. */
 	hdr_dev_addr = priv->umq_indirect_hdrs_dev_addr +
 		slot_idx * sizeof(struct host_queue_indirect_hdr);
@@ -1198,7 +1218,7 @@ static int fill_indirect_pkt_level2(struct amdxdna_hwctx_priv *priv, u64 slot_id
 		 * a stale one that count still advertises to CERT.  Abort before
 		 * the packet is published.
 		 */
-		if (uci >= HSA_MAX_LEVEL2_INDIRECT_ENTRIES) {
+		if (uci > HIPE_UC_INDEX_MAX) {
 			XDNA_ERR(xdna, "Invalid uc index %d", uci);
 			return -EINVAL;
 		}
