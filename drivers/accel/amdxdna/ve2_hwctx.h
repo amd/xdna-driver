@@ -12,6 +12,7 @@
 
 #include <linux/atomic.h>
 #include <linux/ktime.h>
+#include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/timer.h>
 #include <linux/types.h>
@@ -101,9 +102,11 @@ struct amdxdna_ctx_priv {
 	atomic_t			nwaiters;	/* threads inside ve2_cmd_wait() */
 	bool				tdr_reset_pending;
 	bool				tdr_timeout_reported;
+	u8				tdr_attempts;
 
 	/* AIE partition management context backend. */
 	struct amdxdna_mgmtctx		*mgmtctx;
+	struct list_head		partition_link; /* member of mgmtctx->ctx_list */
 
 	struct ve2_config_hwctx		*hwctx_config;	/* [num_col] */
 

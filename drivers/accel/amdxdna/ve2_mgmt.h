@@ -44,10 +44,11 @@ struct ve2_ctx_fifo_entry {
 struct amdxdna_mgmtctx {
 	struct device			*aie_dev;
 	struct amdxdna_hwctx		*active_ctx;
+	struct list_head		ctx_list; /* hwctx sharing this partition */
 	struct list_head		ctx_command_fifo_head;
 	struct workqueue_struct		*work_queue;
 	struct work_struct		scheduler_work;
-	struct mutex			ctx_lock;/* protects active_ctx, scheduler, fifo */
+	struct mutex			ctx_lock;/* protects active_ctx, ctx_list, fifo */
 	u32				start_col;
 	u32				num_col;
 	u32				num_rows;
@@ -143,6 +144,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx);
 int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 			  u64 command_index);
 int ve2_mgmt_recover_hwctx(struct amdxdna_hwctx *hwctx);
+void ve2_mgmt_tdr_abandon(struct amdxdna_hwctx *hwctx);
 
 int notify_fw_cmd_ready(struct amdxdna_mgmtctx *mgmtctx);
 

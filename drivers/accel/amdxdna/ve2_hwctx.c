@@ -1063,6 +1063,7 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	vp->hwctx = hwctx;
 
 	init_waitqueue_head(&priv->job_free_wq);
+	INIT_LIST_HEAD(&vp->partition_link);
 	mutex_init(&vp->privctx_lock);
 	mutex_init(&vp->submit_lock);
 	mutex_init(&vp->coredump_cache.lock);
@@ -1982,16 +1983,25 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 		timed_out = false;
 
 	/*
-	 * Treat as a timeout when the timed wait expired, or when a MISC
-	 * interrupt woke us but CERT has not written a terminal completion
-	 * state (a stall). Otherwise process the (possibly errored) completion.
+	 * A host wait can name any sequence. When TDR is enabled, do not mark
+	 * that job TIMEOUT or release it here: CERT is still running, and
+	 * doing so makes recovery abort older commands instead of timing out
+	 * the oldest. Leave the jobs pending, and let recovery publish the
+	 * states after it halts CERT.
 	 */
 	if (timed_out || (vp->misc_intrpt_flag && !ve2_hqc_has_terminal_state(vp, seq))) {
-		ve2_handle_timeout(hwctx, job, seq);
 		if (ve2_tdr_enabled(hwctx->client->xdna)) {
-			WRITE_ONCE(vp->tdr_timeout_reported, true);
 			WRITE_ONCE(vp->tdr_reset_pending, true);
+			ve2_job_put(job);
+			mutex_unlock(&vp->hsa_queue.hq_lock);
+			ve2_tdr_queue(hwctx->client->xdna);
+			ret = wait_event_interruptible(vp->waitq,
+						       !READ_ONCE(vp->tdr_reset_pending));
+			trace_xdna_cmd_wait_done(hwctx->name, hwctx->id, seq,
+						 ret < 0 ? ret : 0);
+			return ret < 0 ? ret : 0;
 		}
+		ve2_handle_timeout(hwctx, job, seq);
 	} else {
 		ve2_process_hqc_completion(hwctx, job, seq);
 	}
