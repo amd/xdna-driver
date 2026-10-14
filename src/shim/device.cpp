@@ -2413,7 +2413,7 @@ struct flr_reset
     const std::string reset_path = device_sysfs + "/reset";
     std::ofstream ofs(reset_path);
     if (!ofs) {
-      shim_debug("Cannot open %s for write", reset_path.c_str());
+      shim_debug("Cannot open %s for write, device may not support FLR", reset_path.c_str());
       return false;
     }
     ofs << "1";
