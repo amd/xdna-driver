@@ -792,6 +792,18 @@ TEST_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector
   elf_io(id, sdev, arg, "good", &flow);
 }
 
+/*
+ * Full-column full-ELF nop — one submission.  Looks up the "nop_full_col" tag
+ * Distinct from the default "nop" ELF and from TEST_elf_io (PARTIAL_ELF "good" on
+ * NPU1/NPU4).
+ */
+void
+TEST_elf_nop_full_col_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
+{
+  static const flow_type flow = FULL_ELF;
+  elf_io(id, sdev, arg, "nop_full_col", &flow);
+}
+
 void
 TEST_preempt_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {

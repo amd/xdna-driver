@@ -71,9 +71,22 @@ dev_filter_is_npu3vf(device::id_type id, device* dev)
   return device_id == npu3_device_id1 || device_id == npu3a_device_id1;
 }
 
-// Classic AIE4 userpf or SRIOV VF (npu3 / npu3a).
+inline bool
+dev_filter_is_npu12(device::id_type id, device* dev)
+{
+  return is_npu12(dev);
+}
+
+// Device that uses AIE4 code path (npu3 / npu3a / npu12).
 inline bool
 dev_filter_is_aie4(device::id_type id, device* dev)
+{
+  return dev_filter_is_npu3(id, dev) || dev_filter_is_npu3vf(id, dev) || dev_filter_is_npu12(id, dev);
+}
+
+// Classic AIE4 userpf or SRIOV VF (npu3 / npu3a).
+inline bool
+dev_filter_is_npu3_hw(device::id_type id, device* dev)
 {
   return dev_filter_is_npu3(id, dev) || dev_filter_is_npu3vf(id, dev);
 }
@@ -82,12 +95,6 @@ inline bool
 dev_filter_is_ve2(device::id_type id, device* dev)
 {
   return test_device_id(dev) == npu_ve2_device_id;
-}
-
-inline bool
-dev_filter_is_npu12(device::id_type id, device* dev)
-{
-  return is_npu12(dev);
 }
 
 // hw_filter_table: non_npu is entry 0 with nullptr check (special case handled by
