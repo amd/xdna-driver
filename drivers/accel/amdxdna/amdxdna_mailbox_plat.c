@@ -788,12 +788,12 @@ void xdna_mailbox_drain_channel(struct mailbox_channel *mailbox_chann)
 }
 
 /*
- * Produce a command into the mgmt TX ring and raise the IPI.  @tx_timeout is
- * unused: there is no TX-side completion tracking here, and the sender already
- * bounds the round trip with its own RX timeout.
+ * Produce a command into the mgmt TX ring and raise the IPI.  There is no
+ * TX-side completion tracking here; the sender already bounds the round
+ * trip with its own RX timeout.
  */
 int xdna_mailbox_send_msg(struct mailbox_channel *mailbox_chann,
-			  const struct xdna_mailbox_msg *msg, u64 tx_timeout)
+			  const struct xdna_mailbox_msg *msg)
 {
 	struct mailbox *mb = mailbox_chann->mb;
 	struct plat_inflight_msg *ifm;
