@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <optional>
@@ -2389,6 +2390,42 @@ struct xrt_smi_lists
 };
 
 
+// Trigger FLR reset from xrt-smi using the PCI sysfs reset node.
+struct flr_reset
+{
+  using result_type = query::flr_reset::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    if (key != key_type::flr_reset)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto& pci_dev_impl = get_pcidev_impl(device);
+    const std::string device_sysfs = shim_xdna::dev_sysfs_root(pci_dev_impl.m_sysfs_name);
+
+    static constexpr char k_pci_prefix[] = "/sys/bus/pci/devices/";
+    if (device_sysfs.compare(0, sizeof(k_pci_prefix) - 1, k_pci_prefix) != 0) {
+      shim_debug("PCI FLR requires a PCI device, got %s", device_sysfs.c_str());
+      return false;
+    }
+
+    const std::string reset_path = device_sysfs + "/reset";
+    std::ofstream ofs(reset_path);
+    if (!ofs) {
+      shim_debug("Cannot open %s for write, device may not support FLR", reset_path.c_str());
+      return false;
+    }
+    ofs << "1";
+    ofs.flush();
+    if (!ofs) {
+      shim_debug("Failed to write PCI FLR to %s", reset_path.c_str());
+      return false;
+    }
+    return true;
+  }
+};
+
 struct sub_device_path
 {
   static std::any
@@ -2634,6 +2671,7 @@ initialize_query_table()
   emplace_func1_request<query::aie_read,                       aie_read>();
   emplace_func1_request<query::aie_write,                      aie_write>();
   emplace_func4_getput<query::auto_coredump,                   auto_coredump>();
+  emplace_func0_request<query::flr_reset,                      flr_reset>();
 }
 
 struct X { X() { initialize_query_table(); }};
