@@ -158,12 +158,6 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 mbox_fini:
 	ve2_mailbox_fini(ndev);
-	/*
-	 * Free the pool after the channel is stopped. aie4_setup_aie() can
-	 * publish a partial pool and then fail; the helper is NULL-safe when
-	 * setup never allocated one.
-	 */
-	amdxdna_async_events_free(&ndev->aie);
 xa_fini:
 	mutex_destroy(&ndev->cert_comp_lock);
 	xa_destroy(&ndev->cert_comp_xa);
@@ -224,6 +218,5 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.suspend		= ve2_suspend,
 	.runtime_resume		= ve2_resume,
 	.runtime_suspend	= ve2_suspend,
-	.register_async_event	= aie4_async_event_register,
 	.handle_dev_async_event	= aie4_handle_dev_event,
 };

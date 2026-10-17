@@ -43,7 +43,7 @@
 
 struct mailbox {
 	struct amdxdna_dev		*xdna;
-	struct mutex			lock;
+	struct mutex			lock; /* serializes VE2 mailbox opcodes */
 	bool				dropped;
 	bool				cert_ready;
 	bool				dev_info_ready;
@@ -315,7 +315,7 @@ struct mailbox_channel *xdna_mailbox_alloc_channel(struct mailbox *mb)
 {
 	struct mailbox_channel *chann;
 
-	chann = kzalloc(sizeof(*chann), GFP_KERNEL);
+	chann = kzalloc_obj(*chann);
 	if (!chann)
 		return NULL;
 
@@ -361,7 +361,7 @@ void xdna_mailbox_drain_channel(struct mailbox_channel *mailbox_chann)
 }
 
 int xdna_mailbox_send_msg(struct mailbox_channel *mailbox_chann,
-			  const struct xdna_mailbox_msg *msg, u64 tx_timeout_ms)
+			  const struct xdna_mailbox_msg *msg)
 {
 	struct mailbox *mb;
 	int ret;

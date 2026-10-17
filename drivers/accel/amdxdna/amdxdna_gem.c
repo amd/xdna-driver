@@ -1656,6 +1656,22 @@ int amdxdna_drm_get_bo_usage(struct drm_device *dev, struct amdxdna_drm_get_arra
 	return 0;
 }
 
+#if !IS_ENABLED(CONFIG_HMM_MIRROR)
+/*
+ * hmm_range_fault() is built only with CONFIG_HMM_MIRROR. Without it there
+ * is no population work to do. Clear map_invalid so the caller drops the BO
+ * from bo_invalid_list; leaving the flag set spins command submit.
+ */
+static int amdxdna_populate_range(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+
+	down_write(&xdna->notifier_lock);
+	abo->mem.map_invalid = false;
+	up_write(&xdna->notifier_lock);
+	return 0;
+}
+#else
 static int amdxdna_populate_range(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
@@ -1690,12 +1706,7 @@ again:
 
 	mapp->range.notifier_seq = mmu_interval_read_begin(&mapp->notifier);
 	mmap_read_lock(mm);
-#if IS_ENABLED(CONFIG_HMM_MIRROR)
 	ret = hmm_range_fault(&mapp->range);
-#else
-	ret = -EOPNOTSUPP;
-	XDNA_ERR(xdna, "HMM mirror is disabled; userptr population is unavailable");
-#endif
 	mmap_read_unlock(mm);
 	if (ret) {
 		if (ret == -EBUSY) {
@@ -1740,6 +1751,7 @@ put_mm:
 	mmput(mm);
 	return ret;
 }
+#endif
 
 int amdxdna_client_populate_ranges(struct amdxdna_client *client)
 {
