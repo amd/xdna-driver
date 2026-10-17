@@ -22,6 +22,7 @@
 #include "amdxdna_mailbox.h"
 
 struct host_queue_packet;
+struct host_queue_indirect_hdr;
 struct host_indirect_packet_data;
 struct amdxdna_hwctx;
 struct amdxdna_dev_priv;
@@ -102,6 +103,8 @@ struct amdxdna_hwctx_priv {
 	 */
 	u64                             write_index;
 	struct host_queue_packet        *umq_pkts;
+	struct host_queue_indirect_hdr  *umq_indirect_hdrs;
+	u64                             umq_indirect_hdrs_dev_addr;
 	struct host_indirect_packet_data *umq_indirect_pkts;
 	u64                             umq_indirect_pkts_dev_addr;
 	/*
@@ -233,10 +236,17 @@ int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 s
 int aie4_msg_get_ctx_restore_pool_size(struct amdxdna_dev_hdl *ndev, u32 *buff_size);
 int aie4_msg_get_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 int aie4_msg_set_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+void aie4_msg_set_power_hint(struct amdxdna_dev_hdl *ndev, u8 power_hint);
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie4_configure_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u8 mode);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
+void aie4_set_dpm_cap_percent_table(struct amdxdna_dev_hdl *ndev);
+void aie4_set_dpm_compute_params(struct amdxdna_dev_hdl *ndev);
+void aie4_set_dpm_pwr_ovr_percent_table(struct amdxdna_dev_hdl *ndev);
+void aie4_set_dpm_bw_busyness(struct amdxdna_dev_hdl *ndev);
+void aie4_configure_hw_context_dpm(struct amdxdna_dev_hdl *ndev, u32 hw_context_id,
+				   const struct amdxdna_qos_info *qos);
 int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 				       u32 hw_context_id, u32 property,
 				       const struct aie4_msg_context_config_cert_logging *cl);
@@ -263,6 +273,12 @@ enum aie4_fw_feature {
 	AIE4_CALIBRATE_CLOCK,
 	AIE4_HSA_COMMAND,
 	AIE4_APP_HEALTH,
+	AIE4_POWER_HINT,
+	AIE4_DPM_CAP_TABLE,
+	AIE4_CONFIGURE_DPM,
+	AIE4_CTX_DPM_QOS,
+	AIE4_DPM_BW_BUSYNESS,
+	AIE4_DPM_PWR_OVR_TABLE,
 	AIE4_FEATURE_MAX
 };
 
@@ -303,6 +319,7 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
  * one made at probe.
  */
 #define AIE4_PART_PER_HWCTX(xdna) ((xdna)->dev_info->partition_per_hwctx)
+#define AIE4_HSA_LEVEL2_INDIRECT(xdna) ((xdna)->dev_info->hsa_level2_indirect)
 
 /* aie4.c transport-independent query/policy helpers. */
 int aie4_partition_create(struct amdxdna_dev_hdl *ndev, u32 col_start,

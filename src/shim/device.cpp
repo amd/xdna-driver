@@ -2602,7 +2602,7 @@ initialize_query_table()
   emplace_sysfs_get<query::pcie_vendor>                        ("", "vendor");
 
   emplace_func0_getput<query::performance_mode,                performance_mode>();
-  emplace_func0_getput<query::preemption,                      preemption>();
+  emplace_func4_getput<query::preemption,                      preemption>();
   emplace_func0_getput<query::frame_boundary_preemption,       frame_boundary_preemption>();
 
   emplace_func4_request<query::event_trace_data,               event_trace>();
@@ -2633,7 +2633,7 @@ initialize_query_table()
   emplace_func0_request<query::npu_load,                       npu_load_info>();
   emplace_func1_request<query::aie_read,                       aie_read>();
   emplace_func1_request<query::aie_write,                      aie_write>();
-  emplace_func0_getput<query::auto_coredump,                   auto_coredump>();
+  emplace_func4_getput<query::auto_coredump,                   auto_coredump>();
 }
 
 struct X { X() { initialize_query_table(); }};

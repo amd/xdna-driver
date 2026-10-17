@@ -570,7 +570,7 @@ int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 	req.buf_size = size;
 
 	XDNA_DBG(ndev->aie.xdna, "Register addr 0x%llx size 0x%x", addr, size);
-	return xdna_mailbox_send_msg(ndev->aie.mgmt_chann, &msg, TX_TIMEOUT);
+	return xdna_mailbox_send_msg(ndev->aie.mgmt_chann, &msg);
 }
 
 int aie2_config_cu(struct amdxdna_hwctx *hwctx,
@@ -582,7 +582,6 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx,
 	struct config_cu_req req = { 0 };
 	struct xdna_mailbox_msg msg;
 	struct amdxdna_gem_obj *abo;
-	int ret;
 	int i;
 
 	if (!chann)
@@ -623,10 +622,7 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx,
 	msg.opcode = MSG_OP_CONFIG_CU;
 	msg.notify_cb = notify_cb;
 
-	mutex_lock(&hwctx->priv->io_lock);
-	ret = xdna_mailbox_send_msg(chann, &msg, 0);
-	mutex_unlock(&hwctx->priv->io_lock);
-	return ret;
+	return xdna_mailbox_send_msg(chann, &msg);
 }
 
 static int aie2_init_exec_cu_req(struct amdxdna_gem_obj *cmd_bo, void *req,
@@ -1064,7 +1060,7 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	print_hex_dump_debug("cmd: ", DUMP_PREFIX_OFFSET, 16, 4, &req,
 			     0x40, false);
 
-	ret = xdna_mailbox_send_msg(chann, &msg, 0);
+	ret = xdna_mailbox_send_msg(chann, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
@@ -1152,7 +1148,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 	msg.send_size = sizeof(req);
 	print_hex_dump_debug("cmdlist msg: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     &req, msg.send_size, false);
-	ret = xdna_mailbox_send_msg(chann, &msg, 0);
+	ret = xdna_mailbox_send_msg(chann, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
@@ -1199,7 +1195,7 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
 	msg.send_size = sizeof(req);
 	print_hex_dump_debug("cmdlist msg: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     &req, msg.send_size, false);
-	ret = xdna_mailbox_send_msg(chann, &msg, 0);
+	ret = xdna_mailbox_send_msg(chann, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
@@ -1235,7 +1231,7 @@ int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	msg.send_size = sizeof(req);
 	msg.opcode = MSG_OP_SYNC_BO;
 
-	ret = xdna_mailbox_send_msg(chann, &msg, 0);
+	ret = xdna_mailbox_send_msg(chann, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
@@ -1270,7 +1266,7 @@ int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *
 	msg.send_size = sizeof(req);
 	msg.opcode = MSG_OP_CONFIG_DEBUG_BO;
 
-	return xdna_mailbox_send_msg(chann, &msg, 0);
+	return xdna_mailbox_send_msg(chann, &msg);
 }
 
 int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,

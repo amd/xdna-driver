@@ -240,9 +240,10 @@ binary_info binary_infos[] = {
     .path = "local_shim_test_data/npu_ve2/nop/nop.elf",
     .flow = FULL_ELF,
   },
-  // npu12 (platform aie2ps, UMQ with kernel submission; routed through the aie4
-  // async-error test): aie2ps ELFs under its own npu12/ data dir.  Only the
-  // binaries exercised by that test are listed; add more tags as coverage grows.
+  // npu12 (platform aie2ps, UMQ with kernel submission): aie2ps ELFs under its
+  // own npu12/ data dir.  good/bad_timeout feed the async-error test; nop is the
+  // default full-ELF nop; nop_24col is the T20 24-column nop.  Add more tags as
+  // coverage grows.
   {
     .tag = "good",
     .platform = true,
@@ -264,6 +265,16 @@ binary_info binary_infos[] = {
     .flow = FULL_ELF,
   },
   {
+    .tag = "nop_full_col",
+    .platform = true,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu12/nop/nop_24col.elf",
+    .flow = FULL_ELF,
+  },
+  {
     .tag = "bad_timeout",
     .platform = true,
     .revision_id = npu_any_revision_id,
@@ -272,6 +283,28 @@ binary_info binary_infos[] = {
     },
     // aie2ps ELF that maskpolls forever so CERT hits its context timeout.
     .path = "local_shim_test_data/npu12/bad/bad_timeout.elf",
+    .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "5"} },
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "bad_op",
+    .platform = true,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu12/bad/bad_op.elf",
+    .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "0"} },
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "bad_addr",
+    .platform = true,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu12/bad/bad_addr.elf",
     .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "5"} },
     .flow = FULL_ELF,
   },

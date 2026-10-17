@@ -78,8 +78,9 @@ void aie4_partition_destroy(struct amdxdna_dev_hdl *ndev, u32 part_id)
  * Power override is a per-VF property in firmware: each supervisor (VF) stores
  * its own requested mode and the hypervisor arbitrates globally by taking the
  * highest mode across all supervisors. A full firmware reload on suspend clears
- * every supervisor override back to default, so each device type (PF, VF and
- * classic) must re-send its own cached override on resume.
+ * every supervisor override back to default, so each VF and classic device
+ * must re-send its own cached override on resume. PF devices do not support
+ * this opcode and this function is a no-op for them.
  */
 void aie4_restore_power_mode(struct amdxdna_dev_hdl *ndev)
 {
@@ -116,7 +117,6 @@ int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	aie4_restore_power_mode(ndev);
 	aie4_restore_force_preemption(ndev);
 	aie4_restore_hws_debug_mode(ndev);
 
@@ -178,9 +178,7 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 
 	/*
 	 * Do not reset ndev->pw_mode here: this runs on every resume, and
-	 * clobbering the cache would drop the user's power override. The
-	 * probe-time default is set in aie4m_pcidev_init(), and the cached
-	 * override is re-applied to firmware by aie4_restore_power_mode().
+	 * clobbering the cache would drop the user's power override.
 	 */
 	ndev->total_col = ndev->aie.metadata.cols;
 	ndev->aie.frame_boundary_preempt_enabled = 1;
@@ -208,6 +206,13 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
 		return ret;
 	}
+
+	/*
+	 * NPU_AC_PERF is hard-coded for now to maximize throughput; a sysfs
+	 * control node to allow runtime mode changes may be added later.
+	 */
+	aie4_msg_set_power_hint(ndev, AIE4_NPU_AC_PERF);
+	aie4_restore_power_mode(ndev);
 
 	return 0;
 }

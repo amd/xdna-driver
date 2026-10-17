@@ -548,8 +548,9 @@ void aie4_partition_destroy(struct amdxdna_dev_hdl *ndev, u32 part_id)
  * Power override is a per-VF property in firmware: each supervisor (VF) stores
  * its own requested mode and the hypervisor arbitrates globally by taking the
  * highest mode across all supervisors. A full firmware reload on suspend clears
- * every supervisor override back to default, so each device type (PF, VF and
- * classic) must re-send its own cached override on resume.
+ * every supervisor override back to default, so each VF and classic device
+ * must re-send its own cached override on resume. PF devices do not support
+ * this opcode and this function is a no-op for them.
  */
 void aie4_restore_power_mode(struct amdxdna_dev_hdl *ndev)
 {
@@ -586,7 +587,6 @@ int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	aie4_restore_power_mode(ndev);
 	aie4_restore_force_preemption(ndev);
 	aie4_restore_hws_debug_mode(ndev);
 
@@ -608,8 +608,12 @@ static int aie4_config_fw(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	/* Best-effort tuning knob; failure is warned inside and does not fail hw start */
+	/* Best-effort tuning knobs; failure is warned inside and does not fail hw start. */
 	aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
+	aie4_set_dpm_compute_params(ndev);
+	aie4_set_dpm_bw_busyness(ndev);
+	aie4_set_dpm_pwr_ovr_percent_table(ndev);
+	aie4_set_dpm_cap_percent_table(ndev);
 
 #ifdef AMDXDNA_NPU3A
 	ret = aie4_iommu_bypass_echo(ndev);
@@ -704,6 +708,13 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
 		goto partition_fini;
 	}
+
+	/*
+	 * NPU_AC_PERF is hard-coded for now to maximize throughput; a sysfs
+	 * control node to allow runtime mode changes may be added later.
+	 */
+	aie4_msg_set_power_hint(ndev, AIE4_NPU_AC_PERF);
+	aie4_restore_power_mode(ndev);
 
 	return 0;
 
@@ -1731,14 +1742,19 @@ int aie4_hwctx_reconnect_all(struct amdxdna_dev_hdl *ndev)
  * <- fw_load                   |  Y    |  -    |   Y
  * <- mailbox_init              |  Y    |  Y    |   Y
  * <- query_fw                  |  Y    |  Y    |   Y
- *      <- restore_power_mode   |  Y    |  Y    |   Y
  *      <- restore_force_preempt|  Y    |  Y    |   Y
  * <- config_fw                 |  Y    |  -    |   Y
  *      <- calibrate_clock      |  Y    |  -    |   Y
  *      <- attach_work_buffer   |  Y    |  -    |   Y
+ *      <- set_dpm_compute      |  Y    |  -    |   Y
+ *      <- set_dpm_bw_busyness  |  Y    |  -    |   Y
+ *      <- set_pwr_ovr_table    |  Y    |  -    |   Y
+ *      <- set_dpm_cap_table    |  Y    |  -    |   Y
  * <- setup_aie                 |  -    |  Y    |   Y
  *      <- partition_init       |  -    |  Y    |   Y
  *      <- async_events_alloc   |  -    |  Y    |   Y
+ *      <- set_power_hint       |  -    |  Y    |   Y
+ *      <- restore_power_mode   |  -    |  Y    |   Y
  * <- hwctx_resume_all          |  -    |  Y    |   Y
  * <- restore VFs               |  Y    |  -    |   -
  */
@@ -1962,14 +1978,19 @@ pci_disable:
  * <- fw_load(*)                |  Y  |  -  |   Y
  * <- mailbox_init              |  Y  |  Y  |   Y
  * <- query_fw                  |  Y  |  Y  |   Y
- *      <- restore_power_mode   |  Y  |  Y  |   Y
  *      <- restore_force_preempt|  Y  |  Y  |   Y
  * <- config_fw                 |  Y  |  -  |   Y
  *      <- calibrate_clock      |  Y  |  -  |   Y
  *      <- attach_work_buffer   |  Y  |  -  |   Y
+ *      <- set_dpm_compute      |  Y  |  -  |   Y
+ *      <- set_dpm_bw_busyness  |  Y  |  -  |   Y
+ *      <- set_pwr_ovr_table    |  Y  |  -  |   Y
+ *      <- set_dpm_cap_table    |  Y  |  -  |   Y
  * <- setup_aie                 |  -  |  Y  |   Y
  *      <- partition_init       |  -  |  Y  |   Y
  *      <- async_events_alloc   |  -  |  Y  |   Y
+ *      <- set_power_hint       |  -  |  Y  |   Y
+ *      <- restore_power_mode   |  -  |  Y  |   Y
  * <- restore_sriov             |  Y  |  -  |   -
  * <- hwctx_reconnect_all       |  -  |  Y  |   Y
  * <- dpt_reset_done            |  Y  |  Y  |   Y

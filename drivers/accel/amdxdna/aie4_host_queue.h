@@ -11,6 +11,7 @@
 
 #define CTX_MAX_CMDS                    32
 #define HSA_MAX_LEVEL1_INDIRECT_ENTRIES	6
+#define HSA_MAX_LEVEL2_INDIRECT_ENTRIES	36
 #define QUEUE_INDEX_START		0
 #define HOST_QUEUE_MAJOR_VERSION	1
 #define HOST_QUEUE_MINOR_VERSION	0
@@ -70,6 +71,8 @@ struct host_indirect_packet_entry {
 #define HIPE_HOST_ADDR_HIGH_MASK	GENMASK(24, 0)
 #define HIPE_UC_INDEX_SHIFT		25
 #define HIPE_UC_INDEX_MASK		GENMASK(31, 25)
+/* Largest uc index the entry can carry; a bigger one would be truncated. */
+#define HIPE_UC_INDEX_MAX		(HIPE_UC_INDEX_MASK >> HIPE_UC_INDEX_SHIFT)
 
 static inline void hipe_set_host_addr_high(u32 *val, u32 addr_hi)
 {
@@ -86,6 +89,11 @@ static inline void hipe_set_uc_index(u32 *val, u32 uc_idx)
 struct host_indirect_packet_data {
 	struct common_header header;
 	struct exec_buf payload;
+};
+
+struct host_queue_indirect_hdr {
+	struct common_header header;
+	struct host_indirect_packet_entry data[HSA_MAX_LEVEL2_INDIRECT_ENTRIES];
 };
 
 #endif /* _AIE4_HOST_QUEUE_H_ */
