@@ -46,11 +46,16 @@ namespace {
 constexpr uint32_t NONZERO_START_COL = 4; // any non-zero start won't fit a full array
 // Overlap / adjacent cases place an 8-wide partition at column 4 (cols 4-11).
 constexpr uint32_t MIN_PLACED_COLS = 12;
+constexpr uint32_t MAX_COLS = 36; // 36 col max for T50
 
 uint32_t
 total_columns(device* dev)
 {
-  return device_query<query::aie_tiles_stats>(dev).cols;
+  auto cols = device_query<query::aie_tiles_stats>(dev).cols;
+  if (cols > MAX_COLS)
+    throw std::runtime_error("device reports column count above max: " +
+      std::to_string(cols));
+  return cols;
 }
 
 // Create a partition of an arbitrary column width.  start_col < 0 means "no
