@@ -351,31 +351,6 @@ open_accel_fd(device* dev)
   return fd;
 }
 
-void
-trigger_pci_flr(device* dev)
-{
-  const auto device_sysfs = resolve_device_sysfs(dev);
-  if (!device_sysfs) {
-    throw std::runtime_error(
-      "Failed to resolve device sysfs for PCI FLR (tried sub_device_path and "
-      "/sys/bus/pci/devices/<name>)");
-  }
-  if (!is_pci_sysfs_device(*device_sysfs)) {
-    throw std::runtime_error("PCI FLR requires a PCI device, got " + *device_sysfs);
-  }
-
-  const std::string reset_path = *device_sysfs + "/reset";
-  std::ofstream ofs(reset_path);
-  if (!ofs) {
-    throw std::runtime_error(
-      "Cannot open " + reset_path + " for write (needs root?)");
-  }
-  ofs << "1";
-  ofs.flush();
-  if (!ofs)
-    throw std::runtime_error("Failed to write PCI FLR to " + reset_path);
-}
-
 unsigned int
 get_sriov_numvfs(device* dev)
 {

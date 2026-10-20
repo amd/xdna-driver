@@ -38,7 +38,6 @@
 using namespace xrt_core;
 
 extern int open_accel_fd(device* dev);
-extern void trigger_pci_flr(device* dev);
 extern std::string get_device_sysfs(device* dev);
 
 namespace {
@@ -1426,7 +1425,8 @@ TEST_aie4_flr(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
   for (auto& w : loads)
     submit_flr_workload(w);
 
-  trigger_pci_flr(sdev.get());
+  if (!device_query<query::flr_reset>(sdev.get()))
+    throw std::runtime_error("PCI FLR reset failed (requires a PCI device and root)");
 
   int n_abort = 0;
   int n_completed = 0;
@@ -1483,7 +1483,8 @@ TEST_aie4_pf_flr(device::id_type id, std::shared_ptr<device>& sdev,
     throw std::runtime_error("PF FLR: no AIE4 VF to run workload on");
 
   auto t0 = std::chrono::steady_clock::now();
-  trigger_pci_flr(pf.get());
+  if (!device_query<query::flr_reset>(pf.get()))
+    throw std::runtime_error("PCI FLR reset failed (requires a PCI device and root)");
   auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::steady_clock::now() - t0).count();
   std::cout << "PF FLR latency: " << latency_ms << " ms" << std::endl;
