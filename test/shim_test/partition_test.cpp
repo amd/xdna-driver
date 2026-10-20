@@ -31,6 +31,7 @@
 #include "core/common/shim/hwctx_handle.h"
 #include "xrt/xrt_hw_context.h"
 
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -52,9 +53,11 @@ uint32_t
 total_columns(device* dev)
 {
   auto cols = device_query<query::aie_tiles_stats>(dev).cols;
-  if (cols > MAX_COLS)
+  if (cols > MAX_COLS) {
+    const uint32_t reported = cols <= UINT16_MAX ? cols : UINT16_MAX;
     throw std::runtime_error("device reports column count above max: " +
-      std::to_string(cols));
+      std::to_string(reported));
+  }
   return cols;
 }
 
