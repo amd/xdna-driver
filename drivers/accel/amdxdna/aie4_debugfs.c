@@ -4,7 +4,6 @@
  */
 
 #include <drm/drm_drv.h>
-#include <linux/cleanup.h>
 #include <linux/debugfs.h>
 #include <linux/limits.h>
 #include <linux/mutex.h>
@@ -18,11 +17,34 @@ static int aie4_ctx_hysteresis_get(void *data, u64 *val)
 {
 	struct amdxdna_dev_hdl *ndev = data;
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	u32 timeout_us;
+	int ret, idx;
 
-	guard(mutex)(&xdna->dev_lock);
-	*val = ndev->ctx_switch_hysteresis_us;
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
 
-	return 0;
+	mutex_lock(&xdna->dev_lock);
+
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto unlock;
+
+	/*
+	 * Report firmware's value but do not cache it: the cache holds what hw
+	 * start and resume re-apply, which may differ from firmware's default
+	 * if that best-effort SET failed.
+	 */
+	ret = aie4_get_ctx_hysteresis(ndev, &timeout_us);
+	if (!ret)
+		*val = timeout_us;
+
+	amdxdna_pm_suspend_put(xdna);
+
+unlock:
+	mutex_unlock(&xdna->dev_lock);
+	drm_dev_exit(idx);
+
+	return ret;
 }
 
 static int aie4_ctx_hysteresis_set(void *data, u64 val)
