@@ -805,15 +805,21 @@ sync(direction dir, size_t sz, size_t offset)
 //
 // Impl for class uc_dbg_buffer
 //
+// The driver gets a copy of struct amdxdna_fw_buffer_metadata describing how
+// this BO is sliced between uCs, and keeps the BO referenced while firmware
+// writes it.
+//
 void
 uc_dbg_buffer::
 config(const xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes)
 {
+  if (m_ctx_id != AMDXDNA_INVALID_CTX_HANDLE)
+    shim_err(EBUSY, "BO %d is already configured on hwctx %d", id().handle, m_ctx_id);
+
   auto meta_buf_size = offsetof(amdxdna_fw_buffer_metadata, uc_info)
      + buf_sizes.size() * sizeof(amdxdna_uc_info_entry);
-  m_metadata_bo = std::make_unique<dbg_buffer>(m_pdev, meta_buf_size, AMDXDNA_BO_CMD);
-  auto metadata = reinterpret_cast<amdxdna_fw_buffer_metadata *>(m_metadata_bo->vaddr());
-  std::memset(metadata, 0, meta_buf_size);
+  std::vector<char> meta_buf(meta_buf_size);
+  auto metadata = reinterpret_cast<amdxdna_fw_buffer_metadata *>(meta_buf.data());
   metadata->bo_handle = id().handle;
   metadata->command_id = 0; //support this later
   auto f = xcl_bo_flags{get_flags()};
@@ -831,16 +837,66 @@ config(const xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& bu
     type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str(), i);
 
   auto ctx = static_cast<const shim_xdna::hwctx *>(hwctx);
-  m_metadata_bo->bind_hwctx(*ctx);
+  m_buf_type = metadata->buf_type;
+  m_ctx_id = ctx->get_slotidx();
+  try {
+    config_fw_buf(false, meta_buf);
+  } catch (...) {
+    m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
+    throw;
+  }
 }
 
 void
 uc_dbg_buffer::
 unconfig(const xrt_core::hwctx_handle* hwctx)
 {
-  shim_debug("Unconfig BO %d (%s)", id().handle,
-    type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str());
-  m_metadata_bo->unbind_hwctx();
+  if (m_ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
+    return;
+
+  shim_debug("Unconfig BO %d (%s) from hwctx %d", id().handle,
+    type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str(), m_ctx_id);
+  detach();
+}
+
+void
+uc_dbg_buffer::
+config_fw_buf(bool is_detach, const std::vector<char>& meta)
+{
+  config_ctx_fw_buf_arg arg = {
+    .ctx_handle = m_ctx_id,
+    .is_detach = is_detach,
+    .meta = meta,
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::config_ctx_fw_buf, &arg);
+}
+
+void
+uc_dbg_buffer::
+detach()
+{
+  // Removing a buffer only needs its type and BO handle
+  std::vector<char> meta_buf(sizeof(amdxdna_fw_buffer_metadata));
+  auto metadata = reinterpret_cast<amdxdna_fw_buffer_metadata *>(meta_buf.data());
+  metadata->buf_type = m_buf_type;
+  metadata->bo_handle = id().handle;
+
+  // On failure the driver keeps the BO attached, so keep m_ctx_id to retry
+  try {
+    config_fw_buf(true, meta_buf);
+    m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
+  } catch (const xrt_core::system_error& e) {
+    std::cout << "Failed to detach BO " << std::to_string(id().handle)
+      << " from hwctx " << std::to_string(m_ctx_id)
+      << ": " << e.what() << std::endl;
+  }
+}
+
+uc_dbg_buffer::
+~uc_dbg_buffer()
+{
+  if (m_ctx_id != AMDXDNA_INVALID_CTX_HANDLE)
+    detach();
 }
 
 }

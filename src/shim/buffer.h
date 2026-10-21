@@ -212,6 +212,7 @@ class uc_dbg_buffer : public buffer
 {
 public:
   using buffer::buffer;
+  ~uc_dbg_buffer();
 
   void
   config(const xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes) override;
@@ -220,7 +221,15 @@ public:
   unconfig(const xrt_core::hwctx_handle* hwctx) override;
 
 private:
-  std::unique_ptr<buffer> m_metadata_bo;
+  void
+  config_fw_buf(bool is_detach, const std::vector<char>& meta);
+
+  void
+  detach();
+
+  // Set while this BO is attached to a hwctx as a firmware buffer.
+  xrt_core::hwctx_handle::slot_id m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
+  uint8_t m_buf_type = 0;
 };
 
 }

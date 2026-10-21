@@ -143,6 +143,19 @@ config_ctx_debug_bo(config_ctx_debug_bo_arg& ctx_arg) const
   ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &arg);
 }
 
+void
+platform_drv_host::
+config_ctx_fw_buf(config_ctx_fw_buf_arg& ctx_arg) const
+{
+  amdxdna_drm_config_hwctx arg = {};
+  arg.handle = ctx_arg.ctx_handle;
+  arg.param_type = ctx_arg.is_detach ?
+    DRM_AMDXDNA_HWCTX_REMOVE_FW_BUF : DRM_AMDXDNA_HWCTX_ASSIGN_FW_BUF;
+  arg.param_val = reinterpret_cast<uintptr_t>(ctx_arg.meta.data());
+  arg.param_val_size = ctx_arg.meta.size();
+  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &arg);
+}
+
 std::pair<uint64_t, uint64_t>
 platform_drv_host::
 get_bo_info(uint32_t boh) const

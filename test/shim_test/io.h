@@ -237,7 +237,8 @@ private:
 class elf_io_gemm_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_gemm_test_bo_set(device *dev, const std::string& tag = "");
+  elf_io_gemm_test_bo_set(device *dev, const std::string& tag = "",
+                          unsigned int idle_ms = 0);
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -255,6 +256,8 @@ private:
   std::unique_ptr<xrt_core::buffer_handle> m_dbo;
   bool m_is_full_elf = false;
   bool m_is_aie4 = false;
+  // Idle time after attaching the debug BO, to let the device autosuspend
+  unsigned int m_idle_ms = 0;
 };
 
 class elf_io_aie_debug_test_bo_set : public io_test_bo_set_base
