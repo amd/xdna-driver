@@ -470,7 +470,7 @@ int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
-		XDNA_ERR(xdna, "CERT log configure failed, ctx %u property %u ret %d",
+		XDNA_ERR(xdna, "Configure debug buffer failed, ctx %u property %u ret %d",
 			 hw_context_id, property, ret);
 
 	return ret;

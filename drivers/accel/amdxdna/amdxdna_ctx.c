@@ -416,8 +416,8 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_hwctx *hwctx;
 	u32 buf_size;
+	int ret, idx;
 	void *buf;
-	int ret;
 	u64 val;
 
 	if (XDNA_MBZ_DBG(xdna, &args->pad, sizeof(args->pad)))
@@ -431,9 +431,11 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 
 	switch (args->param_type) {
 	case DRM_AMDXDNA_HWCTX_CONFIG_CU:
+	case DRM_AMDXDNA_HWCTX_ASSIGN_FW_BUF:
+	case DRM_AMDXDNA_HWCTX_REMOVE_FW_BUF:
 		/* For those types that param_val is pointer */
 		if (buf_size > PAGE_SIZE) {
-			XDNA_ERR(xdna, "Config CU param buffer too large");
+			XDNA_ERR(xdna, "Config param buffer too large");
 			return -E2BIG;
 		}
 
@@ -459,10 +461,16 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		return -EINVAL;
 	}
 
+	if (!drm_dev_enter(dev, &idx)) {
+		XDNA_WARN(xdna, "Device is removed, cannot config hwctx %d", args->handle);
+		ret = -ENODEV;
+		goto free_buf;
+	}
+
 	ret = amdxdna_pm_resume_get(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Resume failed, ret %d", ret);
-		goto free_buf;
+		goto dev_exit;
 	}
 
 	mutex_lock(&xdna->client_lock);
@@ -480,6 +488,8 @@ unlock:
 	mutex_unlock(&xdna->dev_lock);
 	mutex_unlock(&xdna->client_lock);
 	amdxdna_pm_suspend_put(xdna);
+dev_exit:
+	drm_dev_exit(idx);
 free_buf:
 	kfree(buf);
 	return ret;

@@ -68,6 +68,8 @@ struct amdxdna_hwctx_priv {
 
 	struct cert_comp                *cert_comp;
 	u32                             hw_ctx_id;
+	/* Attached debug buffers, held until removal or fini. */
+	struct amdxdna_gem_obj          *fw_buf_bo[AMDXDNA_FW_BUF_NUM];
 	/*
 	 * Partition this ctx runs in: its own when
 	 * dev_info->partition_per_hwctx is set, otherwise a copy of the
