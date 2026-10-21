@@ -749,6 +749,26 @@ config_ctx_debug_bo(config_ctx_debug_bo_arg& arg) const
 
 void
 platform_drv_virtio::
+config_ctx_fw_buf(config_ctx_fw_buf_arg& arg) const
+{
+  std::vector<char> param_buf(sizeof(amdxdna_ccmd_config_ctx_req) + roundup_64bit(arg.meta.size()));
+  auto req = reinterpret_cast<amdxdna_ccmd_config_ctx_req *>(param_buf.data());
+
+  req->hdr.cmd = AMDXDNA_CCMD_CONFIG_CTX;
+  req->hdr.len = param_buf.size();
+  req->handle = arg.ctx_handle;
+  req->param_type = arg.is_detach ?
+    DRM_AMDXDNA_HWCTX_REMOVE_FW_BUF : DRM_AMDXDNA_HWCTX_ASSIGN_FW_BUF;
+  req->param_val_size = arg.meta.size();
+  std::memcpy(param_buf.data() + sizeof(amdxdna_ccmd_config_ctx_req),
+    arg.meta.data(), arg.meta.size());
+  // Check the host response so a failed attach or detach throws
+  amdxdna_ccmd_rsp rsp = {};
+  hcall(req, &rsp, sizeof(rsp));
+}
+
+void
+platform_drv_virtio::
 submit_cmd(submit_cmd_arg& arg) const
 {
   // Assuming 512 max args per cmd bo

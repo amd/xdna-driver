@@ -191,6 +191,11 @@ struct amdxdna_uc_info_entry {
  * @bo_handle: actual bo handle
  * @command_id: command id used for trace
  * @uc_info: uc index & buffer size mapping info
+ *
+ * Passed by pointer in struct amdxdna_drm_config_hwctx.param_val for
+ * DRM_AMDXDNA_HWCTX_ASSIGN_FW_BUF and DRM_AMDXDNA_HWCTX_REMOVE_FW_BUF, with
+ * param_val_size set to its size including @uc_info. Removing a buffer only
+ * uses @buf_type and @bo_handle.
  */
 struct amdxdna_fw_buffer_metadata {
 #define AMDXDNA_FW_BUF_DEBUG	0
@@ -223,6 +228,8 @@ struct amdxdna_drm_config_hwctx {
 #define DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF	1
 #define DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF	2
 #define DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT	3
+#define DRM_AMDXDNA_HWCTX_ASSIGN_FW_BUF		4
+#define DRM_AMDXDNA_HWCTX_REMOVE_FW_BUF		5
 	__u32 param_type;
 	__u64 param_val;
 	__u32 param_val_size;

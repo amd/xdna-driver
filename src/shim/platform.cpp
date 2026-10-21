@@ -219,6 +219,9 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
   case drv_ioctl_cmd::config_ctx_debug_bo:
     config_ctx_debug_bo(*static_cast<config_ctx_debug_bo_arg*>(cmd_arg));
     break;
+  case drv_ioctl_cmd::config_ctx_fw_buf:
+    config_ctx_fw_buf(*static_cast<config_ctx_fw_buf_arg*>(cmd_arg));
+    break;
   case drv_ioctl_cmd::create_bo:
     create_bo(*static_cast<bo_info*>(cmd_arg));
     break;
