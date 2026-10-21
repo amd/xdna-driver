@@ -1091,6 +1091,17 @@ TEST_create_free_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_
 }
 
 void
+TEST_create_uptr_bo_from_mapped_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  const size_t size = 4096;
+  auto dev = sdev.get();
+
+  bo normal_bo{dev, size};
+  auto uptr = reinterpret_cast<void *>(normal_bo.map());
+  bo uptr_bo{dev, uptr, size};
+}
+
+void
 TEST_sync_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto boflags = static_cast<unsigned int>(arg[0]);
@@ -1845,6 +1856,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "NPU write to read-only user pointer BO is rejected", {},
     TEST_NEGATIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_write_to_readonly_uptr_bo, {}
+  },
+  test_case{ "create user pointer bo from mapped bo", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_uptr_bo_from_mapped_bo, {}
   },
 };
 
