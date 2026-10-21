@@ -1010,6 +1010,17 @@ TEST_create_free_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_
 }
 
 void
+TEST_create_uptr_bo_from_mapped_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  const size_t size = 4096;
+  auto dev = sdev.get();
+
+  bo normal_bo{dev, size};
+  auto uptr = reinterpret_cast<void *>(normal_bo.map());
+  bo uptr_bo{dev, uptr, size};
+}
+
+void
 TEST_sync_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto boflags = static_cast<unsigned int>(arg[0]);
@@ -1798,6 +1809,9 @@ std::vector<test_case> test_list {
   // test_case{ "AIE4 PF FLR", {},
     // TEST_POSITIVE, {npu3vf}, {amdxdna}, TEST_aie4_pf_flr_entry, {}
   // },
+  test_case{ "create user pointer bo from mapped bo", {},
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, npu12}, {}, TEST_create_uptr_bo_from_mapped_bo, {}
+  },
 };
 
 void
