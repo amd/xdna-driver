@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Wendy Liang <wendy.liang@amd.com>
+Date: Tue, 18 Aug 2026 00:00:00 +0000
+Subject: [PATCH] drivers/accel: select HMM_MIRROR under DRM_ACCEL
+
+The out-of-tree amdxdna driver uses hmm_range_fault(), which needs
+CONFIG_HMM_MIRROR. HMM_MIRROR is a hidden (select-only) symbol, so it
+cannot be set from a config fragment directly. Select it from the
+already-enabled DRM_ACCEL framework (guarded by MMU) so the mm/hmm.c
+helpers are built and exported for the out-of-tree module.
+
+The in-tree DRM_ACCEL_AMDXDNA option already selects HMM_MIRROR, but
+that option depends on X86_64, PCI, and AMD_IOMMU, so it is not enabled
+on Versal.
+
+Signed-off-by: Wendy Liang <wendy.liang@amd.com>
+---
+diff --git a/drivers/accel/Kconfig b/drivers/accel/Kconfig
+index bb01cebc42bf..052571ab581e 100644
+--- a/drivers/accel/Kconfig
++++ b/drivers/accel/Kconfig
+@@ -10,6 +10,7 @@ if DRM
+ 
+ menuconfig DRM_ACCEL
+ 	bool "Compute Acceleration Framework"
++	select HMM_MIRROR if MMU
+ 	help
+ 	  Framework for device drivers of compute acceleration devices, such
+ 	  as, but not limited to, Machine-Learning and Deep-Learning

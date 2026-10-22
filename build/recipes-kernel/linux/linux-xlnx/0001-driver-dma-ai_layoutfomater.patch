@@ -1,0 +1,131 @@
+From 26f6cd83143567ef8abfb2d52308db3a52bcbfd2 Mon Sep 17 00:00:00 2001
+From: Mounik Katikala <mounik.katikala@amd.com>
+Date: Thu, 27 Aug 2026 16:03:12 +0530
+Subject: [LINUX PATCH] driver:dma:ai_layoutfomater
+
+Signed-off-by: Mounik Katikala <mounik.katikala@amd.com>
+---
+ .../dma/xilinx/xilinx_ai_layout_formatter.c   | 50 +++++++------------
+ 1 file changed, 19 insertions(+), 31 deletions(-)
+
+diff --git a/drivers/dma/xilinx/xilinx_ai_layout_formatter.c b/drivers/dma/xilinx/xilinx_ai_layout_formatter.c
+index 9c9a87633171..a804ac4c0919 100644
+--- a/drivers/dma/xilinx/xilinx_ai_layout_formatter.c
++++ b/drivers/dma/xilinx/xilinx_ai_layout_formatter.c
+@@ -142,7 +142,6 @@
+ #define XILINX_AI_LAYOUT_FORMATTER_ALIGN_MUL		8
+ 
+ #define XILINX_AI_LAYOUT_FORMATTER_WAIT_FOR_FLUSH_DONE		25
+-#define XILINX_AI_LAYOUT_FORMATTER_WAIT_FOR_AP_IDLE		2000
+ #define XILINX_AI_LAYOUT_FORMATTER_RESET_PULSE_US		1
+ #define XILINX_AI_LAYOUT_FORMATTER_FRAME_BOUNDARY_MS		50
+ #define XILINX_AI_LAYOUT_FORMATTER_FLUSH_SLEEP_MAX_US		2100
+@@ -198,6 +197,8 @@ struct xilinx_ai_layout_formatter_tx_descriptor {
+  * @lock: Descriptor operation lock
+  * @pending_list: Descriptors waiting
+  * @done_list: Complete descriptors
++ * @staged_desc: Descriptor already programmed into the address registers, which
++ *		 the core picks up on its next auto-restart cycle
+  * @active_desc: Descriptor currently running in hardware until AP_DONE
+  * @common: DMA common channel
+  * @dev: The dma device
+@@ -215,6 +216,7 @@ struct xilinx_ai_layout_formatter_chan {
+ 	spinlock_t lock;
+ 	struct list_head pending_list;
+ 	struct list_head done_list;
++	struct xilinx_ai_layout_formatter_tx_descriptor *staged_desc;
+ 	struct xilinx_ai_layout_formatter_tx_descriptor *active_desc;
+ 	struct dma_chan common;
+ 	struct device *dev;
+@@ -1098,7 +1100,9 @@ xilinx_ai_layout_formatter_free_descriptors_locked(struct xilinx_ai_layout_forma
+ 	xilinx_ai_layout_formatter_free_desc_list(chan, &chan->pending_list);
+ 	xilinx_ai_layout_formatter_free_desc_list(chan, &chan->done_list);
+ 	kfree(chan->active_desc);
++	kfree(chan->staged_desc);
+ 
++	chan->staged_desc = NULL;
+ 	chan->active_desc = NULL;
+ 	INIT_LIST_HEAD(&chan->pending_list);
+ 	INIT_LIST_HEAD(&chan->done_list);
+@@ -1218,29 +1222,6 @@ static void xilinx_ai_layout_formatter_start(struct xilinx_ai_layout_formatter_c
+ 	chan->idle = false;
+ }
+ 
+-/**
+- * ai_layout_formatter_wait_ap_idle - Wait for AP_IDLE after stopping the core
+- * @chan: Channel
+- *
+- * With XILINX_VID_DMA_AUTO_RESTART, the core can re-arm as soon as AP_DONE asserts. Software
+- * must clear AP_START and XILINX_VID_DMA_AUTO_RESTART, then observe AP_IDLE, before rewriting
+- * buffer address registers to avoid torn frames.
+- */
+-static void ai_layout_formatter_wait_ap_idle(struct xilinx_ai_layout_formatter_chan *chan)
+-{
+-	unsigned int count;
+-
+-	for (count = 0; count < XILINX_AI_LAYOUT_FORMATTER_WAIT_FOR_AP_IDLE; count++) {
+-		if (ai_layout_formatter_read(chan, XILINX_AI_LAYOUT_FORMATTER_CTRL_OFFSET) &
+-		    XILINX_AI_LAYOUT_FORMATTER_CTRL_AP_IDLE)
+-			return;
+-		usleep_range(1, 4);
+-	}
+-
+-	dev_warn_ratelimited(chan->xdev->dev,
+-			     "AI layout formatter: timed out waiting for AP_IDLE; buffer may tear\n");
+-}
+-
+ /**
+  * xilinx_ai_layout_formatter_complete_descriptor - Mark the active descriptor as complete
+  * @chan: xilinx ai_layout_formatter channel
+@@ -1264,6 +1245,11 @@ xilinx_ai_layout_formatter_complete_descriptor(struct xilinx_ai_layout_formatter
+  * Requires @chan->vid_fmt (set via the exported video-format configuration path)
+  * before the first descriptor can run. Without it, pending work is completed on
+  * the done queue with an error so the channel does not stall.
++ *
++ * In auto-restart mode the core is never halted here: the descriptor programmed
++ * by this call is only staged, and becomes the active one when the core re-arms
++ * at the next frame boundary. Halting to reprogram addresses would drop the
++ * pixels the upstream AXI-Stream keeps sending in the meantime.
+  */
+ static void xilinx_ai_layout_formatter_start_transfer(struct xilinx_ai_layout_formatter_chan *chan)
+ {
+@@ -1272,6 +1258,11 @@ static void xilinx_ai_layout_formatter_start_transfer(struct xilinx_ai_layout_fo
+ 	if (!chan->idle)
+ 		return;
+ 
++	if (chan->staged_desc) {
++		chan->active_desc = chan->staged_desc;
++		chan->staged_desc = NULL;
++	}
++
+ 	if (list_empty(&chan->pending_list))
+ 		return;
+ 
+@@ -1290,12 +1281,6 @@ static void xilinx_ai_layout_formatter_start_transfer(struct xilinx_ai_layout_fo
+ 		return;
+ 	}
+ 
+-	if (chan->mode == XILINX_VID_DMA_AUTO_RESTART) {
+-		ai_layout_formatter_clr(chan, XILINX_AI_LAYOUT_FORMATTER_CTRL_OFFSET,
+-					XILINX_AI_LAYOUT_FORMATTER_CTRL_AP_START | chan->mode);
+-		ai_layout_formatter_wait_ap_idle(chan);
+-	}
+-
+ 	/* Start the transfer */
+ 	if (chan->vid_fmt->layout_format == XILINX_AI_LAYOUT_FORMATTER_LAYOUT_NCHW) {
+ 		chan->write_addr(chan,
+@@ -1331,7 +1316,10 @@ static void xilinx_ai_layout_formatter_start_transfer(struct xilinx_ai_layout_fo
+ 	xilinx_ai_layout_formatter_start(chan);
+ 	list_del(&desc->node);
+ 
+-	chan->active_desc = desc;
++	if (chan->mode == XILINX_VID_DMA_AUTO_RESTART)
++		chan->staged_desc = desc;
++	else
++		chan->active_desc = desc;
+ }
+ 
+ /**
+-- 
+2.43.0
+

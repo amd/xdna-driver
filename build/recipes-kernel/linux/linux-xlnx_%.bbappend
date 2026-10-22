@@ -15,3 +15,13 @@ SRC_URI:append = " file://0010-xilinx-ai-engine-user-event1-irq-latency-fix.patc
 SRC_URI:append = " file://0008-xilinx-dma-tile-offset.patch"
 SRC_URI:append = " file://0001-media-platform-xilinx-preprocess.patch"
 SRC_URI:append = " file://0001-xilinx-ai-engine-Add-USER_EVENT1-initialization-support.patch"
+SRC_URI:append = " file://0001-driver-dma-ai_layoutfomater.patch"
+
+# Out-of-tree amdxdna calls hmm_range_fault(), exported only with
+# CONFIG_HMM_MIRROR. That symbol is promptless and depends only on MMU.
+# In-tree DRM_ACCEL_AMDXDNA selects it, but that option is x86/PCI-only, so
+# on Versal select it from DRM_ACCEL (already enabled by bsp_vaiml.cfg).
+# CONFIG_HMM_MIRROR=y in that fragment keeps do_kernel_configcheck quiet;
+# olddefconfig would drop a fragment-only request.
+SRC_URI:append = " file://0009-drivers-accel-select-HMM_MIRROR-for-out-of-tree-amdxdna.patch"
+
