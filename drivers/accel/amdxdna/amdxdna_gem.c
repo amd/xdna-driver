@@ -1617,11 +1617,13 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		 args->handle, args->offset, args->size);
 
 	/*
-	 * A FROM_DEVICE sync also refreshes a debug BO where the device supports
-	 * it. Devices without debug BO sync (e.g. aie4) report -EOPNOTSUPP; that
-	 * must not fail the cache-sync the caller actually asked for.
+	 * A FROM_DEVICE sync also refreshes a debug BO attached to a context,
+	 * where the device supports it. Other BOs have no context to look up.
+	 * Devices without debug BO sync report -EOPNOTSUPP; that must not fail
+	 * the cache-sync the caller actually asked for.
 	 */
-	if (args->direction == SYNC_DIRECT_FROM_DEVICE) {
+	if (abo->assigned_hwctx != AMDXDNA_INVALID_CTX_HANDLE &&
+	    args->direction == SYNC_DIRECT_FROM_DEVICE) {
 		ret = amdxdna_hwctx_sync_debug_bo(abo->client, args->handle);
 		if (ret == -EOPNOTSUPP)
 			ret = 0;
