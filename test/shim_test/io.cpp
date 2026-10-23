@@ -8,6 +8,7 @@
 #include "xrt/detail/xrt_error_code.h"
 #include "core/common/query_requests.h"
 
+#include <chrono>
 #include <climits>
 #include <cstdint>
 #include <iomanip>
@@ -16,6 +17,7 @@
 #include <string>
 #include <sstream>
 #include <regex>
+#include <thread>
 
 using namespace xrt_core;
 
@@ -772,8 +774,9 @@ elf_io_negative_test_bo_set(device* dev, const std::string& tag)
 }
 
 elf_io_gemm_test_bo_set::
-elf_io_gemm_test_bo_set(device* dev, const std::string& tag)
+elf_io_gemm_test_bo_set(device* dev, const std::string& tag, unsigned int idle_ms)
   : io_test_bo_set_base(dev, tag, nullptr)
+  , m_idle_ms(idle_ms)
 {
   const char* tag_c = tag.empty() ? nullptr : tag.c_str();
   const auto& info = get_binary_info(dev, tag_c, nullptr);
@@ -1089,6 +1092,9 @@ init_cmd(hw_ctx& hwctx, bool dump)
     std::map<uint32_t, size_t> buf_map{{0, m_gemm_uc_debug_size}};
     m_dbo->config(hwctx.get(), buf_map);
   }
+
+  if (m_idle_ms)
+    std::this_thread::sleep_for(std::chrono::milliseconds(m_idle_ms));
 
   io_test_bo_set_base::init_cmd(hwctx, dump);
 }

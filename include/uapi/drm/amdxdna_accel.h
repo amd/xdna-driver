@@ -149,20 +149,24 @@ enum amdxdna_drm_config_hwctx_param {
 	DRM_AMDXDNA_HWCTX_CONFIG_CU,
 	DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF,
 	DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF,
+	DRM_AMDXDNA_HWCTX_ASSIGN_FW_BUF = 4,
+	DRM_AMDXDNA_HWCTX_REMOVE_FW_BUF,
 };
 
 /**
- * enum amdxdna_fw_buf_type - CERT firmware buffer type.
- * @AMDXDNA_FW_BUF_DEBUG: CERT debug buffer.
- * @AMDXDNA_FW_BUF_TRACE: CERT trace buffer.
- * @AMDXDNA_FW_BUF_DBG_Q: CERT debug queue.
- * @AMDXDNA_FW_BUF_LOG:   CERT log buffer.
+ * enum amdxdna_fw_buf_type - Debug buffer type.
+ * @AMDXDNA_FW_BUF_DEBUG: Debug buffer.
+ * @AMDXDNA_FW_BUF_TRACE: Trace buffer.
+ * @AMDXDNA_FW_BUF_DBG_Q: Debug queue.
+ * @AMDXDNA_FW_BUF_LOG:   Log buffer.
+ * @AMDXDNA_FW_BUF_NUM:   Number of debug buffer types.
  */
 enum amdxdna_fw_buf_type {
-	AMDXDNA_FW_BUF_DEBUG,
+	AMDXDNA_FW_BUF_DEBUG = 0,
 	AMDXDNA_FW_BUF_TRACE,
 	AMDXDNA_FW_BUF_DBG_Q,
 	AMDXDNA_FW_BUF_LOG,
+	AMDXDNA_FW_BUF_NUM,
 };
 
 /**
@@ -170,7 +174,8 @@ enum amdxdna_fw_buf_type {
  *                                struct amdxdna_fw_buffer_metadata.
  * @index: uC index. The payload BO is sliced per-uC; @index must be unique
  *         within an array and stay below the device's CERT uC count.
- * @size:  Per-uC slice size in bytes. Entries with size == 0 are ignored.
+ * @size:  Per-uC slice size in bytes. Entries with size == 0 are ignored,
+ *         but at least one entry must have a non-zero size.
  */
 struct amdxdna_uc_info_entry {
 	__u32 index;
@@ -178,7 +183,7 @@ struct amdxdna_uc_info_entry {
 };
 
 /**
- * struct amdxdna_fw_buffer_metadata - per-hwctx CERT buffer description.
+ * struct amdxdna_fw_buffer_metadata - per-hwctx debug buffer description.
  * @buf_type:   One of enum amdxdna_fw_buf_type.
  * @num_ucs:    Number of valid entries in @uc_info.
  * @pad:        MBZ. Reserved for ABI growth.
@@ -187,10 +192,9 @@ struct amdxdna_uc_info_entry {
  * @command_id: User tag for trace correlation.
  * @uc_info:    Per-uC slice descriptors, in payload BO layout order.
  *
- * The metadata is carried in a SHARE BO whose handle user space passes via
- * struct amdxdna_drm_config_hwctx.param_val for
- * %DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF and %DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF.
- * AIE4-only.
+ * The buffer is released when the hardware context is suspended, reset or
+ * destroyed, and is not restored; user space recreates the hardware context
+ * and attaches the buffer again.
  */
 struct amdxdna_fw_buffer_metadata {
 	__u8 buf_type;
@@ -198,7 +202,7 @@ struct amdxdna_fw_buffer_metadata {
 	__u8 pad[2];
 	__u32 bo_handle;
 	__u64 command_id;
-	struct amdxdna_uc_info_entry uc_info[];
+	struct amdxdna_uc_info_entry uc_info[] __counted_by(num_ucs);
 };
 
 /**

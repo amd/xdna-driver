@@ -21,6 +21,7 @@ enum class drv_ioctl_cmd {
   destroy_ctx,
   config_ctx_cu_config,
   config_ctx_debug_bo,
+  config_ctx_fw_buf,
 
   create_bo,
   create_uptr_bo,
@@ -83,6 +84,13 @@ struct config_ctx_debug_bo_arg {
   uint32_t ctx_handle;
   bool is_detach;
   bo_id bo;
+};
+
+struct config_ctx_fw_buf_arg {
+  uint32_t ctx_handle;
+  bool is_detach;
+  // struct amdxdna_fw_buffer_metadata including its uc_info entries
+  const std::vector<char>& meta;
 };
 
 struct bo_info {
@@ -251,6 +259,10 @@ private:
 
   virtual void
   config_ctx_debug_bo(config_ctx_debug_bo_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  config_ctx_fw_buf(config_ctx_fw_buf_arg& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void

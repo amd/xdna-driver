@@ -11,6 +11,7 @@
 #include <drm/gpu_scheduler.h>
 #include <linux/minmax.h>
 #include <linux/overflow.h>
+#include <linux/pm_runtime.h>
 #include <linux/sched/mm.h>
 #include <linux/timekeeping.h>
 #include <linux/types.h>
@@ -156,6 +157,46 @@ static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context
 	}
 
 	return graceful ? resp.restore_id : 0;
+}
+
+/* Release the debug buffer of @type, taken on attach. */
+static void aie4_hwctx_put_fw_buf(struct amdxdna_hwctx *hwctx, u32 type)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	priv->fw_buf_bo[type]->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
+	/* Drop the reference taken when the buffer was attached. */
+	amdxdna_gem_put_obj(priv->fw_buf_bo[type]);
+	priv->fw_buf_bo[type] = NULL;
+	amdxdna_pm_suspend_put(hwctx->client->xdna);
+}
+
+static int aie4_fw_buf_property(u32 type)
+{
+	switch (type) {
+	case AMDXDNA_FW_BUF_LOG:
+		return AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_LOG_BUFFER;
+	case AMDXDNA_FW_BUF_DEBUG:
+		return AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_BUFFER;
+	case AMDXDNA_FW_BUF_TRACE:
+		return AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_TRACE_BUFFER;
+	case AMDXDNA_FW_BUF_DBG_Q:
+		return AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_QUEUE;
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+/* Release all attached debug buffers. */
+static void aie4_hwctx_put_fw_bufs(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	u32 type;
+
+	for (type = 0; type < ARRAY_SIZE(priv->fw_buf_bo); type++) {
+		if (priv->fw_buf_bo[type])
+			aie4_hwctx_put_fw_buf(hwctx, type);
+	}
 }
 
 static u32 aie4_parse_priority_to_dev(u32 priority)
@@ -565,6 +606,13 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags
 	hwctx->doorbell_offset = CTX_INVALID_DOORBELL;
 
 	/*
+	 * Suspend/resume and recovery destroy this context and create a new
+	 * one. Attached debug buffers do not carry over, so release them here;
+	 * user space configures them again on the new context for debugging.
+	 */
+	aie4_hwctx_put_fw_bufs(hwctx);
+
+	/*
 	 * Firmware refuses to destroy a partition that still has contexts, so
 	 * this has to follow the context destroy above. A disconnect never sent
 	 * that destroy because the reset discards firmware state anyway, so it
@@ -889,6 +937,8 @@ void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		aie4_hwctx_wait_for_running(hwctx);
 		destroy_workqueue(priv->job_work_q);
 	}
+	/* The context is destroyed, so release its debug buffers. */
+	aie4_hwctx_put_fw_bufs(hwctx);
 	aie4_hwctx_umq_fini(hwctx);
 	mutex_destroy(&priv->io_lock);
 	kfree(priv);
@@ -1947,144 +1997,176 @@ put_mm:
 	return ret;
 }
 
-static int aie4_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 meta_bo_hdl,
-				   bool attach)
+/*
+ * Attach or detach the debug buffer @meta describes. @meta is a kernel copy
+ * of the user descriptor.
+ */
+static int aie4_hwctx_cfg_fw_buf(struct amdxdna_hwctx *hwctx,
+				 const struct amdxdna_fw_buffer_metadata *meta,
+				 u32 size, bool attach)
 {
 	struct aie4_msg_context_config_cert_logging cl = { };
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	struct amdxdna_fw_buffer_metadata *meta;
-	struct amdxdna_gem_obj *meta_bo;
-	struct amdxdna_gem_obj *log_bo;
+	struct amdxdna_gem_obj *abo;
 	u32 prev_size = 0;
 	u64 base_addr;
 	u32 property;
-	u32 num_ucs;
-	u32 index;
+	u32 seen = 0;	/* uC indices in the descriptor */
+	u32 used = 0;	/* uC indices with a non-empty slice */
 	int ret;
 	int i;
 
-	meta_bo = amdxdna_gem_get_obj(client, meta_bo_hdl, AMDXDNA_BO_SHARE);
-	if (!meta_bo) {
-		XDNA_ERR(xdna, "Get meta bo %u failed", meta_bo_hdl);
+	if (!meta || size < sizeof(*meta)) {
+		XDNA_ERR(xdna, "Invalid debug buffer descriptor, size %u", size);
 		return -EINVAL;
 	}
 
-	if (meta_bo->mem.size < sizeof(*meta)) {
-		XDNA_ERR(xdna, "meta bo size %lu is too small", meta_bo->mem.size);
-		ret = -EINVAL;
-		goto put_meta_bo;
-	}
+	if (XDNA_MBZ_DBG(xdna, meta->pad, sizeof(meta->pad)))
+		return -EINVAL;
 
-	meta = amdxdna_gem_vmap(meta_bo);
-	if (!meta) {
-		ret = -ENOMEM;
-		goto put_meta_bo;
+	ret = aie4_fw_buf_property(meta->buf_type);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "Unsupported buf_type %u", meta->buf_type);
+		return ret;
 	}
+	property = ret;
 
 	/*
-	 * meta lives in a user-shared BO that a second user thread can mutate
-	 * concurrently.  Snapshot num_ucs once so the bound check, struct_size()
-	 * check, loop bound, and value sent to firmware all agree; otherwise a
-	 * racing writer could pass the checks with a small value and drive the
-	 * loop past the vmapped BO with a large one (out-of-bounds read).
+	 * On attach, this reference is held until detach or context teardown.
+	 * The device reaches the buffer through the process address space
+	 * (PASID), so the BO is not pinned or fenced: if the process changes
+	 * that mapping, only its own jobs are affected.
 	 */
-	num_ucs = READ_ONCE(meta->num_ucs);
-
-	switch (meta->buf_type) {
-	case AMDXDNA_FW_BUF_LOG:
-		property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_LOG_BUFFER;
-		break;
-	case AMDXDNA_FW_BUF_DEBUG:
-		property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_BUFFER;
-		break;
-	case AMDXDNA_FW_BUF_TRACE:
-		property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_TRACE_BUFFER;
-		break;
-	case AMDXDNA_FW_BUF_DBG_Q:
-		property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_QUEUE;
-		break;
-	default:
-		XDNA_ERR(xdna, "Unsupported buf_type %u", meta->buf_type);
-		ret = -EOPNOTSUPP;
-		goto put_meta_bo;
+	abo = amdxdna_gem_get_obj(client, meta->bo_handle, AMDXDNA_BO_SHARE);
+	if (!abo) {
+		XDNA_ERR(xdna, "Get bo %u failed", meta->bo_handle);
+		return -EINVAL;
 	}
 
-	if (num_ucs > AIE4_MAX_NUM_CERTS) {
-		XDNA_ERR(xdna, "num_ucs %u exceeds %d", num_ucs, AIE4_MAX_NUM_CERTS);
+	if (!attach) {
+		if (abo != priv->fw_buf_bo[meta->buf_type]) {
+			XDNA_ERR(xdna, "BO %u is not attached as debug buffer type %u on %s",
+				 meta->bo_handle, meta->buf_type, hwctx->name);
+			ret = -EINVAL;
+			goto put_obj;
+		}
+
+		/* Nothing to remove on a stopped context. */
+		if (priv->hw_ctx_id != CTX_INVALID_ID) {
+			ret = aie4_configure_hw_context_cert_log(ndev, priv->hw_ctx_id,
+								 property, &cl);
+			/* Keep the buffer attached if it was not removed. */
+			if (ret)
+				goto put_obj;
+		}
+
+		/* Release the attach reference; put_obj drops the lookup one. */
+		aie4_hwctx_put_fw_buf(hwctx, meta->buf_type);
+		XDNA_DBG(xdna, "Detached debug buffer type %u BO %u from %s",
+			 meta->buf_type, meta->bo_handle, hwctx->name);
+		ret = 0;
+		goto put_obj;
+	}
+
+	if (!meta->num_ucs || meta->num_ucs > AIE4_MAX_NUM_CERTS ||
+	    size < struct_size(meta, uc_info, meta->num_ucs)) {
+		XDNA_ERR(xdna, "Invalid num_ucs %u for size %u", meta->num_ucs, size);
 		ret = -EINVAL;
-		goto put_meta_bo;
+		goto put_obj;
 	}
 
-	if (meta_bo->mem.size < struct_size(meta, uc_info, num_ucs)) {
-		XDNA_ERR(xdna, "meta bo size %lu too small for %u ucs",
-			 meta_bo->mem.size, num_ucs);
+	/* One buffer of each type per context. */
+	if (priv->fw_buf_bo[meta->buf_type]) {
+		XDNA_ERR(xdna, "Debug buffer type %u already attached on %s",
+			 meta->buf_type, hwctx->name);
+		ret = -EBUSY;
+		goto put_obj;
+	}
+
+	if (abo->assigned_hwctx != AMDXDNA_INVALID_CTX_HANDLE) {
+		XDNA_ERR(xdna, "BO %u already attached to a context",
+			 meta->bo_handle);
+		ret = -EBUSY;
+		goto put_obj;
+	}
+
+	if (priv->hw_ctx_id == CTX_INVALID_ID) {
+		XDNA_ERR(xdna, "No firmware context to attach debug buffer type %u on %s",
+			 meta->buf_type, hwctx->name);
+		ret = -ENODEV;
+		goto put_obj;
+	}
+
+	base_addr = amdxdna_gem_dev_addr(abo);
+	if (base_addr == AMDXDNA_INVALID_ADDR) {
+		XDNA_ERR(xdna, "Debug buffer type %u payload BO %u is not mapped",
+			 meta->buf_type, meta->bo_handle);
 		ret = -EINVAL;
-		goto put_meta_bo;
+		goto put_obj;
 	}
 
-	log_bo = amdxdna_gem_get_obj(client, meta->bo_handle, AMDXDNA_BO_SHARE);
-	if (!log_bo) {
-		XDNA_ERR(xdna, "Get payload bo %u failed", meta->bo_handle);
-		ret = -EINVAL;
-		goto put_meta_bo;
-	}
-
-	base_addr = amdxdna_gem_dev_addr(log_bo);
-
-	for (i = 0; i < num_ucs; i++) {
+	for (i = 0; i < meta->num_ucs; i++) {
 		u32 slice_size = meta->uc_info[i].size;
+		u32 index = meta->uc_info[i].index;
 		u32 next_size;
 
-		index = meta->uc_info[i].index;
 		if (index >= AIE4_MAX_NUM_CERTS) {
 			XDNA_ERR(xdna, "Invalid uc index %u", index);
 			ret = -EINVAL;
-			goto put_log_bo;
+			goto put_obj;
 		}
 
-		if (!attach) {
-			cl.info[index].paddr = 0;
-			cl.info[index].size = 0;
-			continue;
+		if (seen & BIT(index)) {
+			XDNA_ERR(xdna, "Duplicate uc index %u", index);
+			ret = -EINVAL;
+			goto put_obj;
 		}
+		seen |= BIT(index);
 
 		if (!slice_size)
 			continue;
 
-		if (cl.info[index].size) {
-			XDNA_ERR(xdna, "Duplicate uc index %u", index);
-			ret = -EINVAL;
-			goto put_log_bo;
-		}
-
 		if (check_add_overflow(prev_size, slice_size, &next_size) ||
-		    next_size > log_bo->mem.size) {
-			XDNA_ERR(xdna,
-				 "uc[%u] slice 0x%x at 0x%x overflows payload bo size %lu",
-				 index, slice_size, prev_size, log_bo->mem.size);
+		    next_size > abo->mem.size) {
+			XDNA_ERR(xdna, "uc[%u] slice 0x%x at 0x%x overflows bo size %lu",
+				 index, slice_size, prev_size, abo->mem.size);
 			ret = -EINVAL;
-			goto put_log_bo;
+			goto put_obj;
 		}
 
 		cl.info[index].paddr = base_addr + prev_size;
 		cl.info[index].size = slice_size;
+		used |= BIT(index);
 		prev_size = next_size;
 	}
 
-	cl.num = FIELD_PREP(AIE4_MSG_CERT_LOG_NUM, attach ? num_ucs : 0);
+	if (!used) {
+		XDNA_ERR(xdna, "Debug buffer type %u has no non-empty uc slice",
+			 meta->buf_type);
+		ret = -EINVAL;
+		goto put_obj;
+	}
 
-	ret = aie4_configure_hw_context_cert_log(ndev, hwctx->priv->hw_ctx_id,
-						 property, &cl);
-	XDNA_DBG(xdna, "%s CERT bo %u on %s, property %u, ret %d",
-		 attach ? "attach" : "detach", meta_bo_hdl,
-		 hwctx->name, property, ret);
+	/* cl.info[] is indexed by uC, so cover up to the highest one used. */
+	cl.num = FIELD_PREP(AIE4_MSG_CERT_LOG_NUM, fls(used));
+	ret = aie4_configure_hw_context_cert_log(ndev, priv->hw_ctx_id, property, &cl);
+	if (ret)
+		goto put_obj;
 
-put_log_bo:
-	amdxdna_gem_put_obj(log_bo);
-put_meta_bo:
-	amdxdna_gem_put_obj(meta_bo);
+	/* Keep the lookup reference. */
+	abo->assigned_hwctx = hwctx->id;
+	priv->fw_buf_bo[meta->buf_type] = abo;
+	/* Keep the device active while the buffer is attached. */
+	pm_runtime_get_noresume(xdna->ddev.dev);
+	XDNA_DBG(xdna, "Attached debug buffer type %u BO %u to %s",
+		 meta->buf_type, meta->bo_handle, hwctx->name);
+	return 0;
+
+put_obj:
+	amdxdna_gem_put_obj(abo);
 	return ret;
 }
 
@@ -2094,10 +2176,10 @@ int aie4_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *bu
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	switch (type) {
-	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
-		return aie4_hwctx_cfg_debug_bo(hwctx, (u32)value, true);
-	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
-		return aie4_hwctx_cfg_debug_bo(hwctx, (u32)value, false);
+	case DRM_AMDXDNA_HWCTX_ASSIGN_FW_BUF:
+		return aie4_hwctx_cfg_fw_buf(hwctx, buf, size, true);
+	case DRM_AMDXDNA_HWCTX_REMOVE_FW_BUF:
+		return aie4_hwctx_cfg_fw_buf(hwctx, buf, size, false);
 	default:
 		XDNA_DBG(xdna, "Not supported type %d", type);
 		return -EOPNOTSUPP;

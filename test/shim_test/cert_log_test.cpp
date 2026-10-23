@@ -28,6 +28,13 @@ alloc_log_bo(hw_ctx& ctx, size_t size)
   return ctx.get()->alloc_bo(size, get_bo_flags(XRT_BO_FLAGS_CARVEOUT, ext_boflags));
 }
 
+std::unique_ptr<buffer_handle>
+alloc_uc_debug_bo(hw_ctx& ctx, size_t size)
+{
+  uint32_t ext_boflags = XRT_BO_USE_UC_DEBUG << 4;
+  return ctx.get()->alloc_bo(size, get_bo_flags(XRT_BO_FLAGS_CACHEABLE, ext_boflags));
+}
+
 void
 expect_config_ok(buffer_handle* bo, hwctx_handle* ctx,
                  const std::map<uint32_t, size_t>& sizes, const std::string& tag)
@@ -122,4 +129,29 @@ TEST_certlog_payload_overflow(device::id_type id, std::shared_ptr<device>& sdev,
   expect_config_err(bo.get(), ctx.get(),
                     {{0, default_slice_size}, {1, default_slice_size}},
                     EINVAL, "cumulative slice size > payload BO size");
+}
+
+void
+TEST_dbgbuf_one_per_type(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  hw_ctx ctx{sdev.get()};
+  auto bo1 = alloc_uc_debug_bo(ctx, payload_bo_size);
+  auto bo2 = alloc_uc_debug_bo(ctx, payload_bo_size);
+
+  bo1->config(ctx.get(), {{0, default_slice_size}});
+  expect_config_err(bo2.get(), ctx.get(), {{0, default_slice_size}},
+                    EBUSY, "second uC debug BO on the same context");
+  bo1->unconfig(ctx.get());
+
+  bo2->config(ctx.get(), {{0, default_slice_size}});
+  bo2->unconfig(ctx.get());
+}
+
+void
+TEST_dbgbuf_empty_slices(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  hw_ctx ctx{sdev.get()};
+  auto bo = alloc_uc_debug_bo(ctx, payload_bo_size);
+
+  expect_config_err(bo.get(), ctx.get(), {{0, 0}}, EINVAL, "all uc slices empty");
 }

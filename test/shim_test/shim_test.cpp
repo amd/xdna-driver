@@ -66,6 +66,7 @@ void TEST_export_bo_then_close_device(device::id_type, std::shared_ptr<device>&,
 void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_gemm(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_gemm_after_idle(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_tdr_timeout_and_abort(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
@@ -112,6 +113,8 @@ void TEST_certlog_multi_uc(device::id_type, std::shared_ptr<device>&, arg_type&)
 void TEST_certlog_num_ucs_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_certlog_invalid_uc_index(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_certlog_payload_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_dbgbuf_one_per_type(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_dbgbuf_empty_slices(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_df_bw(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_aie4_flr(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_aie4_pf_flr(device::id_type, std::shared_ptr<device>&,
@@ -1724,6 +1727,9 @@ std::vector<test_case> test_list {
   test_case{ "gemm and debug BO", {},
     TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_io_gemm, {}
   },
+  test_case{ "gemm and debug BO after idle", {},
+    TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_io_gemm_after_idle, { 6000 }
+  },
   test_case{ "create and free internal bo", {},
     TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, npu12}, {amdxdna}, TEST_create_free_internal_bo, {}
   },
@@ -1794,6 +1800,12 @@ std::vector<test_case> test_list {
   },
   test_case{ "CERT log: payload overflow rejected", {},
     TEST_POSITIVE, {npu3, npu3vf, npu12}, {}, TEST_certlog_payload_overflow, {}
+  },
+  test_case{ "debug BO: one per type per context", {},
+    TEST_POSITIVE, {npu3, npu3vf, npu12}, {}, TEST_dbgbuf_one_per_type, {}
+  },
+  test_case{ "debug BO: all-empty slices rejected", {},
+    TEST_POSITIVE, {npu3, npu3vf, npu12}, {}, TEST_dbgbuf_empty_slices, {}
   },
   test_case{ "NPU write to read-only user pointer BO is rejected", {},
     TEST_NEGATIVE, {npu1, npu4, npu3, npu3vf}, {amdxdna}, TEST_write_to_readonly_uptr_bo, {}

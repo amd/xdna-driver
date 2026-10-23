@@ -27,6 +27,9 @@ private:
   config_ctx_debug_bo(config_ctx_debug_bo_arg& arg) const override;
 
   void
+  config_ctx_fw_buf(config_ctx_fw_buf_arg& arg) const override;
+
+  void
   create_bo(bo_info& arg) const override;
 
   void
