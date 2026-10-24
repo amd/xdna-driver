@@ -199,22 +199,6 @@ static void aie4_hwctx_put_fw_bufs(struct amdxdna_hwctx *hwctx)
 	}
 }
 
-static u32 aie4_parse_priority_to_dev(u32 priority)
-{
-	switch (priority) {
-	case AMDXDNA_QOS_LOW_PRIORITY:
-		return AIE4_CONTEXT_PRIORITY_BAND_IDLE;
-	case AMDXDNA_QOS_NORMAL_PRIORITY:
-		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
-	case AMDXDNA_QOS_HIGH_PRIORITY:
-		return AIE4_CONTEXT_PRIORITY_BAND_FOCUS;
-	case AMDXDNA_QOS_REALTIME_PRIORITY:
-		return AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME;
-	default:
-		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
-	}
-}
-
 /*
  * Resolve the partition this context runs in. Parts that partition per hwctx
  * create one sized to the context's own tile request, at the column userspace
@@ -312,23 +296,6 @@ static void aie4_hwctx_partition_put(struct amdxdna_hwctx *hwctx, bool notify_fw
 	priv->partition_id = 0;
 }
 
-/*
- * Firmware uses priority_level to determine the priority band for DPM cap
- * table lookup. The ranges are: IDLE=0, NORMAL=1-15, FOCUS=16-29,
- * REAL_TIME=30-31. Without setting this, priority_level=0 causes firmware
- * to treat the context as IDLE band for DPM, regardless of priority_band.
- */
-static u8 aie4_band_to_priority_level(u32 band)
-{
-	switch (band) {
-	case AIE4_CONTEXT_PRIORITY_BAND_IDLE:		return 0;
-	case AIE4_CONTEXT_PRIORITY_BAND_NORMAL:		return 1;
-	case AIE4_CONTEXT_PRIORITY_BAND_FOCUS:		return 16;
-	case AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME:	return 30;
-	default:					return 1;
-	}
-}
-
 int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 {
 	DECLARE_AIE_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
@@ -358,7 +325,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	req.partition_id = priv->partition_id;
 	req.request_num_tiles = hwctx->num_tiles;
 	req.pasid = aie4_msg_pasid(client);
-	req.priority_band = aie4_parse_priority_to_dev(hwctx->qos.priority);
+	req.priority_band = aie4_qos2dev_priority_band(hwctx->qos.priority);
 	req.priority_level = aie4_band_to_priority_level(req.priority_band);
 	req.restore_id = priv->restore_id;
 	req.hsa_addr_high = upper_32_bits(amdxdna_gem_dev_addr(priv->umq_bo));

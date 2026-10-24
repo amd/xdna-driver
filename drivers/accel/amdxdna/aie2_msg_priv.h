@@ -31,6 +31,7 @@ enum aie2_msg_opcode {
 	MSG_OP_SET_RUNTIME_CONFIG          = 0x10A,
 	MSG_OP_GET_RUNTIME_CONFIG          = 0x10B,
 	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
+	MSG_OP_SET_CONTEXT_PRIORITY        = 0x10D,
 	MSG_OP_START_FW_TRACE              = 0x10F,
 	MSG_OP_STOP_FW_TRACE               = 0x110,
 	MSG_OP_SET_FW_TRACE_CATEGORIES     = 0x111,
@@ -686,6 +687,16 @@ struct set_fw_trace_categories_req {
 } __packed;
 
 struct set_fw_trace_categories_resp {
+	enum aie2_msg_status	status;
+} __packed;
+
+struct set_context_priority_req {
+	__u8	context_id;
+	__u8	context_priority;
+	__u16	reserved;
+} __packed;
+
+struct set_context_priority_resp {
 	enum aie2_msg_status	status;
 } __packed;
 

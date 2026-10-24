@@ -7,14 +7,19 @@
  * AIE2 TDR (Timeout Detection and Recovery)
  *
  * A standalone TDR timer is used for AIE2 devices. A delayed_work fires
- * every tdr_timeout_ms to call aie2_legacy_tdr_detect(). On stall,
- * aie2_tdr_recover_all() iterates all stuck contexts, dumps health, and
- * performs stop/restart.
+ * every tdr_timeout_ms and performs two tasks:
  *
- * Detection uses a two-phase approach to avoid false positives: each call
- * compares the current TDR status against the previous progress snapshot.
- * A stall is confirmed only when no signal (from job completion or submission)
- * has occurred across two consecutive intervals while jobs remain pending.
+ * 1. Dead firmware detection: aie2_tdr_dead_fw_detect() checks for a device-
+ *    wide stall. On stall, aie2_tdr_dead_fw_recover_all() iterates all stuck
+ *    contexts, dumps health, and performs stop/restart. Detection uses a
+ *    two-phase approach: a stall is confirmed only when no signal (from job
+ *    completion or submission) has occurred across two consecutive intervals
+ *    while jobs remain pending.
+ *
+ * 2. Starvation detection: aie2_tdr_starvation_detect_and_recover() checks
+ *    each non-realtime context for lack of progress while jobs are outstanding.
+ *    A starved context is temporarily boosted to realtime priority via
+ *    aie2_set_context_priority() and restored when progress resumes.
  */
 
 #include "aie2_pci.h"
@@ -25,7 +30,7 @@
 
 #define TDR_TIMEOUT_JIFF msecs_to_jiffies(tdr_timeout_ms)
 
-static int aie2_legacy_tdr_hwctx_pending(struct amdxdna_hwctx *hwctx, void *arg)
+static int aie2_tdr_hwctx_pending(struct amdxdna_hwctx *hwctx, void *arg)
 {
 	if (atomic64_read(&hwctx->job_submit_cnt) > atomic64_read(&hwctx->job_free_cnt))
 		return 1;
@@ -33,7 +38,7 @@ static int aie2_legacy_tdr_hwctx_pending(struct amdxdna_hwctx *hwctx, void *arg)
 	return 0;
 }
 
-static bool aie2_legacy_tdr_detect(struct amdxdna_dev *xdna)
+static bool aie2_tdr_dead_fw_detect(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_client *client;
@@ -42,8 +47,7 @@ static bool aie2_legacy_tdr_detect(struct amdxdna_dev *xdna)
 
 	/* Check if there are any pending jobs */
 	amdxdna_for_each_client(xdna, client) {
-		pending = amdxdna_hwctx_walk(client, NULL, NULL,
-					     aie2_legacy_tdr_hwctx_pending);
+		pending = amdxdna_hwctx_walk(client, NULL, NULL, aie2_tdr_hwctx_pending);
 		if (pending)
 			break;
 	}
@@ -127,7 +131,61 @@ static int aie2_tdr_resume_hwctx(struct amdxdna_hwctx *hwctx, void *arg)
 	return 0;
 }
 
-static void aie2_tdr_recover_all(struct amdxdna_dev *xdna)
+static int aie2_hwctx_starvation_detect_and_recover(struct amdxdna_hwctx *hwctx, void *arg)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u64 submit_cnt, free_cnt;
+
+	/* Realtime contexts cannot be preempted; no starvation possible. */
+	if (hwctx->qos.priority == AMDXDNA_QOS_REALTIME_PRIORITY)
+		return 0;
+
+	submit_cnt = atomic64_read(&hwctx->job_submit_cnt);
+	free_cnt = atomic64_read(&hwctx->job_free_cnt);
+
+	/*
+	 * Best-effort starvation detection: no completions since the last
+	 * interval (free_cnt unchanged) AND jobs were already outstanding at
+	 * the last snapshot (last_submit_cnt > last_free_cnt). This avoids
+	 * false positives when a burst of new submissions arrives just before
+	 * the interval fires. Boosting a hung job to realtime is harmless —
+	 * it does not prevent TDR from recovering it.
+	 */
+	if (free_cnt == hwctx->priv->starvation_last_free_cnt &&
+	    hwctx->priv->starvation_last_submit_cnt > hwctx->priv->starvation_last_free_cnt) {
+		if (!hwctx->priv->starvation_priority_boosted) {
+			/* Best-effort: mark boosted regardless of return value.
+			 * A failed boost is harmless — TDR will recover a hung ctx.
+			 */
+			aie2_set_context_priority(hwctx, AMDXDNA_QOS_REALTIME_PRIORITY);
+			XDNA_WARN_RATELIMITED(xdna, "PID %d fw ctx %d starved, boosted priority",
+					      hwctx->client->pid, hwctx->fw_ctx_id);
+			hwctx->priv->starvation_priority_boosted = true;
+		}
+	} else {
+		if (hwctx->priv->starvation_priority_boosted) {
+			aie2_set_context_priority(hwctx, hwctx->qos.priority);
+			XDNA_INFO_RATELIMITED(xdna,
+					      "PID %d fw ctx %d not starved, restoring priority",
+					      hwctx->client->pid, hwctx->fw_ctx_id);
+			hwctx->priv->starvation_priority_boosted = false;
+		}
+		hwctx->priv->starvation_last_submit_cnt = submit_cnt;
+		hwctx->priv->starvation_last_free_cnt = free_cnt;
+	}
+
+	return 0;
+}
+
+static void aie2_tdr_starvation_detect_and_recover(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_client *client;
+
+	amdxdna_for_each_client(xdna, client)
+		amdxdna_hwctx_walk(client, NULL, NULL, aie2_hwctx_starvation_detect_and_recover);
+}
+
+static void aie2_tdr_dead_fw_recover_all(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_client *client;
 	bool fw_dead = false;
@@ -158,10 +216,12 @@ static void aie2_tdr_work_func(struct work_struct *work)
 
 	guard(mutex)(&xdna->dev_lock);
 
-	if (aie2_legacy_tdr_detect(xdna)) {
+	if (aie2_tdr_dead_fw_detect(xdna)) {
 		XDNA_WARN(xdna, "Device isn't making progress");
-		aie2_tdr_recover_all(xdna);
+		aie2_tdr_dead_fw_recover_all(xdna);
 	}
+
+	aie2_tdr_starvation_detect_and_recover(xdna);
 
 	schedule_delayed_work(&tdr->work, TDR_TIMEOUT_JIFF);
 }

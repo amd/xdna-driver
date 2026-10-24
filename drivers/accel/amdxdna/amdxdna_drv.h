@@ -33,6 +33,10 @@
 #define XDNA_INFO_ONCE(xdna, fmt, args...) drm_info_once(&(xdna)->ddev, fmt, ##args)
 #define XDNA_ERR_RATELIMITED(xdna, fmt, args...) \
 	drm_err_ratelimited(&(xdna)->ddev, "%s: "fmt, __func__, ##args)
+#define XDNA_WARN_RATELIMITED(xdna, fmt, args...) \
+	dev_warn_ratelimited((xdna)->ddev.dev, "%s: " fmt, __func__, ##args)
+#define XDNA_INFO_RATELIMITED(xdna, fmt, args...) \
+	dev_info_ratelimited((xdna)->ddev.dev, fmt, ##args)
 
 #define XDNA_MBZ_DBG(xdna, ptr, sz)					\
 	({								\
