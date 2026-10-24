@@ -169,7 +169,7 @@ static void amdxdna_client_cleanup(struct amdxdna_client *client)
 	cleanup_srcu_struct(&client->hwctx_srcu);
 
 	xa_for_each(&client->dev_heap_xa, heap_id, heap)
-		drm_gem_object_put(to_gobj(heap));
+		amdxdna_gem_put_obj_async(heap);
 	xa_destroy(&client->dev_heap_xa);
 	if (xdna->dev_info->dev_heap_max_size)
 		drm_mm_takedown(&client->dev_heap_mm);

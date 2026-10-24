@@ -32,6 +32,7 @@
 #include "amdxdna_debugfs.h"
 #include "amdxdna_dpt.h"
 #include "amdxdna_drv.h"
+#include "amdxdna_gem.h"
 #include "amdxdna_pm.h"
 #include "amdxdna_plat_drv.h"
 
@@ -321,7 +322,29 @@ static struct platform_driver amdxdna_plat_driver = {
 	},
 };
 
-module_platform_driver(amdxdna_plat_driver);
+static int __init amdxdna_plat_init(void)
+{
+	int ret;
+
+	ret = amdxdna_bo_free_wq_init();
+	if (ret)
+		return ret;
+
+	ret = platform_driver_register(&amdxdna_plat_driver);
+	if (ret)
+		amdxdna_bo_free_wq_fini();
+
+	return ret;
+}
+
+static void __exit amdxdna_plat_exit(void)
+{
+	platform_driver_unregister(&amdxdna_plat_driver);
+	amdxdna_bo_free_wq_fini();
+}
+
+module_init(amdxdna_plat_init);
+module_exit(amdxdna_plat_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");

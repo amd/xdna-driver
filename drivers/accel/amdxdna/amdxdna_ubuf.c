@@ -370,7 +370,7 @@ struct amdxdna_gem_obj *amdxdna_alloc_ubuf_bo(struct amdxdna_client *client,
 	return abo;
 
 put_obj:
-	drm_gem_object_put(to_gobj(abo));
+	amdxdna_gem_put_obj(abo);
 free_ent:
 	kvfree(va_ent);
 	return ERR_PTR(ret);

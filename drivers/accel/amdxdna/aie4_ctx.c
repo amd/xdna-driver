@@ -688,7 +688,7 @@ void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx
 static void aie4_hwctx_umq_fini(struct amdxdna_hwctx *hwctx)
 {
 	if (hwctx->priv && hwctx->priv->umq_bo)
-		drm_gem_object_put(to_gobj(hwctx->priv->umq_bo));
+		amdxdna_gem_put_obj_async(hwctx->priv->umq_bo);
 }
 
 static int aie4_hwctx_umq_init(struct amdxdna_hwctx *hwctx)
@@ -1532,7 +1532,7 @@ static void aie4_fill_chain_health_data(struct amdxdna_hwctx *hwctx,
 	mutex_unlock(&priv->io_lock);
 
 	if (sub_abo)
-		amdxdna_gem_put_obj(sub_abo);
+		amdxdna_gem_put_obj_async(sub_abo);
 	else
 		XDNA_ERR(xdna, "Failed to find sub cmd BO %u", (u32)payload->data[i]);
 }
@@ -1800,7 +1800,7 @@ static int submit_job_cmds(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job
 		 * the job worker's reset drain (see below).
 		 */
 		ret = submit_one_cmd(hwctx, abo, i + 1 == ccnt, i == 0, &job->seq);
-		amdxdna_gem_put_obj(abo);
+		amdxdna_gem_put_obj_async(abo);
 		if (ret)
 			break;
 		job->aie4_job_state = AIE4_JOB_STATE_SUBMITTING;
@@ -2133,7 +2133,7 @@ static int aie4_hwctx_cfg_fw_buf(struct amdxdna_hwctx *hwctx,
 	return 0;
 
 put_obj:
-	amdxdna_gem_put_obj(abo);
+	amdxdna_gem_put_obj_async(abo);
 	return ret;
 }
 
