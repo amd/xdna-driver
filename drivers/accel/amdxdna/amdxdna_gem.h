@@ -71,6 +71,10 @@ struct amdxdna_gem_obj {
 	bool				readonly;
 
 	struct list_head		node;
+
+	/* Async BO free support for callers holding dev_lock. */
+	atomic_t			pending_free_cnt;
+	struct work_struct		free_work;
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)
@@ -82,10 +86,22 @@ static inline struct amdxdna_gem_obj *to_xdna_obj(struct drm_gem_object *gobj)
 	return container_of(gobj, struct amdxdna_gem_obj, base.base);
 }
 
+int amdxdna_bo_free_wq_init(void);
+void amdxdna_bo_free_wq_fini(void);
+
 struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct amdxdna_client *client,
 					    u32 bo_hdl, u8 bo_type);
+/*
+ * Must be used instead of amdxdna_gem_put_obj() when dev_lock is held.
+ * Using the non-async variant with dev_lock held can deadlock through the
+ * HMM notifier removal path.
+ */
+void amdxdna_gem_put_obj_async(struct amdxdna_gem_obj *abo);
 static inline void amdxdna_gem_put_obj(struct amdxdna_gem_obj *abo)
 {
+	if (!abo)
+		return;
+
 	drm_gem_object_put(to_gobj(abo));
 }
 

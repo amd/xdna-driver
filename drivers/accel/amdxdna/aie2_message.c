@@ -1150,7 +1150,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 
 		size = cmdbuf_abo->mem.size - offset;
 		ret = aie2_cmdlist_fill_slot(cmd_buf + offset, abo, &size, &op);
-		amdxdna_gem_put_obj(abo);
+		amdxdna_gem_put_obj_async(abo);
 		if (ret)
 			return ret;
 

@@ -301,7 +301,29 @@ static struct pci_driver amdxdna_pci_driver = {
 	.sriov_configure = amdxdna_sriov_configure,
 };
 
-module_pci_driver(amdxdna_pci_driver);
+static int __init amdxdna_pci_init(void)
+{
+	int ret;
+
+	ret = amdxdna_bo_free_wq_init();
+	if (ret)
+		return ret;
+
+	ret = pci_register_driver(&amdxdna_pci_driver);
+	if (ret)
+		amdxdna_bo_free_wq_fini();
+
+	return ret;
+}
+
+static void __exit amdxdna_pci_exit(void)
+{
+	pci_unregister_driver(&amdxdna_pci_driver);
+	amdxdna_bo_free_wq_fini();
+}
+
+module_init(amdxdna_pci_init);
+module_exit(amdxdna_pci_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_IMPORT_NS("AMD_PMF");

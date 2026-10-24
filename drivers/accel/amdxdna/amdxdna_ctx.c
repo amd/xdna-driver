@@ -31,7 +31,7 @@ static void amdxdna_hwctx_release_expanded_heap(struct amdxdna_hwctx *hwctx)
 		xa_for_each_range(&client->dev_heap_xa, heap_id, heap, 1,
 				  hwctx->last_attached_heap) {
 			amdxdna_gem_unpin(heap);
-			drm_gem_object_put(to_gobj(heap));
+			amdxdna_gem_put_obj_async(heap);
 		}
 	}
 	mutex_unlock(&client->mm_lock);
@@ -164,7 +164,7 @@ int amdxdna_cmd_set_error(struct amdxdna_gem_obj *abo,
 			return -EINVAL;
 		cmd = amdxdna_gem_vmap(abo);
 		if (!cmd) {
-			amdxdna_gem_put_obj(abo);
+			amdxdna_gem_put_obj_async(abo);
 			return -ENOMEM;
 		}
 	}
@@ -174,7 +174,7 @@ int amdxdna_cmd_set_error(struct amdxdna_gem_obj *abo,
 		memcpy(cmd->data, err_data, min(size, abo->mem.size - sizeof(*cmd)));
 
 	if (cc)
-		amdxdna_gem_put_obj(abo);
+		amdxdna_gem_put_obj_async(abo);
 
 	return 0;
 }
@@ -532,7 +532,7 @@ unlock:
 	mutex_unlock(&xdna->client_lock);
 	amdxdna_pm_suspend_put(xdna);
 put_obj:
-	drm_gem_object_put(gobj);
+	amdxdna_gem_put_obj(to_xdna_obj(gobj));
 	return ret;
 }
 
@@ -553,7 +553,7 @@ static int amdxdna_hwctx_expand_heap(struct amdxdna_hwctx *hwctx)
 		drm_gem_object_get(to_gobj(heap));
 		ret = amdxdna_gem_pin(heap);
 		if (ret) {
-			drm_gem_object_put(to_gobj(heap));
+			amdxdna_gem_put_obj_async(heap);
 			break;
 		}
 
@@ -562,7 +562,7 @@ static int amdxdna_hwctx_expand_heap(struct amdxdna_hwctx *hwctx)
 		mutex_lock(&client->mm_lock);
 		if (ret) {
 			amdxdna_gem_unpin(heap);
-			drm_gem_object_put(to_gobj(heap));
+			amdxdna_gem_put_obj_async(heap);
 			break;
 		}
 
@@ -600,7 +600,7 @@ amdxdna_arg_bos_put(struct amdxdna_sched_job *job)
 	for (i = 0; i < job->bo_cnt; i++) {
 		if (!job->bos[i])
 			break;
-		drm_gem_object_put(job->bos[i]);
+		amdxdna_gem_put_obj_async(to_xdna_obj(job->bos[i]));
 	}
 }
 
@@ -633,7 +633,7 @@ amdxdna_arg_bos_lookup(struct amdxdna_client *client,
 		ret = amdxdna_gem_pin_nolock(abo);
 		if (ret) {
 			mutex_unlock(&abo->lock);
-			drm_gem_object_put(gobj);
+			amdxdna_gem_put_obj_async(abo);
 			goto put_shmem_bo;
 		}
 		abo->pinned = true;
@@ -654,7 +654,7 @@ void amdxdna_job_cleanup(struct amdxdna_sched_job *job)
 	trace_amdxdna_debug_point(job->hwctx->name, job->seq, "job release");
 	amdxdna_pm_suspend_put(job->hwctx->client->xdna);
 	amdxdna_arg_bos_put(job);
-	amdxdna_gem_put_obj(job->cmd_bo);
+	amdxdna_gem_put_obj_async(job->cmd_bo);
 	mmdrop(job->mm);
 	WARN_ON(!job->submitted);
 	atomic64_inc(&job->hwctx->job_free_cnt);
@@ -752,7 +752,7 @@ unlock_srcu:
 put_bos:
 	amdxdna_arg_bos_put(job);
 cmd_put:
-	amdxdna_gem_put_obj(job->cmd_bo);
+	amdxdna_gem_put_obj_async(job->cmd_bo);
 free_job:
 	if (job->mm)
 		mmdrop(job->mm);

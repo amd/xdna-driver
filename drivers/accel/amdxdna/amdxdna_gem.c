@@ -6,6 +6,7 @@
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_cache.h>
 #include <drm/drm_device.h>
+#include <drm/drm_drv.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_print.h>
@@ -182,6 +183,55 @@ void amdxdna_gem_heap_free(struct amdxdna_client *client, struct amdxdna_gem_obj
 	client->heap_usage -= abo->mem.size;
 
 	mutex_unlock(&client->mm_lock);
+}
+
+static struct workqueue_struct *amdxdna_bo_free_wq;
+
+/*
+ * Module-wide workqueue for deferred BO puts. A module-level queue is
+ * required because amdxdna_gem_put_obj_async() can be called after
+ * device remove (e.g. from postclose) and the work must not run after
+ * the module is unloaded. destroy_workqueue() at module exit drains all
+ * pending work before the module text is freed.
+ */
+int amdxdna_bo_free_wq_init(void)
+{
+	amdxdna_bo_free_wq = alloc_workqueue("amdxdna_bo_free", WQ_MEM_RECLAIM | WQ_UNBOUND, 0);
+	if (!amdxdna_bo_free_wq)
+		return -ENOMEM;
+
+	return 0;
+}
+
+void amdxdna_bo_free_wq_fini(void)
+{
+	destroy_workqueue(amdxdna_bo_free_wq);
+}
+
+static void amdxdna_gem_free_work(struct work_struct *work)
+{
+	struct amdxdna_gem_obj *abo = container_of(work, struct amdxdna_gem_obj, free_work);
+	struct drm_device *ddev = to_gobj(abo)->dev;
+	int cnt;
+
+	/*
+	 * Atomically claim all pending puts and reset the counter to allow new
+	 * requests to requeue the work. Each claimed put owns a GEM reference,
+	 * so the object remains alive until all claimed puts are processed.
+	 *
+	 * The final put may destroy the object, including this embedded work.
+	 * Do not access the object or work after the final put.
+	 */
+	cnt = atomic_xchg(&abo->pending_free_cnt, 0);
+	while (cnt--)
+		drm_gem_object_put(to_gobj(abo));
+
+	/*
+	 * Release the drm_device reference taken in amdxdna_gem_put_obj_async.
+	 * This must happen after all puts so that any drmm teardown triggered
+	 * by the final drm_dev_put does not race with BO free callbacks.
+	 */
+	drm_dev_put(ddev);
 }
 
 void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo)
@@ -478,6 +528,8 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 	xa_init_flags(&abo->heap_xa, XA_FLAGS_ALLOC);
 	INIT_WORK(&abo->hmm_unreg_work, amdxdna_hmm_unreg_work);
 	INIT_LIST_HEAD(&abo->node);
+	atomic_set(&abo->pending_free_cnt, 0);
+	INIT_WORK(&abo->free_work, amdxdna_gem_free_work);
 
 	return abo;
 }
@@ -503,7 +555,7 @@ static void amdxdna_gem_dev_obj_free(struct drm_gem_object *gobj)
 
 	amdxdna_gem_vunmap(abo);
 	xa_for_each(&abo->heap_xa, heap_id, heap)
-		drm_gem_object_put(to_gobj(heap));
+		amdxdna_gem_put_obj(heap);
 	xa_destroy(&abo->heap_xa);
 
 	drm_gem_object_release(gobj);
@@ -566,7 +618,7 @@ static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 		amdxdna_mark_mapp_invalid(abo, vma);
 
 		/* Drop the reference drm_gem_mmap_obj() acquired.*/
-		drm_gem_object_put(to_gobj(abo));
+		amdxdna_gem_put_obj(abo);
 		return 0;
 	}
 
@@ -728,7 +780,7 @@ static int amdxdna_gem_dmabuf_mmap(struct dma_buf *dma_buf, struct vm_area_struc
 	return 0;
 
 put_obj:
-	drm_gem_object_put(gobj);
+	amdxdna_gem_put_obj(abo);
 	return ret;
 }
 
@@ -808,6 +860,31 @@ amdxdna_gem_del_bo_usage(struct amdxdna_client *client, struct amdxdna_gem_obj *
 	client->total_bo_usage -= abo->mem.size;
 	if (abo->internal)
 		client->total_int_bo_usage -= abo->mem.size;
+}
+
+void amdxdna_gem_put_obj_async(struct amdxdna_gem_obj *abo)
+{
+	if (!abo)
+		return;
+
+	/*
+	 * Each deferred put owns a valid GEM reference, keeping the object alive
+	 * until the put is processed. Only the transition from 0 to 1 needs to
+	 * queue the work; subsequent requests are accumulated in the counter
+	 * and handled by the queued worker.
+	 *
+	 * If the worker has already consumed the previous count, a new request
+	 * sees 0 and requeues the work, even if the worker is still running.
+	 *
+	 * Take a drm_device reference to prevent device teardown (drmm actions,
+	 * DMA region release) from completing before the worker finishes. A GEM
+	 * object does not pin the drm_device on its own, so without this the
+	 * device could be freed while the worker is still running.
+	 */
+	if (atomic_fetch_inc(&abo->pending_free_cnt) == 0) {
+		drm_dev_get(to_gobj(abo)->dev);
+		queue_work(amdxdna_bo_free_wq, &abo->free_work);
+	}
 }
 
 static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
@@ -1246,7 +1323,7 @@ amdxdna_drm_create_dev_heap_bo(struct drm_device *dev,
 
 mm_unlock:
 	mutex_unlock(&client->mm_lock);
-	drm_gem_object_put(to_gobj(abo));
+	amdxdna_gem_put_obj(abo);
 	return ERR_PTR(ret);
 }
 
@@ -1341,7 +1418,7 @@ put_obj:
 	if (ret && abo->type == AMDXDNA_BO_DEV)
 		amdxdna_gem_heap_free(client, abo);
 	/* Dereference object reference. Handle holds it now. */
-	drm_gem_object_put(to_gobj(abo));
+	amdxdna_gem_put_obj(abo);
 	return ret;
 }
 
@@ -1438,7 +1515,7 @@ struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct amdxdna_client *client,
 	if (bo_type == AMDXDNA_BO_INVALID || abo->type == bo_type)
 		return abo;
 
-	drm_gem_object_put(gobj);
+	amdxdna_gem_put_obj_async(abo);
 	return NULL;
 }
 
@@ -1509,7 +1586,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	XDNA_DBG(xdna, "BO hdl %d map_offset 0x%llx vaddr 0x%llx xdna_addr 0x%llx",
 		 args->handle, args->map_offset, args->vaddr, args->xdna_addr);
 
-	drm_gem_object_put(gobj);
+	amdxdna_gem_put_obj(abo);
 	return ret;
 }
 
@@ -1630,7 +1707,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	}
 
 put_obj:
-	drm_gem_object_put(gobj);
+	amdxdna_gem_put_obj(abo);
 	return ret;
 }
 
@@ -1785,7 +1862,7 @@ int amdxdna_client_populate_ranges(struct amdxdna_client *client)
 				list_del_init(&abo->node);
 			up_write(&xdna->notifier_lock);
 		}
-		drm_gem_object_put(to_gobj(abo));
+		amdxdna_gem_put_obj_async(abo);
 		if (ret)
 			break;
 	}

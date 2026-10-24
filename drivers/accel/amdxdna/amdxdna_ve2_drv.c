@@ -23,6 +23,7 @@
 #include "amdxdna_debugfs.h"
 #include "amdxdna_dpt.h"
 #include "amdxdna_drv.h"
+#include "amdxdna_gem.h"
 #include "amdxdna_pm.h"
 #include "amdxdna_ve2_drv.h"
 
@@ -180,7 +181,30 @@ static struct auxiliary_driver amdxdna_ve2_driver = {
 		.pm	= &amdxdna_ve2_pm_ops,
 	},
 };
-module_auxiliary_driver(amdxdna_ve2_driver);
+
+static int __init amdxdna_ve2_init(void)
+{
+	int ret;
+
+	ret = amdxdna_bo_free_wq_init();
+	if (ret)
+		return ret;
+
+	ret = auxiliary_driver_register(&amdxdna_ve2_driver);
+	if (ret)
+		amdxdna_bo_free_wq_fini();
+
+	return ret;
+}
+
+static void __exit amdxdna_ve2_exit(void)
+{
+	auxiliary_driver_unregister(&amdxdna_ve2_driver);
+	amdxdna_bo_free_wq_fini();
+}
+
+module_init(amdxdna_ve2_init);
+module_exit(amdxdna_ve2_exit);
 
 MODULE_FIRMWARE("amdnpu/release_cert_ve2.elf");
 #ifdef MODULE_VER_STR

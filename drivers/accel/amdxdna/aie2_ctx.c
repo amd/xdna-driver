@@ -808,11 +808,11 @@ free_cmd_bufs:
 		if (!priv->cmd_buf[i])
 			continue;
 		amdxdna_gem_heap_free(client, priv->cmd_buf[i]);
-		drm_gem_object_put(to_gobj(priv->cmd_buf[i]));
+		amdxdna_gem_put_obj_async(priv->cmd_buf[i]);
 	}
 	amdxdna_gem_unpin(heap);
 put_heap:
-	drm_gem_object_put(to_gobj(heap));
+	amdxdna_gem_put_obj_async(heap);
 free_priv:
 	kfree(priv);
 	return ret;
@@ -829,7 +829,7 @@ static void aie2_hwctx_put_cu_bos(struct amdxdna_hwctx *hwctx)
 	for (i = 0; i < hwctx->cus->num_cus; i++) {
 		if (!hwctx->priv->cu_bos[i])
 			break;
-		drm_gem_object_put(to_gobj(hwctx->priv->cu_bos[i]));
+		amdxdna_gem_put_obj_async(hwctx->priv->cu_bos[i]);
 	}
 
 	kfree(hwctx->priv->cu_bos);
@@ -865,10 +865,10 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		 * dev bo. Call amdxdna_gem_heap_free explicitly.
 		 */
 		amdxdna_gem_heap_free(hwctx->client, hwctx->priv->cmd_buf[idx]);
-		drm_gem_object_put(to_gobj(hwctx->priv->cmd_buf[idx]));
+		amdxdna_gem_put_obj_async(hwctx->priv->cmd_buf[idx]);
 	}
 	amdxdna_gem_unpin(hwctx->priv->heap);
-	drm_gem_object_put(to_gobj(hwctx->priv->heap));
+	amdxdna_gem_put_obj_async(hwctx->priv->heap);
 
 	kfree(hwctx->priv->cached_health);
 	mutex_destroy(&hwctx->priv->io_lock);
@@ -926,7 +926,7 @@ static int aie2_hwctx_hold_cu_bos(struct amdxdna_hwctx *hwctx)
 
 		abo = to_xdna_obj(gobj);
 		if (abo->type != AMDXDNA_BO_DEV) {
-			drm_gem_object_put(gobj);
+			amdxdna_gem_put_obj_async(abo);
 			XDNA_ERR(xdna, "Invalid BO type");
 			goto put_bos;
 		}
@@ -1078,7 +1078,7 @@ static int aie2_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl,
 put_cmd:
 	aie2_cmd_put(cmd);
 put_obj:
-	amdxdna_gem_put_obj(abo);
+	amdxdna_gem_put_obj_async(abo);
 	return ret;
 }
 
