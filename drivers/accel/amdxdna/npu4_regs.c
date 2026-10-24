@@ -104,6 +104,7 @@ const struct amdxdna_fw_feature_tbl npu4_fw_feature_table[] = {
 	{ .features = BIT_U64(AIE2_GET_DEV_REVISION), .major = 6, .min_minor = 24 },
 	{ .features = BIT_U64(AIE2_RW_ACCESS), .major = 6, .min_minor = 24 },
 	{ .features = BIT_U64(AIE2_CALIBRATE_CLOCK), .major = 6, .min_minor = 24 },
+	{ .features = BIT_U64(AIE2_SET_CONTEXT_PRIORITY), .major = 6, .min_minor = 24 },
 	{ .features = AIE2_ALL_FEATURES, .major = 7 },
 	{ 0 }
 };

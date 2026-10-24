@@ -98,6 +98,11 @@ struct amdxdna_hwctx_priv {
 	struct amdxdna_gem_obj		**cu_bos;
 
 	struct app_health_report	*cached_health;
+
+	/* Per-hwctx starvation detection. Accessed under dev_lock. */
+	u64				starvation_last_submit_cnt;
+	u64				starvation_last_free_cnt;
+	bool				starvation_priority_boosted;
 };
 
 enum aie2_dev_status {
@@ -171,6 +176,7 @@ enum aie2_fw_feature {
 	AIE2_CALIBRATE_CLOCK,
 	AIE2_FW_LOG,
 	AIE2_FW_TRACE,
+	AIE2_SET_CONTEXT_PRIORITY,
 	AIE2_FEATURE_MAX
 };
 
@@ -276,6 +282,7 @@ int aie2_fw_trace_fini(struct amdxdna_dev *xdna);
 
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
+int aie2_set_context_priority(struct amdxdna_hwctx *hwctx, u32 qos_priority);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
 int aie2_add_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
 int aie2_query_status(struct amdxdna_msg_buf_hdl *buf_hdl, u32 *cols_filled, u32 *resp_size);

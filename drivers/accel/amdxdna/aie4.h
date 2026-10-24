@@ -287,6 +287,8 @@ enum aie4_fw_feature {
 	AIE4_FEATURE_MAX
 };
 
+u8 aie4_band_to_priority_level(u32 band);
+u32 aie4_qos2dev_priority_band(u32 qos_priority);
 int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 			  struct amdxdna_msg_buf_hdl *list_hdl,
 			  u32 num_bufs);

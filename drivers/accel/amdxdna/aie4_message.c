@@ -1178,6 +1178,43 @@ int aie4_fill_hwctx_health(struct amdxdna_hwctx *hwctx, struct amdxdna_drm_hwctx
 static_assert(sizeof(struct uc_health_info) == AMDXDNA_HWCTX_UC_HEALTH_BYTES);
 static_assert(AIE4_MPNPUFW_MAX_UC_COUNT == AMDXDNA_HWCTX_MAX_UC);
 
+u32 aie4_qos2dev_priority_band(u32 qos_priority)
+{
+	switch (qos_priority) {
+	case AMDXDNA_QOS_LOW_PRIORITY:
+		/* Map low to normal to avoid idle ctx which may suffer starvation
+		 * due to the current firmware implementation. Firmware guarantees
+		 * no starvation for all priority levels except idle.
+		 */
+		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
+	case AMDXDNA_QOS_NORMAL_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
+	case AMDXDNA_QOS_HIGH_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_FOCUS;
+	case AMDXDNA_QOS_REALTIME_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME;
+	default:
+		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
+	}
+}
+
+/*
+ * Firmware uses priority_level to determine the priority band for DPM cap
+ * table lookup. The ranges are: IDLE=0, NORMAL=1-15, FOCUS=16-29,
+ * REAL_TIME=30-31. Without setting this, priority_level=0 causes firmware
+ * to treat the context as IDLE band for DPM, regardless of priority_band.
+ */
+u8 aie4_band_to_priority_level(u32 band)
+{
+	switch (band) {
+	case AIE4_CONTEXT_PRIORITY_BAND_IDLE:		return 0;
+	case AIE4_CONTEXT_PRIORITY_BAND_NORMAL:		return 1;
+	case AIE4_CONTEXT_PRIORITY_BAND_FOCUS:		return 16;
+	case AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME:	return 30;
+	default:					return 1;
+	}
+}
+
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 {
 	if (AIE_FEATURE_ON(&ndev->aie, AIE4_GET_COREDUMP))

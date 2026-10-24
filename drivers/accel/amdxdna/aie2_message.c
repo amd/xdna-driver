@@ -269,13 +269,12 @@ static int aie2_destroy_context_req(struct amdxdna_dev_hdl *ndev, u32 id)
 	return ret;
 }
 
-static u32 aie2_get_context_priority(struct amdxdna_dev_hdl *ndev,
-				     struct amdxdna_hwctx *hwctx)
+static u32 aie2_qos2dev_priority_band(struct amdxdna_dev_hdl *ndev, u32 qos_priority)
 {
 	if (!AIE_FEATURE_ON(&ndev->aie, AIE2_PREEMPT))
 		return PRIORITY_HIGH;
 
-	switch (hwctx->qos.priority) {
+	switch (qos_priority) {
 	case AMDXDNA_QOS_REALTIME_PRIORITY:
 		return PRIORITY_REALTIME;
 	case AMDXDNA_QOS_HIGH_PRIORITY:
@@ -287,6 +286,29 @@ static u32 aie2_get_context_priority(struct amdxdna_dev_hdl *ndev,
 	default:
 		return PRIORITY_HIGH;
 	}
+}
+
+int aie2_set_context_priority(struct amdxdna_hwctx *hwctx, u32 qos_priority)
+{
+	DECLARE_AIE_MSG(set_context_priority, MSG_OP_SET_CONTEXT_PRIORITY);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE2_SET_CONTEXT_PRIORITY))
+		return -EOPNOTSUPP;
+
+	if (hwctx->fw_ctx_id == (u32)-1)
+		return -ENODEV;
+
+	req.context_id = hwctx->fw_ctx_id;
+	req.context_priority = aie2_qos2dev_priority_band(ndev, qos_priority);
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_ERR(xdna, "Set context priority failed, ret %d", ret);
+
+	return ret;
 }
 
 int aie2_calibrate_clock(struct amdxdna_dev_hdl *ndev)
@@ -326,7 +348,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 	req.num_unused_col = hwctx->num_unused_col;
 	req.num_cq_pairs_requested = 1;
 	req.pasid = amdxdna_pasid_on(hwctx->client) ? hwctx->client->pasid : 0;
-	req.context_priority = aie2_get_context_priority(ndev, hwctx);
+	req.context_priority = aie2_qos2dev_priority_band(ndev, hwctx->qos.priority);
 
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
@@ -379,6 +401,10 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 	}
 	ndev->hwctx_num++;
 
+	hwctx->priv->starvation_last_submit_cnt = 0;
+	hwctx->priv->starvation_last_free_cnt = 0;
+	hwctx->priv->starvation_priority_boosted = false;
+
 	XDNA_DBG(xdna, "Mailbox channel irq: %d, msix_id: %d", ret, resp.msix_id);
 	XDNA_DBG(xdna, "Created fw ctx %d pasid %d", hwctx->fw_ctx_id, hwctx->client->pasid);
 
@@ -389,6 +415,7 @@ free_channel:
 	hwctx->priv->mbox_chann = NULL;
 del_ctx_req:
 	aie2_destroy_context_req(ndev, hwctx->fw_ctx_id);
+	hwctx->fw_ctx_id = -1;
 	return ret;
 }
 
