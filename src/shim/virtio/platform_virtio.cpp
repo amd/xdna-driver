@@ -31,23 +31,19 @@ roundup_64bit(size_t size)
 #define VIRTGPU_DRM_CAPSET_DRM 6
 #endif
 
-// The build-time <drm/virtgpu_drm.h> may predate userptr blob support. Define
-// the flag and the extended RESOURCE_CREATE_BLOB request layout locally so the
-// guest can pin a userptr range and hand it to the host regardless of the UAPI
-// header version. These are defined unconditionally (under our own names) so the
-// wire ABI is fixed by this source, independent of whichever header the build
-// host happens to provide -- the same binary then talks to the guest kernel the
-// same way whether or not the header knew about userptr. Only the flag value
-// defers to the header when it already defines it.
-//
-// Compile safety: the flag is #ifndef-guarded; the struct and ioctl macro use
-// project-local names that never collide with the UAPI header. Runtime safety:
-// on a kernel/VMM without userptr support the ioctl() wrapper below throws
-// (ENOTTY), so drm_bo_alloc_userptr fails cleanly instead of returning a bogus
-// zeroed handle.
-#ifndef VIRTGPU_BLOB_FLAG_USE_USERPTR
+// ---- virtio-gpu userptr blob ioctl --------------------------------------
+// Use the UAPI header's definitions if it knows about userptr blobs; otherwise
+// define the flag, the extended request layout and the ioctl locally. If the
+// running kernel/VMM lacks userptr support the ioctl fails with ENOTTY.
+#ifdef VIRTGPU_BLOB_FLAG_USE_USERPTR
+
+using virtgpu_resource_create_blob_userptr = drm_virtgpu_resource_create_blob;
+#define DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB_USERPTR \
+  DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB
+
+#else
+
 #define VIRTGPU_BLOB_FLAG_USE_USERPTR 0x0008
-#endif
 
 struct virtgpu_resource_create_blob_userptr {
   uint32_t blob_mem;
@@ -59,27 +55,30 @@ struct virtgpu_resource_create_blob_userptr {
   uint32_t cmd_size;
   uint64_t cmd;
   uint64_t blob_id;
+  uint32_t blob_hints;
+  uint32_t pad2;
   uint64_t userptr;
   uint64_t blob_svm;
   uint64_t offset;
 };
+#define DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB_USERPTR \
+  DRM_IOWR(DRM_COMMAND_BASE + DRM_VIRTGPU_RESOURCE_CREATE_BLOB, \
+           struct virtgpu_resource_create_blob_userptr)
+
+#endif  // VIRTGPU_BLOB_FLAG_USE_USERPTR
 
 // The DRM_IOWR command number encodes sizeof(struct), so it must match the size
 // the guest kernel expects byte-for-byte. Pin the size (guards add/remove of a
 // field) and the offsets of the two fields that define this request (guards a
-// reorder that happens to preserve the total size). If the layout above is ever
-// edited, the build fails loudly rather than silently shifting the ioctl number
-// or field positions (which would surface only at runtime as ENOTTY or garbage).
-static_assert(sizeof(virtgpu_resource_create_blob_userptr) == 72,
+// reorder that happens to preserve the total size). If the layout above ever
+// diverges from the guest kernel UAPI the build fails loudly rather than
+// surfacing ENOTTY or field misalignment only at runtime.
+static_assert(sizeof(virtgpu_resource_create_blob_userptr) == 80,
               "virtgpu userptr blob request size must match the guest kernel UAPI");
 static_assert(offsetof(virtgpu_resource_create_blob_userptr, size) == 16,
               "virtgpu userptr blob 'size' offset must match the guest kernel UAPI");
-static_assert(offsetof(virtgpu_resource_create_blob_userptr, userptr) == 48,
+static_assert(offsetof(virtgpu_resource_create_blob_userptr, userptr) == 56,
               "virtgpu userptr blob 'userptr' offset must match the guest kernel UAPI");
-
-#define DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB_USERPTR \
-  DRM_IOWR(DRM_COMMAND_BASE + DRM_VIRTGPU_RESOURCE_CREATE_BLOB, \
-           struct virtgpu_resource_create_blob_userptr)
 
 std::string
 ioctl_cmd2name(unsigned long cmd)
@@ -87,8 +86,6 @@ ioctl_cmd2name(unsigned long cmd)
   switch(cmd) {
   case DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB:
     return "DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB";
-  case DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB_USERPTR:
-    return "DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB(USERPTR)";
   case DRM_IOCTL_VIRTGPU_MAP:
     return "DRM_IOCTL_VIRTGPU_MAP";
   case DRM_IOCTL_VIRTGPU_EXECBUFFER:
@@ -115,6 +112,11 @@ ioctl_cmd2name(unsigned long cmd)
   case DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT:
     return "DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT";
   }
+
+  // Not a case label: with a userptr-aware UAPI header this equals
+  // DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB and would be a duplicate case.
+  if (cmd == DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB_USERPTR)
+    return "DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB(USERPTR)";
 
   return "UNKNOWN(" + std::to_string(cmd) + ")";
 }
