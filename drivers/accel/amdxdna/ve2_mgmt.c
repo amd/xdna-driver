@@ -674,7 +674,7 @@ static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
 	int ret;
 
 	ret = ve2_aie_priv_read(mgmtctx->aie_dev, off, sizeof(misc_status), &misc_status);
-	if (ret || !misc_status)
+	if (ret < 0 || !misc_status)
 		return false;
 
 	if (mgmtctx->active_ctx) {
@@ -772,11 +772,27 @@ static void ve2_scheduler_work(struct work_struct *work)
 		 * This branch neither recovers the faulted context nor yields
 		 * the partition. Switching away needs CERT context-switch
 		 * semantics for a faulted partition confirmed first.
+		 *
+		 * Mark all pending commands TIMEOUT so that poll_command() in
+		 * the shim can see the error without requiring a WAIT_CMD ioctl.
 		 */
 		XDNA_ERR(mgmtctx->xdna,
 			 "MISC interrupt from firmware, hwctx %u (pid %d) on col %u is unusable (misc_status 0x%x)\n",
 			 hwctx->id, hwctx->client->pid, mgmtctx->start_col,
 			 vp->misc_status_latched);
+
+		mutex_lock(&vp->privctx_lock);
+		for (int i = 0; i < HWCTX_MAX_CMDS; i++) {
+			struct amdxdna_sched_job *job = vp->pending[i];
+
+			if (!job)
+				continue;
+			XDNA_ERR(mgmtctx->xdna,
+				 "MISC interrupt: marking pending job seq=%llu TIMEOUT\n",
+				 job->seq);
+			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
+		}
+		mutex_unlock(&vp->privctx_lock);
 	} else if (ve2_check_queue_not_empty(mgmtctx)) {
 		/*
 		 * The firmware acked the switch but the active context still has
@@ -841,6 +857,12 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 		return;
 	}
 	pop_from_ctx_command_fifo_till(mgmtctx, active_ctx, read_index);
+
+	/*
+	 * Check for MISC interrupt before waking waiters so check_read_index()
+	 * sees misc_intrpt_flag=true and the waiter does not re-sleep.
+	 */
+	ve2_check_misc_interrupt(mgmtctx);
 
 	vp = ve2_hw_priv(active_ctx);
 	if (vp) {
@@ -990,7 +1012,7 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna, struct amdxdna_mgmtct
 	}
 
 	ret = ve2_partition_read_privileged_mem(mgmtctx, 0, sizeof(*hs), hs);
-	if (ret) {
+	if (ret < 0) {
 		XDNA_WARN(xdna, "Failed to read firmware handshake (ret=%d); skipping dump\n", ret);
 		kfree(hs);
 		return;
