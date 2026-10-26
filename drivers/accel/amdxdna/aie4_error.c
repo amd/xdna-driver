@@ -378,11 +378,19 @@ static void aie4_async_note_worker(struct work_struct *work)
 			  aie4_async_note_str(ev->event_id), ev->ctx_id);
 		break;
 	case AIE4_ASYNC_NOTE_REPORT_DROPPED:
-		/* Nothing to recover, but make the lost report visible. */
 		XDNA_ERR(xdna,
 			 "async notification %s: no async buffer for event type %u, ctx_id=%u",
 			 aie4_async_note_str(ev->event_id), ev->async_event_type,
 			 ev->ctx_id);
+		/*
+		 * Firmware reports a context timeout or uC critical error in a
+		 * report buffer. With none free it sends only this note, so
+		 * recover the context here as the report path would. A VF
+		 * registers no buffers, so on a VF these errors always arrive
+		 * this way.
+		 */
+		if (ev->async_event_type == AIE4_ASYNC_EVENT_TYPE_CTX_ERROR)
+			aie4_async_note_ctx_error_recover(aie, ev->ctx_id);
 		break;
 	case AIE4_ASYNC_NOTE_POWER_ERROR:
 		XDNA_ERR(xdna, "async notification %s: unrecoverable power sequencing error",
