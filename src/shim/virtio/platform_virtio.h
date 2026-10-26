@@ -97,6 +97,9 @@ private:
   config_ctx_debug_bo(config_ctx_debug_bo_arg& arg) const override;
 
   void
+  config_ctx_fw_buf(config_ctx_fw_buf_arg& arg) const override;
+
+  void
   submit_cmd(submit_cmd_arg& arg) const override;
 
   void

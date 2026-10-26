@@ -68,6 +68,8 @@ struct amdxdna_hwctx_priv {
 
 	struct cert_comp                *cert_comp;
 	u32                             hw_ctx_id;
+	/* Attached debug buffers, held until removal or fini. */
+	struct amdxdna_gem_obj          *fw_buf_bo[AMDXDNA_FW_BUF_NUM];
 	/*
 	 * Partition this ctx runs in: its own when
 	 * dev_info->partition_per_hwctx is set, otherwise a copy of the
@@ -241,6 +243,7 @@ int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie4_configure_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u8 mode);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
+int aie4_get_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 *timeout_us);
 void aie4_set_dpm_cap_percent_table(struct amdxdna_dev_hdl *ndev);
 void aie4_set_dpm_compute_params(struct amdxdna_dev_hdl *ndev);
 void aie4_set_dpm_pwr_ovr_percent_table(struct amdxdna_dev_hdl *ndev);

@@ -48,6 +48,7 @@ static const struct aie4_role_allow aie4_opcode_allow[] = {
 	{ AIE4_MSG_OP_SET_FW_TRACE_CATEGORIES,		AIE4_OP_CP },
 	{ AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION,	AIE4_OP_ALL },
 	{ AIE4_MSG_OP_SET_RUNTIME_CONFIG,		AIE4_OP_ALL },
+	{ AIE4_MSG_OP_GET_RUNTIME_CONFIG,		AIE4_OP_ALL },
 
 	/* 0x2xxxx */
 	{ AIE4_MSG_OP_CREATE_VFS,			AIE4_OP_PF },
@@ -82,9 +83,9 @@ static const struct aie4_role_allow aie4_opcode_allow[] = {
 };
 
 /*
- * SET_RUNTIME_CONFIG carries a subtype selecting which firmware config it
- * programs, and firmware accepts each of those per role, so they are gated
- * individually in aie4_set_runtime_cfg(). Unlisted subtypes are denied.
+ * SET/GET_RUNTIME_CONFIG carry a subtype selecting which firmware config they
+ * access, and firmware accepts each of those per role, so they are gated
+ * individually by both the set and get paths. Unlisted subtypes are denied.
  */
 static const struct aie4_role_allow aie4_runtime_cfg_allow[] = {
 	{ AIE4_RUNTIME_CONFIG_FORCE_PREEMPTION,		AIE4_OP_CP },
@@ -470,7 +471,7 @@ int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
-		XDNA_ERR(xdna, "CERT log configure failed, ctx %u property %u ret %d",
+		XDNA_ERR(xdna, "Configure debug buffer failed, ctx %u property %u ret %d",
 			 hw_context_id, property, ret);
 
 	return ret;
@@ -928,6 +929,31 @@ void aie4_restore_hws_debug_mode(struct amdxdna_dev_hdl *ndev)
 	if (aie4_configure_hws_debug_mode(ndev, AIE4_HWS_DEBUG_MODE_ARM_ON_ERROR))
 		XDNA_WARN(xdna,
 			  "Failed to restore HWS debug mode; auto coredump remains enabled");
+}
+
+int aie4_get_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 *timeout_us)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_ctx_hysteresis, AIE4_MSG_OP_GET_RUNTIME_CONFIG);
+	u32 type = AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS;
+	int ret;
+
+	if (!aie4_role_allowed(&ndev->aie, aie4_runtime_cfg_allow,
+			       ARRAY_SIZE(aie4_runtime_cfg_allow), type)) {
+		XDNA_DBG(ndev->aie.xdna, "runtime cfg %u not allowed on this device", type);
+		return -EOPNOTSUPP;
+	}
+
+	req.type = type;
+
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Failed to get ctx switch hysteresis: %d", ret);
+		return ret;
+	}
+
+	*timeout_us = resp.timeout_us;
+
+	return 0;
 }
 
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
