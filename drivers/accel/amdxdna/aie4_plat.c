@@ -218,9 +218,20 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 	if (ret)
 		return ret;
 
+	/*
+	 * Pre-allocate the async error report buffers before the mailbox
+	 * exists, mirroring the PCI aie4_classic_init(): aie4_setup_aie() only
+	 * arms the slots that already exist.
+	 */
+	ret = amdxdna_async_events_alloc(&ndev->aie, AMDXDNA_MAX_ASYNC_EVENT_BUFS);
+	if (ret) {
+		XDNA_ERR(xdna, "Allocate async events failed, ret %d", ret);
+		goto free_work_buf;
+	}
+
 	ret = aie4_mailbox_init(ndev);
 	if (ret)
-		goto free_work_buf;
+		goto free_async_events;
 
 	ret = aie4_query_fw(ndev);
 	if (ret)
@@ -270,10 +281,16 @@ suspend_fw:
 	 * (AIE4_MSG_OP_SUSPEND is the only op that does; there is no detach) before
 	 * aie4_free_work_buffer() frees it -- otherwise the self-booted CERT can
 	 * access freed memory.  Mirrors the aie4_plat_fini() teardown.
+	 * An acknowledged SUSPEND also returns the async error buffers, so the
+	 * pool can free them below rather than keep them.
 	 */
-	aie4_suspend_fw(ndev);
+	if (!aie4_suspend_fw(ndev))
+		amdxdna_async_events_released(&ndev->aie);
 mbox_fini:
 	aie4_mailbox_fini(ndev);
+free_async_events:
+	/* Keeps any slot buffer firmware was handed; see the PCI unwind. */
+	amdxdna_async_events_abandon(&ndev->aie);
 free_work_buf:
 	aie4_free_work_buffer(ndev);
 	return ret;

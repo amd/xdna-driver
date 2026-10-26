@@ -77,6 +77,26 @@ enum amdxdna_error_module {
  * callbacks in struct amdxdna_dev_ops, and the MAX status code and the
  * per-generation AIE tile-error categorization tables (luts) in the
  * struct aie_async_error_desc that struct amdxdna_dev_info points at.
+ *
+ * The pool has a four-stage lifetime that mirrors the aie4 DRAM work buffer:
+ *
+ *   probe     amdxdna_async_events_alloc()  allocate the slots and buffers
+ *   hw start  amdxdna_async_events_init()   register the slots with firmware
+ *   hw stop   amdxdna_async_events_fini()   unarm the slots, keep the buffers
+ *   remove    amdxdna_async_events_free()   release the slots and buffers
+ *
+ * A probe that fails once slots have been armed unwinds through
+ * amdxdna_async_events_abandon() rather than free(), because firmware only
+ * gives an address back on a release it acknowledged.
+ *
+ * Keeping the buffers across a suspend/resume cycle means the resume path never
+ * has to allocate, and it removes the window where a mailbox message still holds
+ * a slot as its callback handle after the slot has been freed.
+ *
+ * When firmware reports an event, the worker copies the report out of the slot
+ * buffer and re-arms the slot with that same buffer before decoding the copy,
+ * so that the pool firmware draws from is replenished as early as possible and
+ * reporting an error never has to allocate.
  */
 
 /* Per-event async report buffer size. Shared by aie2 and aie4 firmware. */
@@ -85,8 +105,8 @@ enum amdxdna_error_module {
 /*
  * Maximum number of async event buffers. This value is used in two places:
  * (1) to size the management mailbox channel, which must happen before
- * total_col is known from firmware; (2) to allocate the async event pool,
- * which runs after total_col is known. Both counts must match — the channel
+ * total_col is known from firmware; (2) to allocate the async event pool at
+ * probe, before hw start has run. Both counts must match — the channel
  * is sized AMDXDNA_MAX_ASYNC_EVENT_BUFS + 1 (one extra for other management
  * commands), so the pool cannot exceed AMDXDNA_MAX_ASYNC_EVENT_BUFS slots.
  */
@@ -167,6 +187,8 @@ struct aie_async_error_desc {
 	struct aie_error_lut_set	luts;
 	/* One past the last status firmware sends; marks an unanswered slot. */
 	u32				max_status_code;
+	/* Status firmware refuses a registration with when its stack is full. */
+	u32				full_status_code;
 };
 
 /*
@@ -208,8 +230,12 @@ void amdxdna_aie_fill_decode(enum aie_error_category cat, u32 mod_type,
 			     const char *event_name,
 			     struct amdxdna_aie_err_decode *out);
 
-int amdxdna_async_events_alloc(struct aie_device *aie, u32 total_col);
+int amdxdna_async_events_alloc(struct aie_device *aie, u32 num_events);
+int amdxdna_async_events_init(struct aie_device *aie);
+void amdxdna_async_events_fini(struct aie_device *aie);
+void amdxdna_async_events_released(struct aie_device *aie);
 void amdxdna_async_events_free(struct aie_device *aie);
+void amdxdna_async_events_abandon(struct aie_device *aie);
 bool amdxdna_async_events_queue_work(struct aie_device *aie, struct work_struct *work);
 int amdxdna_get_array_last_async_error(struct aie_device *aie,
 				       struct amdxdna_drm_get_array *args);

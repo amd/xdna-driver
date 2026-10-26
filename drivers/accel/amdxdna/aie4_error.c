@@ -528,6 +528,7 @@ const struct aie_async_error_desc aie4_async_error_desc = {
 		.mem		= aie4_core_mem_error_events,
 	},
 	.max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.full_status_code	= AIE4_MSG_STATUS_ASYNC_EVENT_MSGS_FULL,
 };
 
 int aie4_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,

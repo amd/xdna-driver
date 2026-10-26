@@ -334,7 +334,14 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	ndev->mbox = NULL;
 	aie_psp_stop(ndev->aie.psp_hdl);
 	aie2_smu_fini(ndev);
-	amdxdna_async_events_free(&ndev->aie);
+	/*
+	 * Unarm and drain after the mailbox is torn down: channel teardown
+	 * fires the async callback for every slot still registered, which
+	 * queues the report worker. Draining any earlier would leave those
+	 * workers to run unattended after this returns. The buffers stay
+	 * allocated for the next hw start.
+	 */
+	amdxdna_async_events_fini(&ndev->aie);
 	pci_disable_device(pdev);
 
 	ndev->dev_status = AIE2_DEV_INIT;
@@ -442,9 +449,9 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto stop_fw;
 	}
 
-	ret = amdxdna_async_events_alloc(&ndev->aie, AMDXDNA_MAX_ASYNC_EVENT_BUFS);
+	ret = amdxdna_async_events_init(&ndev->aie);
 	if (ret) {
-		XDNA_ERR(xdna, "Allocate async events failed, ret %d", ret);
+		XDNA_ERR(xdna, "Register async events failed, ret %d", ret);
 		goto stop_fw;
 	}
 
@@ -455,8 +462,8 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 stop_fw:
 	aie2_suspend_fw(ndev);
 	xdna_mailbox_stop_channel(ndev->aie.mgmt_chann);
-	/* Reclaim a partially-armed async pool now that the channel is stopped. */
-	amdxdna_async_events_free(&ndev->aie);
+	/* Unarm a partially-armed async pool now that the channel is stopped. */
+	amdxdna_async_events_fini(&ndev->aie);
 stop_psp:
 	aie_psp_stop(ndev->aie.psp_hdl);
 fini_smu:
@@ -688,10 +695,21 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	}
 	xdna->dev_handle = ndev;
 
+	/*
+	 * Pre-allocate the async error report buffers before the hardware is
+	 * started: hw_start also runs on every resume, and it only has to arm
+	 * the slots that already exist.
+	 */
+	ret = amdxdna_async_events_alloc(&ndev->aie, AMDXDNA_MAX_ASYNC_EVENT_BUFS);
+	if (ret) {
+		XDNA_ERR(xdna, "Allocate async events failed, ret %d", ret);
+		goto release_fw;
+	}
+
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "start npu failed, ret %d", ret);
-		goto release_fw;
+		goto free_async_events;
 	}
 
 	xrs_cfg.clk_list.num_levels = ndev->max_dpm_level + 1;
@@ -719,6 +737,15 @@ static int aie2_init(struct amdxdna_dev *xdna)
 
 stop_hw:
 	aie2_hw_stop(xdna);
+	/*
+	 * The aie4 unwind keeps the slot buffers firmware was handed, through
+	 * amdxdna_async_events_abandon(). aie2 frees the pool outright because
+	 * it has never been established that aie2 firmware retains those
+	 * registrations past this point. The difference is deliberate and
+	 * stands until there is evidence either way.
+	 */
+free_async_events:
+	amdxdna_async_events_free(&ndev->aie);
 release_fw:
 	release_firmware(fw);
 
@@ -731,6 +758,7 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	amdxdna_pm_fini(xdna);
 	amdxdna_dpt_fini(&xdna->dev_handle->aie);
 	aie2_hw_stop(xdna);
+	amdxdna_async_events_free(&xdna->dev_handle->aie);
 }
 
 static int aie2_get_power_mode(struct amdxdna_client *client,
