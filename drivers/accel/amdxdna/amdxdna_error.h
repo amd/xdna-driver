@@ -77,6 +77,18 @@ enum amdxdna_error_module {
  * callbacks in struct amdxdna_dev_ops, and the MAX status code and the
  * per-generation AIE tile-error categorization tables (luts) in the
  * struct aie_async_error_desc that struct amdxdna_dev_info points at.
+ *
+ * The pool lives from probe to remove and is armed only while the hardware
+ * runs:
+ *
+ *   probe     amdxdna_async_events_alloc()  allocate the slots and buffers
+ *   hw start  amdxdna_async_events_init()   register the slots with firmware
+ *   hw stop   amdxdna_async_events_fini()   unarm the slots, keep the buffers
+ *   remove    amdxdna_async_events_free()   release the slots and buffers
+ *
+ * Reporting an error never allocates: the worker copies each report out and
+ * re-arms the slot with the same buffer. A failed probe frees the pool the way
+ * remove does, once the firmware is stopped or suspended.
  */
 
 /* Per-event async report buffer size. Shared by aie2 and aie4 firmware. */
@@ -85,8 +97,8 @@ enum amdxdna_error_module {
 /*
  * Maximum number of async event buffers. This value is used in two places:
  * (1) to size the management mailbox channel, which must happen before
- * total_col is known from firmware; (2) to allocate the async event pool,
- * which runs after total_col is known. Both counts must match — the channel
+ * total_col is known from firmware; (2) to allocate the async event pool at
+ * probe, before hw start has run. Both counts must match — the channel
  * is sized AMDXDNA_MAX_ASYNC_EVENT_BUFS + 1 (one extra for other management
  * commands), so the pool cannot exceed AMDXDNA_MAX_ASYNC_EVENT_BUFS slots.
  */
@@ -208,7 +220,9 @@ void amdxdna_aie_fill_decode(enum aie_error_category cat, u32 mod_type,
 			     const char *event_name,
 			     struct amdxdna_aie_err_decode *out);
 
-int amdxdna_async_events_alloc(struct aie_device *aie, u32 total_col);
+int amdxdna_async_events_alloc(struct aie_device *aie, u32 num_events);
+int amdxdna_async_events_init(struct aie_device *aie);
+void amdxdna_async_events_fini(struct aie_device *aie);
 void amdxdna_async_events_free(struct aie_device *aie);
 bool amdxdna_async_events_queue_work(struct aie_device *aie, struct work_struct *work);
 int amdxdna_get_array_last_async_error(struct aie_device *aie,

@@ -12,15 +12,13 @@
 #include <linux/kernel.h>
 #include <linux/ktime.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
 
 #include "aie.h"
 #include "amdxdna_error.h"
 #include "amdxdna_drv.h"
-
-/* Private workqueue name (also the worker/rescuer thread name). */
-#define AMDXDNA_ASYNC_ERR_WQ_NAME	"amdxdna_async_err"
 
 /*
  * The AIE tile error report payload layout below is defined by the AIE device
@@ -75,14 +73,27 @@ struct amdxdna_async_event {
 
 /**
  * struct amdxdna_async_events - pool of async error report buffer slots
- * @wq: ordered workqueue draining the report workers.
- * @event_cnt: number of slots in the pool.
+ * @wq: ordered workqueue that runs the report and notification workers.
+ * @scratch: ASYNC_BUF_SIZE buffer the report worker decodes from; NULL in a
+ *           pool without slots.
+ * @armed: set from init() until fini(); gates the re-arm in the report
+ *         worker. Written and read under dev_lock.
+ * @slot_cnt: number of slots that hold a report buffer: fewer than requested
+ *            if allocation fell short, zero for a pool that only carries
+ *            firmware notifications.
  * @event: event slots, each with its own message buffer.
+ *
+ * The pool lives from probe to remove, and its slots are armed with firmware
+ * only between hw start and hw stop. A resume therefore never allocates, and a
+ * mailbox message that still references a slot never points at freed memory.
+ * One scratch buffer is enough because @wq never runs two workers at once.
  */
 struct amdxdna_async_events {
 	struct workqueue_struct		*wq;
-	u32				event_cnt;
-	struct amdxdna_async_event	event[] __counted_by(event_cnt);
+	void				*scratch;
+	bool				armed;
+	u32				slot_cnt;
+	struct amdxdna_async_event	event[] __counted_by(slot_cnt);
 };
 
 /*
@@ -279,32 +290,38 @@ static bool amdxdna_aie_backtrack_and_cache(struct aie_device *aie,
 }
 
 /*
- * Decode an AIE tile error report and cache the last error. Returns true when
- * the report was valid and the slot should be re-registered, false otherwise.
- * The last-error caching (and its dev_lock) is handled inside
- * amdxdna_aie_backtrack_and_cache().
+ * Decode an AIE tile error report and cache the last error. A report that
+ * cannot be parsed is logged and dropped; the caller has already re-armed the
+ * slot. amdxdna_aie_backtrack_and_cache() takes dev_lock for the caching.
  */
-static bool amdxdna_aie_decode_tile_error(struct aie_device *aie,
+static void amdxdna_aie_decode_tile_error(struct aie_device *aie,
 					  void *vaddr, u32 buf_size)
 {
 	struct amdxdna_dev *xdna = aie->xdna;
 	struct aie_err_info *info = vaddr;
 	u32 max_err;
 
+	/* The header read and max_err subtraction below need a full header. */
+	if (unlikely(buf_size < sizeof(*info))) {
+		XDNA_WARN(xdna, "Report buffer too small, %u bytes", buf_size);
+		return;
+	}
+
 	XDNA_DBG(xdna, "Error count %d return code %d", info->err_cnt, info->ret_code);
 
 	max_err = (buf_size - sizeof(*info)) / sizeof(struct aie_error);
 	if (unlikely(info->err_cnt > max_err)) {
-		WARN_ONCE(1, "Error count too large %d\n", info->err_cnt);
-		return false;
+		/*
+		 * err_cnt comes from the report firmware wrote, so this must
+		 * not be a WARN: panic_on_warn would turn a malformed report
+		 * into a panic.
+		 */
+		XDNA_WARN(xdna, "Error count too large %u", info->err_cnt);
+		return;
 	}
 
-	if (!amdxdna_aie_backtrack_and_cache(aie, info->payload, info->err_cnt)) {
+	if (!amdxdna_aie_backtrack_and_cache(aie, info->payload, info->err_cnt))
 		XDNA_WARN(xdna, "No valid AIE error column found in report");
-		return false;
-	}
-
-	return true;
 }
 
 static int amdxdna_async_error_cb(void *handle, void __iomem *data, size_t size)
@@ -327,56 +344,147 @@ static int amdxdna_async_event_send(struct amdxdna_async_event *e)
 								 e, amdxdna_async_error_cb);
 }
 
+/*
+ * Copy the report out of the slot buffer into the pool scratch buffer, so the
+ * slot can be re-armed before the report is decoded. The whole buffer is
+ * copied because the tile error decode takes its error limit from the length
+ * it is given.
+ *
+ * No locking is needed: firmware does not write a slot while its worker runs,
+ * and teardown drains the workqueue before freeing the scratch buffer or any
+ * slot.
+ *
+ * Return: number of bytes copied.
+ */
+static u32 amdxdna_async_event_take_report(struct amdxdna_async_event *e)
+{
+	/* Never copy more than the scratch buffer holds. */
+	u32 len = min_t(u32, e->size, ASYNC_BUF_SIZE);
+
+	/* Invalidate stale cache lines before reading the device-written report. */
+	amdxdna_cache_flush(e->buf, len);
+	memcpy(e->events->scratch, e->buf, len);
+	/*
+	 * Clear the slot, so that a later report firmware writes only in part
+	 * cannot carry bytes of this one. The dirty lines are written back by
+	 * the flush in amdxdna_async_event_send() before firmware gets the
+	 * buffer again.
+	 */
+	memset(e->buf, 0, len);
+
+	return len;
+}
+
+static void amdxdna_async_event_rearm(struct amdxdna_async_event *e)
+{
+	struct amdxdna_dev *xdna = e->aie->xdna;
+
+	mutex_lock(&xdna->dev_lock);
+	/*
+	 * Do not re-arm an unarmed pool. The unarm path clears armed under
+	 * dev_lock before it drains this worker, so the worker never sends on a
+	 * stopped channel. A timed-out management message destroys the channel
+	 * under dev_lock while the pool stays armed, so check for that too.
+	 */
+	if (e->events->armed && e->aie->mgmt_chann && amdxdna_async_event_send(e))
+		XDNA_WARN(xdna, "Unable to register async event");
+	mutex_unlock(&xdna->dev_lock);
+}
+
+/*
+ * Decode @report, the worker's copy of the slot buffer. @type is passed in
+ * because the slot is already re-armed, so its resp.type may belong to a newer
+ * event. @report is memory the device never sees, so it needs no cache
+ * maintenance.
+ */
+static void amdxdna_async_event_decode(struct amdxdna_async_event *e, u32 type,
+				       void *report, u32 size)
+{
+	const struct amdxdna_dev_info *info = e->aie->xdna->dev_info;
+	struct aie_device *aie = e->aie;
+
+	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4, report, 0x100, false);
+
+	/* Call the device handler without dev_lock; it may take dev_lock itself. */
+	if (info->ops->handle_dev_async_event &&
+	    info->ops->handle_dev_async_event(aie, type, report))
+		return;
+
+	amdxdna_aie_decode_tile_error(aie, report, size);
+}
+
 static void amdxdna_async_error_worker(struct work_struct *err_work)
 {
 	struct amdxdna_async_event *e = container_of(err_work, struct amdxdna_async_event, work);
 	const struct amdxdna_dev_info *info = e->aie->xdna->dev_info;
 	struct amdxdna_dev *xdna = e->aie->xdna;
-	struct aie_device *aie = e->aie;
+	u32 status = e->resp.status;
+	u32 size;
+	u32 type;
+
+	/* The copy below dereferences the slot buffer. */
+	if (drm_WARN_ON(&xdna->ddev, !e->hdl))
+		return;
 
 	/*
 	 * On mailbox channel teardown the registered-event callback runs with
 	 * data == NULL (see xdna_mailbox_stop_channel), which leaves resp.status
 	 * at the sentinel. Skip decode and re-registration in that case so the
-	 * dying channel is not touched.
+	 * dying channel is not touched. Stay silent, since this happens for
+	 * every armed slot on every hw stop.
 	 */
-	if (e->resp.status == info->async_error->max_status_code)
+	if (status == info->async_error->max_status_code)
 		return;
 
 	e->resp.status = info->async_error->max_status_code;
 
-	/* Invalidate stale cache lines before reading the device-written report. */
-	amdxdna_cache_flush(e->buf, e->size);
+	/* Once the slot is re-armed, firmware may overwrite resp.type. */
+	type = e->resp.type;
+	size = amdxdna_async_event_take_report(e);
 
-	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4, e->buf, 0x100, false);
-
-	/* Call the device handler without dev_lock; it may take dev_lock itself. */
-	if (info->ops->handle_dev_async_event &&
-	    info->ops->handle_dev_async_event(aie, e->resp.type, e->buf))
-		goto reregister;
-
-	if (!amdxdna_aie_decode_tile_error(aie, e->buf, e->size))
-		return; /* invalid report: do not re-register */
-
-reregister:
-	mutex_lock(&xdna->dev_lock);
 	/*
-	 * Skip re-registration if the event pool is being torn down. The free
-	 * path clears async_events under dev_lock before draining this worker,
-	 * so a drained worker cannot re-arm firmware on an already-stopped
-	 * mailbox channel.
+	 * The slot buffer is cleared before every arm, so a completion that
+	 * left it all zero carries no report, whatever its type: firmware
+	 * refused the registration or could not write the report, and would
+	 * fail the same buffer the same way again, so leave the slot unarmed.
+	 * A nonzero status alone is not enough, because aie2 firmware completes
+	 * a partial report with AIE_BACKTRACK_ERROR. The slot gets no
+	 * completion until the next arm, so this warns at most once per slot
+	 * per arm.
 	 */
-	if (aie->async_events && amdxdna_async_event_send(e))
-		XDNA_WARN(xdna, "Unable to register async event");
-	mutex_unlock(&xdna->dev_lock);
+	if (status && !memchr_inv(e->events->scratch, 0, size)) {
+		XDNA_WARN(xdna, "Async event completed with status 0x%x, slot idle", status);
+		return;
+	}
+
+	/*
+	 * Re-arm the slot before decoding: firmware holds only a few buffers,
+	 * and decoding can be slow because it takes dev_lock and may reset a
+	 * context. The slot is re-armed even if the report then fails to
+	 * decode, so a bad report does not cost a slot for good.
+	 */
+	amdxdna_async_event_rearm(e);
+	amdxdna_async_event_decode(e, type, e->events->scratch, size);
 }
 
-int amdxdna_async_events_alloc(struct aie_device *aie,
-			       u32 num_events)
+/**
+ * amdxdna_async_events_alloc - allocate the async error report pool.
+ * @aie: shared aie device the pool belongs to.
+ * @num_events: number of report slots to allocate. Zero gives a pool that hands
+ *	firmware no buffer and only carries the firmware notifications.
+ *
+ * Sends no firmware message, so it can run early in probe. A pool that gets
+ * fewer buffers than requested, even none, is kept with a warning: a shorter
+ * report queue is better than none, and a pool without buffers still carries
+ * the firmware notifications. Caller must hold dev_lock.
+ *
+ * Return: 0 on success, -ENOMEM if the pool itself cannot be allocated.
+ */
+int amdxdna_async_events_alloc(struct aie_device *aie, u32 num_events)
 {
 	struct amdxdna_dev *xdna = aie->xdna;
 	struct amdxdna_async_events *events;
-	int i, ret;
+	int i, ret = 0;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
@@ -384,68 +492,160 @@ int amdxdna_async_events_alloc(struct aie_device *aie,
 	if (!events)
 		return -ENOMEM;
 
-	events->event_cnt = num_events;
+	/* Set for __counted_by before the loop; trimmed below if short. */
+	events->slot_cnt = num_events;
 
-	events->wq = alloc_ordered_workqueue(AMDXDNA_ASYNC_ERR_WQ_NAME, 0);
+	/* Named per device: the PF and each VF have a pool of their own. */
+	events->wq = alloc_ordered_workqueue("amdxdna_async_err_%s", 0,
+					     dev_name(xdna->ddev.dev));
 	if (!events->wq) {
-		kfree(events);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto free_events;
 	}
 
 	/*
-	 * Publish the pool before arming firmware. amdxdna_async_event_send()
-	 * leaves a mailbox message holding &event[i] as its handle, so on a
-	 * partial-registration failure the pool must outlive the mailbox
-	 * channel. The caller's hw_start() error unwind stops the mailbox and
-	 * then calls amdxdna_async_events_free(), which drains the workqueue and
-	 * frees the (NULL-safe) slots once firmware can no longer DMA into or
-	 * fire the callback on them.
-	 *
-	 * The mailbox async callback is armed before this runs and reads the
-	 * pool without dev_lock, so release the fully built pool to it. Pairs
-	 * with the acquire in amdxdna_async_events_queue_work().
+	 * The report worker decodes from this copy so that it can re-arm the
+	 * slot first, so no slot is kept without it.
+	 */
+	if (num_events) {
+		events->scratch = kvzalloc(ASYNC_BUF_SIZE, GFP_KERNEL);
+		if (!events->scratch)
+			ret = -ENOMEM;
+	}
+
+	for (i = 0; events->scratch && i < num_events; i++) {
+		struct amdxdna_async_event *e = &events->event[i];
+		struct amdxdna_msg_buf_hdl *hdl;
+
+		hdl = amdxdna_alloc_msg_buff(xdna, ASYNC_BUF_SIZE);
+		if (IS_ERR(hdl)) {
+			ret = PTR_ERR(hdl);
+			break;
+		}
+
+		/*
+		 * A slot keeps this buffer from probe to remove: the worker
+		 * copies reports out instead of replacing it.
+		 */
+		e->hdl = hdl;
+		e->addr = to_dma_addr(hdl, 0);
+		e->buf = to_cpu_addr(hdl, 0);
+		e->size = ASYNC_BUF_SIZE;
+
+		INIT_WORK(&e->work, amdxdna_async_error_worker);
+		e->resp.status = xdna->dev_info->async_error->max_status_code;
+		e->events = events;
+		e->aie = aie;
+	}
+
+	if (i < num_events) {
+		XDNA_WARN(xdna, "Async event pool got %d of %u buffers, ret %d",
+			  i, num_events, ret);
+		events->slot_cnt = i;
+	}
+
+	/* A pool without slots takes no report and needs no copy. */
+	if (!events->slot_cnt) {
+		kvfree(events->scratch);
+		events->scratch = NULL;
+	}
+
+	/*
+	 * Pairs with the acquire in amdxdna_async_events_queue_work(), which
+	 * reads the pool without dev_lock: a reader that sees the pointer must
+	 * also see the workqueue.
 	 */
 	smp_store_release(&aie->async_events, events);
 
-	for (i = 0; i < events->event_cnt; i++) {
+	XDNA_DBG(xdna, "Async event count %u, per-event buf size 0x%x",
+		 events->slot_cnt, ASYNC_BUF_SIZE);
+	return 0;
+
+free_events:
+	kfree(events);
+	return ret;
+}
+
+/**
+ * amdxdna_async_events_init - register the pre-allocated slots with firmware.
+ * @aie: shared aie device holding the pool.
+ *
+ * Called from hw start once the mailbox is up. Arms every slot; the slot count
+ * sets how many reports firmware can queue, and each report covers the whole
+ * array.
+ *
+ * On a partial failure the pool is left unarmed. The caller then tears down the
+ * mailbox and drains the workers of the slots that were armed, with
+ * amdxdna_async_events_fini() or, when probe fails,
+ * amdxdna_async_events_free(). Caller must hold dev_lock.
+ *
+ * Return: 0 on success, negative error code on failure.
+ */
+int amdxdna_async_events_init(struct aie_device *aie)
+{
+	struct amdxdna_async_events *events = aie->async_events;
+	struct amdxdna_dev *xdna = aie->xdna;
+	int i, ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	/* A report arriving during the loop is re-armed once dev_lock drops. */
+	events->armed = true;
+
+	for (i = 0; i < events->slot_cnt; i++) {
 		struct amdxdna_async_event *e = &events->event[i];
 
-		e->hdl = amdxdna_alloc_msg_buff(xdna, ASYNC_BUF_SIZE);
-		if (IS_ERR(e->hdl)) {
-			ret = PTR_ERR(e->hdl);
-			e->hdl = NULL;
-			return ret;
-		}
-
-		INIT_WORK(&e->work, amdxdna_async_error_worker);
-
 		e->resp.status = xdna->dev_info->async_error->max_status_code;
-		e->addr = to_dma_addr(e->hdl, 0);
-		e->buf = to_cpu_addr(e->hdl, 0);
-		e->size = ASYNC_BUF_SIZE;
-		e->events = events;
-		e->aie = aie;
 
 		/*
-		 * amdxdna_alloc_msg_buff() does not zero. The decode path trusts
-		 * err_cnt and the payload it bounds, so a firmware write shorter
-		 * than the report would otherwise leave page contents to be
-		 * decoded into the cached error userspace reads back. The send
-		 * below flushes this range before arming firmware.
+		 * Clear the buffer on every arm. A report left in it when the
+		 * mailbox was torn down was never copied out, and a later,
+		 * shorter firmware write would let its bytes reach the error
+		 * userspace reads back. The send below flushes the buffer.
 		 */
 		memset(e->buf, 0, e->size);
 
 		ret = amdxdna_async_event_send(e);
 		if (ret) {
-			amdxdna_free_msg_buff(e->hdl);
-			e->hdl = NULL;
+			XDNA_ERR(xdna, "Register async event %d failed, ret %d", i, ret);
+			events->armed = false;
 			return ret;
 		}
 	}
 
-	XDNA_DBG(xdna, "Async event count %d, per-event buf size 0x%x",
-		 events->event_cnt, ASYNC_BUF_SIZE);
+	XDNA_DBG(xdna, "Registered %u async events", events->slot_cnt);
 	return 0;
+}
+
+/**
+ * amdxdna_async_events_fini - unarm the slots and drain their workers.
+ * @aie: shared aie device holding the pool.
+ *
+ * Called from hw stop and from the hw start error unwind, after the mailbox is
+ * torn down. Keeps the buffers, so a later hw start only has to re-arm them.
+ * On return no worker is running, so this is safe on a pool that was never
+ * armed and safe to call twice.
+ *
+ * Caller must hold dev_lock, which is dropped while the workqueue drains. No
+ * other path may arm the pool meanwhile; none does, because every arm and
+ * unarm runs within a single hw start, hw stop, suspend, resume or reset.
+ */
+void amdxdna_async_events_fini(struct aie_device *aie)
+{
+	struct amdxdna_async_events *events = aie->async_events;
+	struct amdxdna_dev *xdna = aie->xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (!events)
+		return;
+
+	events->armed = false;
+
+	/* Drop dev_lock so in-flight workers can complete before returning. */
+	mutex_unlock(&xdna->dev_lock);
+	flush_workqueue(events->wq);
+	mutex_lock(&xdna->dev_lock);
 }
 
 bool amdxdna_async_events_queue_work(struct aie_device *aie, struct work_struct *work)
@@ -460,17 +660,27 @@ bool amdxdna_async_events_queue_work(struct aie_device *aie, struct work_struct 
 	return true;
 }
 
+/**
+ * amdxdna_async_events_free - release the async error report pool.
+ * @aie: shared aie device holding the pool.
+ *
+ * Called from remove and from the probe unwinds, after the mailbox is torn down
+ * and the firmware is stopped or suspended, the same rule the aie4 work buffer
+ * follows. Caller must hold dev_lock, which is dropped while the workqueue is
+ * destroyed.
+ */
 void amdxdna_async_events_free(struct aie_device *aie)
 {
-	struct amdxdna_dev *xdna = aie->xdna;
 	struct amdxdna_async_events *events = aie->async_events;
-	int i;
+	struct amdxdna_dev *xdna = aie->xdna;
+	u32 i;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	if (!events)
 		return;
 
+	events->armed = false;
 	/*
 	 * Retire the pool with a single store the lockless reader in
 	 * amdxdna_async_events_queue_work() cannot tear. Callers stop the
@@ -485,8 +695,9 @@ void amdxdna_async_events_free(struct aie_device *aie)
 	destroy_workqueue(events->wq);
 	mutex_lock(&xdna->dev_lock);
 
-	for (i = 0; i < events->event_cnt; i++)
+	for (i = 0; i < events->slot_cnt; i++)
 		amdxdna_free_msg_buff(events->event[i].hdl);
+	kvfree(events->scratch);
 	kfree(events);
 }
 
