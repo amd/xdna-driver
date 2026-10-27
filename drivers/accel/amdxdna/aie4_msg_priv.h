@@ -826,6 +826,24 @@ struct aie4_msg_get_ctx_hysteresis_resp {
 	__u32 timeout_us;
 } __packed;
 
+struct aie4_msg_get_dpm_compute_req {
+	__u32 type;
+} __packed;
+
+struct aie4_msg_get_dpm_compute_resp {
+	enum aie4_msg_status status;
+	struct aie4_msg_runtime_config_configure_dpm cfg;
+} __packed;
+
+struct aie4_msg_get_dpm_bw_req {
+	__u32 type;
+} __packed;
+
+struct aie4_msg_get_dpm_bw_resp {
+	enum aie4_msg_status status;
+	struct aie4_msg_runtime_config_configure_dpm_bw cfg;
+} __packed;
+
 struct aie4_msg_runtime_config_fw_log_level {
 	__u32 log_level;
 } __packed;
