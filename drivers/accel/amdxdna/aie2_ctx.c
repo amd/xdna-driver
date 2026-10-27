@@ -179,6 +179,15 @@ int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 		goto out;
 	}
 
+	/*
+	 * If the user closed the debug BO handle without calling REMOVE_DBG_BUF
+	 * first, priv->debug_bo still points to the object but the device heap
+	 * range may have been freed and reallocated. This is a user bug; any
+	 * resulting firmware corruption is self-inflicted within the client's
+	 * own context.
+	 */
+	aie2_hwctx_resume_debug_bo(hwctx);
+
 out:
 	XDNA_DBG(xdna, "%s restarted, ret %d", hwctx->name, ret);
 	aie2_hwctx_job_unpause(hwctx);
@@ -871,6 +880,11 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	amdxdna_gem_put_obj_async(hwctx->priv->heap);
 
 	kfree(hwctx->priv->cached_health);
+	if (hwctx->priv->debug_bo) {
+		hwctx->priv->debug_bo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
+		amdxdna_gem_put_obj_async(hwctx->priv->debug_bo);
+		hwctx->priv->debug_bo = NULL;
+	}
 	mutex_destroy(&hwctx->priv->io_lock);
 	aie2_hwctx_put_cu_bos(hwctx);
 	kfree(hwctx->col_list);
@@ -1017,8 +1031,7 @@ static void aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq)
 	dma_fence_put(out_fence);
 }
 
-static int aie2_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl,
-				   bool attach)
+static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1033,47 +1046,113 @@ static int aie2_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl,
 		return -EINVAL;
 	}
 
+	if (hwctx->priv->debug_bo ||
+	    abo->assigned_hwctx != AMDXDNA_INVALID_CTX_HANDLE) {
+		ret = -EBUSY;
+		goto put_obj;
+	}
+
 	cmd = kzalloc_obj(*cmd);
 	if (!cmd) {
 		ret = -ENOMEM;
 		goto put_obj;
 	}
 	kref_init(&cmd->refcnt);
+	cmd->opcode = ATTACH_DEBUG_BO;
 
-	if (attach) {
-		if (abo->assigned_hwctx != AMDXDNA_INVALID_CTX_HANDLE) {
-			ret = -EBUSY;
-			goto put_cmd;
-		}
-		cmd->opcode = ATTACH_DEBUG_BO;
-	} else {
-		if (abo->assigned_hwctx != hwctx->id) {
-			ret = -EINVAL;
-			goto put_cmd;
-		}
-		cmd->opcode = DETACH_DEBUG_BO;
+	abo->assigned_hwctx = hwctx->id;
+	hwctx->priv->debug_bo = abo;	/* transfer lookup ref to priv */
+
+	/*
+	 * Fire and forget: neither the local submit return nor the firmware
+	 * result is checked. If attach fails for any reason the driver still
+	 * reflects the BO as attached; the user will see an error on the next
+	 * SYNC_DEBUG_BO. Debug BO is optional and best-effort.
+	 *
+	 * dev_lock is dropped so down_interruptible() on job_sem can block
+	 * without preventing TDR from acquiring dev_lock to recover stalled
+	 * jobs. client_lock is still held by the ioctl caller, so the hwctx
+	 * cannot be destroyed during this window.
+	 */
+	mutex_unlock(&xdna->dev_lock);
+	amdxdna_cmd_submit(client, cmd, AMDXDNA_INVALID_BO_HANDLE,
+			   &bo_hdl, 1, hwctx->id, &seq);
+	mutex_lock(&xdna->dev_lock);
+
+	aie2_cmd_put(cmd);
+	XDNA_DBG(xdna, "Attached debug BO %d to %s", bo_hdl, hwctx->name);
+	return 0;
+
+put_obj:
+	amdxdna_gem_put_obj_async(abo);
+	return ret;
+}
+
+static int aie2_hwctx_detach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
+{
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_drv_cmd *cmd;
+	struct amdxdna_gem_obj *abo;
+	u64 seq;
+	int ret;
+
+	abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_DEV);
+	if (!abo) {
+		XDNA_ERR(xdna, "Get bo %d failed", bo_hdl);
+		return -EINVAL;
 	}
 
+	if (abo->assigned_hwctx != hwctx->id) {
+		ret = -EINVAL;
+		goto put_obj;
+	}
+	drm_WARN_ON(&xdna->ddev, hwctx->priv->debug_bo != abo);
+
+	cmd = kzalloc_obj(*cmd);
+	if (!cmd) {
+		ret = -ENOMEM;
+		goto put_obj;
+	}
+	kref_init(&cmd->refcnt);
+	cmd->opcode = DETACH_DEBUG_BO;
+
+	hwctx->priv->debug_bo = NULL;
+
+	/*
+	 * dev_lock is dropped so down_interruptible() on job_sem can block
+	 * without preventing TDR from acquiring dev_lock to recover stalled
+	 * jobs. client_lock is still held by the ioctl caller, so the hwctx
+	 * cannot be destroyed during this window.
+	 *
+	 * If submit fails, state is rolled back so the driver still reflects
+	 * the BO as attached. The user will see SYNC_DEBUG_BO fail and can
+	 * retry REMOVE_DBG_BUF, which succeeds even after a restart of hwctx
+	 * because the detach path does not check the firmware result.
+	 */
+	mutex_unlock(&xdna->dev_lock);
 	ret = amdxdna_cmd_submit(client, cmd, AMDXDNA_INVALID_BO_HANDLE,
 				 &bo_hdl, 1, hwctx->id, &seq);
+	mutex_lock(&xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Submit command failed");
+		hwctx->priv->debug_bo = abo;
 		goto put_cmd;
 	}
 
+	/* Wait for the command to complete or be aborted, but ignore the
+	 * result: by the time we return the device heap range is safe to
+	 * reuse regardless of whether firmware processed DETACH or TDR reset
+	 * the context.
+	 */
 	aie2_cmd_wait(hwctx, seq);
-	if (cmd->result) {
-		XDNA_ERR(xdna, "Response failure 0x%x", cmd->result);
-		ret = -EINVAL;
-		goto put_cmd;
-	}
 
-	if (attach)
-		abo->assigned_hwctx = hwctx->id;
-	else
-		abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
-
-	XDNA_DBG(xdna, "Config debug BO %d to %s", bo_hdl, hwctx->name);
+	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
+	amdxdna_gem_put_obj_async(abo);	/* priv ref */
+	amdxdna_gem_put_obj_async(abo);	/* lookup ref */
+	aie2_cmd_put(cmd);
+	XDNA_DBG(xdna, "Detached debug BO %d from %s", bo_hdl, hwctx->name);
+	return 0;
 
 put_cmd:
 	aie2_cmd_put(cmd);
@@ -1091,9 +1170,9 @@ int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *bu
 	case DRM_AMDXDNA_HWCTX_CONFIG_CU:
 		return aie2_hwctx_cu_config(hwctx, buf, size);
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
-		return aie2_hwctx_cfg_debug_bo(hwctx, (u32)value, true);
+		return aie2_hwctx_attach_debug_bo(hwctx, (u32)value);
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
-		return aie2_hwctx_cfg_debug_bo(hwctx, (u32)value, false);
+		return aie2_hwctx_detach_debug_bo(hwctx, (u32)value);
 	default:
 		XDNA_DBG(xdna, "Not supported type %d", type);
 		return -EOPNOTSUPP;
