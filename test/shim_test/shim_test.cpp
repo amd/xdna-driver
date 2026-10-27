@@ -7,6 +7,7 @@
 
 
 #include "multi_threads.h"
+#include "pm.h"
 #include "dev_info.h"
 #include "dev_filter.h"
 #include "io_param.h"
@@ -187,6 +188,7 @@ get_sysfs_path(device* dev)
 {
   return get_device_sysfs(dev) + "/accel";
 }
+
 
 namespace {
 
@@ -719,6 +721,25 @@ TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device>& sdev, arg
   } catch (const std::system_error& e) {
     std::cout << e.what() << std::endl;
   }
+}
+
+void
+TEST_debug_bo_after_suspend(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto boflags = XRT_BO_FLAGS_CACHEABLE;
+  auto ext_boflags = (dev_filter_is_aie4(id, dev)) ?
+    (XRT_BO_USE_UC_DEBUG << 4) : (XRT_BO_USE_DEBUG << 4);
+  auto size = static_cast<size_t>(arg[0]);
+
+  hw_ctx hwctx{dev};
+  auto bo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+
+  require_runtime_suspend(dev);
+
+  bo.get()->sync(buffer_handle::direction::device2host, size, 0);
+
+  require_runtime_suspend(dev);
 }
 
 void
@@ -1831,6 +1852,9 @@ std::vector<test_case> test_list {
   // },
   test_case{ "create user pointer bo from mapped bo", {},
     TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, npu12}, {}, TEST_create_uptr_bo_from_mapped_bo, {}
+  },
+  test_case{ "debug bo sync after suspend", {},
+    TEST_POSITIVE, {npu1, npu4}, {amdxdna}, TEST_debug_bo_after_suspend, { 0x1000 }
   },
 };
 

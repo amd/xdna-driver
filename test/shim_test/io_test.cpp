@@ -4,6 +4,7 @@
 #include "io.h"
 #include "hwctx.h"
 #include "multi_threads.h"
+#include "pm.h"
 #include "speed.h"
 #include "dev_info.h"
 #include "dev_filter.h"
@@ -640,56 +641,6 @@ struct app_health_ctx_unit {
   std::unique_ptr<hw_ctx> ctx;
   std::unique_ptr<io_test_bo_set_base> boset;
 };
-
-/* Runtime PM state of the NPU, empty when the attribute is absent. */
-std::string
-runtime_pm_status(device* dev)
-{
-  std::ifstream ifs(get_device_sysfs(dev) + "/power/runtime_status");
-  std::string status;
-
-  std::getline(ifs, status);
-  return status;
-}
-
-/*
- * Wait for the NPU to auto-suspend and return the runtime PM status that ended
- * the wait. The suspend delay is a few seconds, so the timeout only has to be
- * generous enough to absorb a loaded machine.
- */
-std::string
-wait_for_runtime_suspend(device* dev)
-{
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-
-  for (;;) {
-    const std::string status = runtime_pm_status(dev);
-
-    if (status == "suspended" || status.empty())
-      return status;
-    if (std::chrono::steady_clock::now() >= deadline)
-      return status;
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  }
-}
-
-/*
- * Wait out the auto-suspend and fail unless the device actually got there.
- * Every suspend/restore test needs the device genuinely suspended, otherwise it
- * would pass without exercising anything.
- */
-void
-require_runtime_suspend(device* dev)
-{
-  const std::string status = wait_for_runtime_suspend(dev);
-
-  if (status.empty())
-    throw std::runtime_error("runtime PM status unavailable, cannot exercise the restore path");
-  if (status != "suspended") {
-    throw std::runtime_error("device did not auto-suspend while holding a context, runtime_status=\""
-      + status + "\"");
-  }
-}
 
 }
 
