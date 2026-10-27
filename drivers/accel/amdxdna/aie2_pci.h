@@ -96,6 +96,8 @@ struct amdxdna_hwctx_priv {
 	 * ioctl returned.
 	 */
 	struct amdxdna_gem_obj		**cu_bos;
+	/* Saved debug BO for reattaching during resume. */
+	struct amdxdna_gem_obj		*debug_bo;
 
 	struct app_health_report	*cached_health;
 
@@ -304,6 +306,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 			       int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, void __iomem *, size_t));
+void aie2_resume_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_gem_obj *abo);
 int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 			 int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev, u32 us);

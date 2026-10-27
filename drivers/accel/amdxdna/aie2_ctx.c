@@ -179,6 +179,9 @@ int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 		goto out;
 	}
 
+	if (hwctx->priv->debug_bo)
+		aie2_resume_debug_bo(hwctx, hwctx->priv->debug_bo);
+
 out:
 	XDNA_DBG(xdna, "%s restarted, ret %d", hwctx->name, ret);
 	aie2_hwctx_job_unpause(hwctx);
@@ -871,6 +874,11 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	amdxdna_gem_put_obj_async(hwctx->priv->heap);
 
 	kfree(hwctx->priv->cached_health);
+	if (hwctx->priv->debug_bo) {
+		hwctx->priv->debug_bo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
+		amdxdna_gem_put_obj_async(hwctx->priv->debug_bo);
+		hwctx->priv->debug_bo = NULL;
+	}
 	mutex_destroy(&hwctx->priv->io_lock);
 	aie2_hwctx_put_cu_bos(hwctx);
 	kfree(hwctx->col_list);
@@ -1041,7 +1049,8 @@ static int aie2_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl,
 	kref_init(&cmd->refcnt);
 
 	if (attach) {
-		if (abo->assigned_hwctx != AMDXDNA_INVALID_CTX_HANDLE) {
+		if (hwctx->priv->debug_bo ||
+		    abo->assigned_hwctx != AMDXDNA_INVALID_CTX_HANDLE) {
 			ret = -EBUSY;
 			goto put_cmd;
 		}
@@ -1054,26 +1063,41 @@ static int aie2_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl,
 		cmd->opcode = DETACH_DEBUG_BO;
 	}
 
+	/*
+	 * Drop dev_lock while submitting so that down_interruptible() on
+	 * job_sem can block without preventing TDR from acquiring dev_lock
+	 * to recover stalled jobs. client_lock is still held by the ioctl
+	 * caller, so the hwctx cannot be destroyed during this window.
+	 */
+	mutex_unlock(&xdna->dev_lock);
 	ret = amdxdna_cmd_submit(client, cmd, AMDXDNA_INVALID_BO_HANDLE,
 				 &bo_hdl, 1, hwctx->id, &seq);
+	mutex_lock(&xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Submit command failed");
 		goto put_cmd;
 	}
 
-	aie2_cmd_wait(hwctx, seq);
-	if (cmd->result) {
-		XDNA_ERR(xdna, "Response failure 0x%x", cmd->result);
-		ret = -EINVAL;
-		goto put_cmd;
+	if (attach) {
+		abo->assigned_hwctx = hwctx->id;
+		hwctx->priv->debug_bo = abo;	/* transfer lookup ref to priv */
+	} else {
+		/*
+		 * abo->assigned_hwctx == hwctx->id (checked above) implies
+		 * abo == hwctx->priv->debug_bo: only one BO can be attached
+		 * per context at a time. Two refs exist: the priv ref (from
+		 * the attach-time lookup transfer) and the current lookup ref.
+		 * Both are released here.
+		 */
+		abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
+		amdxdna_gem_put_obj_async(hwctx->priv->debug_bo);	/* priv ref */
+		hwctx->priv->debug_bo = NULL;
+		amdxdna_gem_put_obj_async(abo);				/* lookup ref */
 	}
 
-	if (attach)
-		abo->assigned_hwctx = hwctx->id;
-	else
-		abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
-
+	aie2_cmd_put(cmd);
 	XDNA_DBG(xdna, "Config debug BO %d to %s", bo_hdl, hwctx->name);
+	return 0;
 
 put_cmd:
 	aie2_cmd_put(cmd);
