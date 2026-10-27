@@ -391,9 +391,12 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 		goto del_ctx_req;
 	}
 
-	/* +1 for the config_cu message that can be in-flight concurrently */
+	/*
+	 * +1 for aie2_config_cu() and +1 for aie2_hwctx_resume_debug_bo(), both sent
+	 * fire-and-forget during restart and not bounded by job_sem.
+	 */
 	ret = xdna_mailbox_start_channel(hwctx->priv->mbox_chann, &x2i, &i2x,
-					 intr_reg, ret, HWCTX_MAX_CMDS + 1);
+					 intr_reg, ret, HWCTX_MAX_CMDS + 2);
 	if (ret) {
 		XDNA_ERR(xdna, "Not able to create channel");
 		ret = -EINVAL;
@@ -1294,6 +1297,35 @@ int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *
 	msg.opcode = MSG_OP_CONFIG_DEBUG_BO;
 
 	return xdna_mailbox_send_msg(chann, &msg);
+}
+
+/*
+ * aie2_hwctx_resume_debug_bo - re-register debug BO with firmware after context restart.
+ *
+ * Called from aie2_hwctx_restart() on both runtime PM resume and TDR recovery.
+ * Debug BO registration is optional and best-effort: if firmware rejects or
+ * ignores the request the user will encounter an error on the next sync, which
+ * is acceptable. The message is therefore fire-and-forget with no completion wait.
+ */
+void aie2_hwctx_resume_debug_bo(struct amdxdna_hwctx *hwctx)
+{
+	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
+	struct amdxdna_gem_obj *abo = hwctx->priv->debug_bo;
+	struct config_debug_bo_req req = { 0 };
+	struct xdna_mailbox_msg msg = {};
+
+	if (!abo)
+		return;
+
+	req.offset = amdxdna_dev_bo_offset(abo);
+	req.size = abo->mem.size;
+	req.config = DEBUG_BO_REGISTER;
+
+	msg.send_data = (u8 *)&req;
+	msg.send_size = sizeof(req);
+	msg.opcode = MSG_OP_CONFIG_DEBUG_BO;
+
+	xdna_mailbox_send_msg(chann, &msg);
 }
 
 int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
