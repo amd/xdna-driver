@@ -8,6 +8,7 @@
 
 #include <linux/delay.h>
 #include <linux/device.h>
+#include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/ktime.h>
 #include <linux/moduleparam.h>
@@ -75,6 +76,7 @@ int ve2_mgmtctx_registry_init(struct amdxdna_dev_hdl *hdl)
 
 		mgmtctx->xdna = xdna;
 		mgmtctx->start_col = i;
+		INIT_LIST_HEAD(&mgmtctx->ctx_list);
 		INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
 		mutex_init(&mgmtctx->ctx_lock);
 		mutex_init(&mgmtctx->async_errs_cache.lock);
@@ -386,7 +388,7 @@ static int ve2_fifo_enqueue(struct amdxdna_mgmtctx *mgmtctx,
 }
 
 static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
-				   struct amdxdna_hwctx *hwctx)
+				   struct amdxdna_hwctx *hwctx, bool reset_queue)
 {
 	struct amdxdna_dev *xdna = mgmtctx->xdna;
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
@@ -439,6 +441,9 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
 		goto release_hs_data;
 	}
+
+	if (reset_queue)
+		ve2_hwctx_tdr_reset_queue(hwctx);
 
 	/*
 	 * Refresh host_time_high/low now that the (slow) partition init has
@@ -507,33 +512,56 @@ static int ve2_request_context_switch(struct amdxdna_mgmtctx *mgmtctx)
  * with nothing else going on to prompt it to check. This mirrors what the
  * legacy driver does.
  *
- * Returns the newly scheduled context, or NULL if the FIFO is empty.
+ * Returns the newly scheduled context, NULL if the FIFO is empty, or
+ * ERR_PTR() if programming the CERT handshake failed. Callers must not
+ * treat ERR_PTR() as an empty FIFO.
  */
 
 static struct amdxdna_hwctx *ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 {
 	struct ve2_ctx_fifo_entry *c_ctx, *t_ctx;
 	struct amdxdna_hwctx *hwctx = NULL;
+	int hs_ret;
 
 	lockdep_assert_held(&mgmtctx->ctx_lock);
+
+	/*
+	 * A firmware TIMEOUT is reported from the completion worker, which can
+	 * lose the race with this high-priority scheduler. Once recovery is
+	 * pending, keep the faulting context active so CERT is halted before
+	 * its command buffers are released.
+	 */
+	if (mgmtctx->active_ctx) {
+		struct amdxdna_ctx_priv *avp = ve2_hw_priv(mgmtctx->active_ctx);
+
+		if (avp && READ_ONCE(avp->tdr_reset_pending)) {
+			ve2_tdr_queue(mgmtctx->xdna);
+			return mgmtctx->active_ctx;
+		}
+	}
 
 	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
 		if (mgmtctx->is_idle_due_to_context || mgmtctx->is_partition_idle) {
 			hwctx = c_ctx->ctx;
 			/*
-			 * Clear these now that they have been consumed, from
-			 * here rather than the caller, so a flag set just
-			 * before this function runs is not lost before it can
-			 * be acted upon. Otherwise every later call to this
-			 * function (e.g. from the async IRQ-driven
-			 * scheduler_work, which runs once per command
-			 * completion) sees a stale flag still set and
-			 * redundantly re-runs handshake_init() on the current
-			 * FIFO head even when no real context switch occurred.
+			 * Clear the idle flags here, once the handshake has
+			 * succeeded, rather than in the caller. Clearing them
+			 * in the caller drops a flag set just before this
+			 * runs. Clearing them before a failed handshake made
+			 * that failure look like an empty FIFO (NULL) and
+			 * dropped the only signal that the switch should be
+			 * retried. On success the flags are consumed, so a
+			 * later scheduler pass does not reprogram the current
+			 * FIFO head when no switch is pending.
 			 */
+			hs_ret = ve2_mgmt_handshake_init(mgmtctx, hwctx, false);
+			if (hs_ret) {
+				XDNA_ERR(mgmtctx->xdna,
+					 "context switch handshake failed: %d", hs_ret);
+				return ERR_PTR(hs_ret);
+			}
 			mgmtctx->is_partition_idle = 0;
 			mgmtctx->is_idle_due_to_context = 0;
-			ve2_mgmt_handshake_init(mgmtctx, hwctx);
 			if (mgmtctx->active_ctx == hwctx)
 				break;
 			mgmtctx->active_ctx = hwctx;
@@ -557,6 +585,7 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
 	struct amdxdna_mgmtctx *mgmtctx;
+	struct amdxdna_hwctx *switched;
 	int ret;
 
 	if (!vp || !vp->mgmtctx)
@@ -570,23 +599,15 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 	mutex_lock(&mgmtctx->ctx_lock);
 
 	ret = ve2_fifo_enqueue(mgmtctx, hwctx, command_index);
-	if (ret) {
-		mutex_unlock(&mgmtctx->ctx_lock);
-		trace_xdna_mgmt_schedule_cmd_done(hwctx->name, hwctx->id, mgmtctx->start_col,
-						  command_index, ret);
-		return ret;
-	}
+	if (ret)
+		goto out_unlock;
 
 	if (!mgmtctx->active_ctx) {
 		/* First command on this partition: program and activate it. */
 		mgmtctx->is_partition_idle = 0;
-		ret = ve2_mgmt_handshake_init(mgmtctx, hwctx);
-		if (ret) {
-			mutex_unlock(&mgmtctx->ctx_lock);
-			trace_xdna_mgmt_schedule_cmd_done(hwctx->name, hwctx->id,
-							  mgmtctx->start_col, command_index, ret);
-			return ret;
-		}
+		ret = ve2_mgmt_handshake_init(mgmtctx, hwctx, false);
+		if (ret)
+			goto out_unlock;
 		mgmtctx->active_ctx = hwctx;
 	} else if (mgmtctx->active_ctx != hwctx) {
 		/*
@@ -606,26 +627,44 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 			XDNA_DBG(mgmtctx->xdna,
 				 "Context switch: active=%p -> new=%p (partition idle)",
 				 mgmtctx->active_ctx, hwctx);
-			ve2_response_ctx_switch_req(mgmtctx);
+			switched = ve2_response_ctx_switch_req(mgmtctx);
+			if (IS_ERR(switched)) {
+				ret = PTR_ERR(switched);
+				goto out_unlock;
+			}
 		} else {
 			XDNA_DBG(mgmtctx->xdna, "Command queued: active=%p, pending=%p",
 				 mgmtctx->active_ctx, hwctx);
 		}
 	} else if (mgmtctx->is_idle_due_to_context) {
-		/* We are active again after a firmware-side save; reprogram. */
+		/*
+		 * We are active again after a firmware-side save; reprogram.
+		 * Leave the idle flags set until the handshake succeeds so a
+		 * failure is returned to the submitter and the next submit
+		 * retries the program instead of notifying a CERT that was
+		 * never started.
+		 */
+		ret = ve2_mgmt_handshake_init(mgmtctx, hwctx, false);
+		if (ret) {
+			XDNA_ERR(mgmtctx->xdna,
+				 "context switch handshake failed: %d", ret);
+			goto out_unlock;
+		}
 		mgmtctx->is_idle_due_to_context = 0;
 		mgmtctx->is_partition_idle = 0;
-		ve2_mgmt_handshake_init(mgmtctx, hwctx);
 		mgmtctx->active_ctx = hwctx;
 	} else {
 		notify_fw_cmd_ready(mgmtctx);
 	}
 
+	ret = 0;
+
+out_unlock:
 	mutex_unlock(&mgmtctx->ctx_lock);
 
 	trace_xdna_mgmt_schedule_cmd_done(hwctx->name, hwctx->id, mgmtctx->start_col,
-					  command_index, 0);
-	return 0;
+					  command_index, ret);
+	return ret;
 }
 
 static bool ve2_check_idle(struct amdxdna_mgmtctx *mgmtctx)
@@ -693,11 +732,15 @@ static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
 			if (!vp->misc_intrpt_flag) {
 				vp->misc_status_latched = misc_status;
 				vp->misc_intrpt_flag = true;
+				if (ve2_tdr_enabled(mgmtctx->xdna))
+					vp->tdr_reset_pending = true;
 				XDNA_ERR(mgmtctx->xdna,
 					 "misc_status 0x%x on col %u: marking hwctx %u (pid %d) unusable\n",
 					 misc_status, mgmtctx->start_col,
 					 mgmtctx->active_ctx->id,
 					 mgmtctx->active_ctx->client->pid);
+				if (vp->tdr_reset_pending)
+					ve2_tdr_queue(mgmtctx->xdna);
 			}
 		}
 	}
@@ -743,6 +786,20 @@ static bool ve2_check_context_req(struct amdxdna_mgmtctx *mgmtctx)
 	}
 
 	return false;
+}
+
+/*
+ * Bring in the FIFO head. NULL means the FIFO is empty, so the partition is
+ * idle. ERR_PTR() is a handshake failure, not an empty FIFO: the idle flags
+ * stay set inside ve2_response_ctx_switch_req() so a later event retries.
+ */
+static void ve2_schedule_pending_or_idle(struct amdxdna_mgmtctx *mgmtctx)
+{
+	struct amdxdna_hwctx *next;
+
+	next = ve2_response_ctx_switch_req(mgmtctx);
+	if (!IS_ERR(next) && !next)
+		mgmtctx->is_partition_idle = 1;
 }
 
 static void ve2_scheduler_work(struct work_struct *work)
@@ -798,12 +855,10 @@ static void ve2_scheduler_work(struct work_struct *work)
 		 * The firmware acked the switch but the active context still has
 		 * queued work; bring in the next context, or mark idle if none.
 		 */
-		if (!ve2_response_ctx_switch_req(mgmtctx))
-			mgmtctx->is_partition_idle = 1;
+		ve2_schedule_pending_or_idle(mgmtctx);
 	} else if (ve2_check_idle(mgmtctx)) {
 		/* Partition idle: schedule the next pending context, if any. */
-		if (!ve2_response_ctx_switch_req(mgmtctx))
-			mgmtctx->is_partition_idle = 1;
+		ve2_schedule_pending_or_idle(mgmtctx);
 	} else {
 		XDNA_DBG(mgmtctx->xdna, "Scheduler: no action needed, active_ctx=%p",
 			 mgmtctx->active_ctx);
@@ -841,6 +896,8 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	struct amdxdna_mgmtctx *mgmtctx = priv;
 	struct amdxdna_hwctx *active_ctx;
 	struct amdxdna_ctx_priv *vp;
+	bool queue_pending;
+	bool misc_fault;
 	u64 write_index = 0;
 	u64 read_index;
 
@@ -874,8 +931,15 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	trace_xdna_irq_exit(active_ctx->name, mgmtctx->partition_id, active_ctx->id,
 			    read_index, write_index);
 
-	if (mgmtctx->work_queue &&
-	    (ve2_check_idle_or_queue_not_empty(mgmtctx) || ve2_check_misc_interrupt(mgmtctx))) {
+	/*
+	 * Latch a MISC fault before the idle/queue test. ve2_check_misc_interrupt()
+	 * is what marks the context and queues TDR; a short-circuit || skips it
+	 * whenever HSA_QUEUE_NOT_EMPTY or CERT_IS_IDLE is set, which is the usual
+	 * state of a stalled queue.
+	 */
+	misc_fault = ve2_check_misc_interrupt(mgmtctx);
+	queue_pending = ve2_check_idle_or_queue_not_empty(mgmtctx);
+	if (mgmtctx->work_queue && (misc_fault || queue_pending)) {
 		XDNA_DBG(mgmtctx->xdna, "IRQ: queue sched_work start_col=%u", mgmtctx->start_col);
 		queue_work(mgmtctx->work_queue, &mgmtctx->scheduler_work);
 	} else {
@@ -1229,12 +1293,16 @@ static void ve2_aie_error_cb(void *arg)
 		if (vp) {
 			if (!vp->misc_intrpt_flag)
 				vp->misc_intrpt_flag = true;
+			if (ve2_tdr_enabled(xdna))
+				vp->tdr_reset_pending = true;
 			wake_up_interruptible_all(&vp->waitq);
 			XDNA_ERR(xdna, "AIE error detected, waking up waiting threads\n");
 		}
 	}
 
 	mutex_unlock(&mgmtctx->ctx_lock);
+	if (ve2_tdr_enabled(xdna))
+		ve2_tdr_queue(xdna);
 
 	/* Error cached and threads woken: let any waiting query proceed. */
 	atomic_set(&mgmtctx->error_cb_in_progress, 0);
@@ -1318,6 +1386,9 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 
 	vp->mgmtctx = mgmtctx;
 	vp->partition_id = mgmtctx->partition_id;
+	mutex_lock(&mgmtctx->ctx_lock);
+	list_add_tail(&vp->partition_link, &mgmtctx->ctx_list);
+	mutex_unlock(&mgmtctx->ctx_lock);
 
 	return 0;
 
@@ -1341,6 +1412,183 @@ static void ve2_fifo_remove_ctx(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_
 			kfree(c_ctx);
 		}
 	}
+}
+
+int ve2_mgmt_recover_hwctx(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct ve2_ctx_fifo_entry *head;
+	struct amdxdna_hwctx *next = NULL;
+	struct amdxdna_mgmtctx *mgmtctx;
+	bool cert_stopped = false;
+	bool timeout_first;
+	int ret;
+
+	if (!vp || !vp->mgmtctx)
+		return -ENODEV;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	mgmtctx = vp->mgmtctx;
+
+	mutex_lock(&vp->submit_lock);
+	mutex_lock(&mgmtctx->ctx_lock);
+	if (mgmtctx->active_ctx && mgmtctx->active_ctx != hwctx) {
+		/*
+		 * The scheduler already switched the partition. CERT is running
+		 * the new owner, so release this context's jobs and drop its
+		 * FIFO entries without reprogramming the partition again.
+		 */
+		XDNA_ERR(xdna,
+			 "TDR releasing inactive hwctx %u; partition col %u owned by hwctx %u",
+			 hwctx->id, mgmtctx->start_col, mgmtctx->active_ctx->id);
+		timeout_first = !READ_ONCE(vp->tdr_timeout_reported);
+		ve2_hwctx_tdr_mark(hwctx, timeout_first);
+		ve2_fifo_remove_ctx(mgmtctx, hwctx);
+		ve2_hwctx_tdr_reset_queue(hwctx);
+		WRITE_ONCE(vp->tdr_timeout_reported, false);
+		WRITE_ONCE(vp->tdr_reset_pending, false);
+		vp->tdr_attempts = 0;
+		ve2_hwctx_tdr_release(hwctx);
+		wake_up_interruptible_all(&vp->waitq);
+		ret = 0;
+		goto unlock;
+	}
+
+	timeout_first = !READ_ONCE(vp->tdr_timeout_reported);
+	/*
+	 * Capture health and command status before column reset erases the
+	 * fault. The jobs stay pending so userspace cannot reuse their buffers
+	 * until CERT has actually been halted below.
+	 */
+	ve2_hwctx_tdr_mark(hwctx, timeout_first);
+	ve2_fifo_remove_ctx(mgmtctx, hwctx);
+
+	mgmtctx->is_partition_idle = 0;
+	mgmtctx->is_context_req = 0;
+	mgmtctx->is_idle_due_to_context = 0;
+
+	/*
+	 * A queued peer must be programmed directly. Waking this context and
+	 * then calling the idle-switch helper would reprogram the peer with
+	 * no firmware idle acknowledgement, and it would leave the idle flag
+	 * set when this context is the only one queued.
+	 */
+	head = list_first_entry_or_null(&mgmtctx->ctx_command_fifo_head,
+					struct ve2_ctx_fifo_entry, list);
+	if (head)
+		next = head->ctx;
+
+	if (next)
+		ret = ve2_mgmt_handshake_init(mgmtctx, next, false);
+	else
+		ret = ve2_mgmt_handshake_init(mgmtctx, hwctx, true);
+	if (ret) {
+		int stop_ret;
+
+		XDNA_ERR(xdna, "TDR partition re-initialization failed for hwctx %u: %d",
+			 hwctx->id, ret);
+		vp->misc_intrpt_flag = true;
+		/*
+		 * Initialization failed before its column reset, so CERT may
+		 * still be executing. Teardown performs that reset; only then
+		 * is it safe to let waiters reuse the command buffers.
+		 */
+		stop_ret = ve2_aie_partition_teardown(mgmtctx->aie_dev);
+		if (!stop_ret) {
+			cert_stopped = true;
+			ve2_hwctx_tdr_reset_queue(hwctx);
+		} else {
+			XDNA_ERR(xdna, "TDR teardown failed for hwctx %u: %d",
+				 hwctx->id, stop_ret);
+		}
+	} else {
+		cert_stopped = true;
+		if (next) {
+			ve2_hwctx_tdr_reset_queue(hwctx);
+			mgmtctx->active_ctx = next;
+		} else if (!mgmtctx->active_ctx) {
+			mgmtctx->active_ctx = hwctx;
+		}
+	}
+	mgmtctx->is_partition_idle = 0;
+
+	if (cert_stopped) {
+		WRITE_ONCE(vp->tdr_timeout_reported, false);
+		WRITE_ONCE(vp->tdr_reset_pending, false);
+		vp->tdr_attempts = 0;
+		ve2_hwctx_tdr_release(hwctx);
+		wake_up_interruptible_all(&vp->waitq);
+	}
+
+unlock:
+	mutex_unlock(&mgmtctx->ctx_lock);
+	mutex_unlock(&vp->submit_lock);
+	return ret;
+}
+
+/*
+ * Re-init and teardown both failed, and retries are exhausted. CERT may still
+ * be running, but leaving tdr_reset_pending set strands submits at -EAGAIN
+ * and leaves waits asleep with no further interrupt. Mark the context
+ * unusable, release its jobs, and drop it as the partition owner so a later
+ * submit can try another context.
+ */
+void ve2_mgmt_tdr_abandon(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct ve2_ctx_fifo_entry *head;
+	struct amdxdna_mgmtctx *mgmtctx;
+	struct amdxdna_hwctx *next = NULL;
+	int ret;
+
+	if (!vp || !vp->mgmtctx)
+		return;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	mgmtctx = vp->mgmtctx;
+
+	mutex_lock(&vp->submit_lock);
+	mutex_lock(&mgmtctx->ctx_lock);
+
+	XDNA_ERR(xdna,
+		 "TDR giving up on hwctx %u (pid %d) after partition reset failed; context is unusable",
+		 hwctx->id, hwctx->client->pid);
+
+	vp->misc_intrpt_flag = true;
+	ve2_fifo_remove_ctx(mgmtctx, hwctx);
+	ve2_hwctx_tdr_release(hwctx);
+	WRITE_ONCE(vp->tdr_timeout_reported, false);
+	WRITE_ONCE(vp->tdr_reset_pending, false);
+	vp->tdr_attempts = 0;
+	wake_up_interruptible_all(&vp->waitq);
+
+	if (!mgmtctx->active_ctx || mgmtctx->active_ctx == hwctx) {
+		head = list_first_entry_or_null(&mgmtctx->ctx_command_fifo_head,
+						struct ve2_ctx_fifo_entry, list);
+		if (head)
+			next = head->ctx;
+
+		mgmtctx->is_context_req = 0;
+		mgmtctx->is_idle_due_to_context = 0;
+		if (next) {
+			ret = ve2_mgmt_handshake_init(mgmtctx, next, false);
+			if (!ret) {
+				mgmtctx->active_ctx = next;
+				mgmtctx->is_partition_idle = 0;
+			} else {
+				mgmtctx->active_ctx = NULL;
+				mgmtctx->is_partition_idle = 1;
+			}
+		} else {
+			mgmtctx->active_ctx = NULL;
+			mgmtctx->is_partition_idle = 1;
+		}
+	}
+
+	mutex_unlock(&mgmtctx->ctx_lock);
+	mutex_unlock(&vp->submit_lock);
 }
 
 /*
@@ -1403,6 +1651,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 	mutex_lock(&mgmtctx->ctx_lock);
 	if (mgmtctx->active_ctx == hwctx)
 		mgmtctx->active_ctx = NULL;
+	list_del_init(&vp->partition_link);
 	/* Remove all FIFO entries for this context before freeing it */
 	ve2_fifo_remove_ctx(mgmtctx, hwctx);
 	mutex_unlock(&mgmtctx->ctx_lock);
