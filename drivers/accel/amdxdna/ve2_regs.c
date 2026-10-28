@@ -15,9 +15,11 @@
 /*
  * VE2 (Versal AIE2). The part has no mailbox IP, so this is not the npu12
  * shared-memory and IPI transport. dev_ve2_info still uses the shared aie4
- * context, command, and query ops. This commit answers the version and
- * geometry queries xrt-smi examine uses. Partition, hardware-context, and
- * command opcodes return -EOPNOTSUPP until a later patch.
+ * context, command, and query ops.
+ *
+ * VE2 is a kernel-mode queue: user space submits command buffers and does
+ * not allocate a host queue. The driver allocates that queue and the shared
+ * aie4 submit path fills it. CERT takes two-level indirect packets.
  *
  * xrt-smi examine prints this VBNV as the device name. This is the
  * Versal 2VE/2VM part, not a RyzenAI NPU.
@@ -43,6 +45,7 @@ const struct amdxdna_dev_info dev_ve2_info = {
 	.device_type		= AMDXDNA_DEV_TYPE_KMQ,
 	.ops			= &ve2_ops,
 	.partition_per_hwctx	= true,
+	.hsa_level2_indirect	= true,
 	.fw_feature_tbl		= ve2_fw_feature_table,
 	.cert_feature_tbl	= ve2_cert_feature_table,
 	.luts			= &aie4_error_luts,
