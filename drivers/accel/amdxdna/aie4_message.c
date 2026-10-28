@@ -187,8 +187,28 @@ int aie4_get_aie_activity_counters(struct amdxdna_dev_hdl *ndev,
 {
 	DECLARE_AIE_MSG(aie4_msg_get_aie_activity_counters,
 			AIE4_MSG_OP_GET_AIE_ACTIVITY_COUNTERS);
+	const struct amdxdna_aie_activity *act = ndev->aie.xdna->dev_info->aie_activity;
+	size_t resp_size;
+	u32 n, i;
 	int ret;
-	u32 i;
+
+	if (!act)
+		return -EOPNOTSUPP;
+
+	n = act->counters;
+	resp_size = offsetof(struct aie4_msg_get_aie_activity_counters_resp,
+			     activity_counters) +
+		    n * sizeof(counters->activity_counters[0]) +
+		    act->resp_tail;
+	/*
+	 * Firmware's payload is smaller than the max-sized response on parts
+	 * that return fewer counters (and, on npu12, a raw trailer). The
+	 * mailbox callback rejects a size mismatch, so ask for that payload.
+	 */
+	if (!n || n > AIE4_AIE_ACTIVITY_COUNTERS_MAX || resp_size > sizeof(resp))
+		return -EOPNOTSUPP;
+
+	hdl.size = resp_size;
 
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
@@ -196,7 +216,7 @@ int aie4_get_aie_activity_counters(struct amdxdna_dev_hdl *ndev,
 
 	counters->sample_state = resp.sample_state;
 	counters->timestamp_ms = resp.timestamp_ms;
-	for (i = 0; i < AIE4_AIE_ACTIVITY_COUNTERS; i++)
+	for (i = 0; i < n; i++)
 		counters->activity_counters[i] = resp.activity_counters[i];
 
 	return 0;
@@ -1177,6 +1197,11 @@ int aie4_fill_hwctx_health(struct amdxdna_hwctx *hwctx, struct amdxdna_drm_hwctx
 
 static_assert(sizeof(struct uc_health_info) == AMDXDNA_HWCTX_UC_HEALTH_BYTES);
 static_assert(AIE4_MPNPUFW_MAX_UC_COUNT == AMDXDNA_HWCTX_MAX_UC);
+/* Header before activity_counters is status + sample_state + timestamp_ms. */
+static_assert(offsetof(struct aie4_msg_get_aie_activity_counters_resp,
+		       activity_counters) == 16);
+static_assert(sizeof(struct aie4_msg_get_aie_activity_counters_resp) ==
+	      16 + AIE4_AIE_ACTIVITY_COUNTERS_MAX * sizeof(u64));
 
 u32 aie4_qos2dev_priority_band(u32 qos_priority)
 {

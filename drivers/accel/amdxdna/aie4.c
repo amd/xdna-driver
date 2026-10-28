@@ -8,6 +8,7 @@
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_cache.h>
 #include <drm/drm_drv.h>
+#include <linux/delay.h>
 #include <linux/pm_runtime.h>
 #include <linux/rcupdate.h>
 
@@ -288,6 +289,170 @@ static int aie4_query_resource_info(struct amdxdna_client *client,
 	return 0;
 }
 
+#define AIE4_AIE_LOAD_SAMPLE_INTERVAL_MS	2U
+#define AIE4_AIE_LOAD_SAMPLE_MAX_MS		1000U
+#define AIE4_ARRAY_MAX_CLOCK_HZ			1000000000ULL
+
+static int aie4_aie_load_from_samples(struct amdxdna_dev_hdl *ndev,
+				      const struct aie4_msg_get_aie_activity_counters_resp *first,
+				      const struct aie4_msg_get_aie_activity_counters_resp *second,
+				      struct amdxdna_drm_query_aie_load *load)
+{
+	const struct amdxdna_aie_activity *act = ndev->aie.xdna->dev_info->aie_activity;
+	u64 modulus;
+	u32 ncounters;
+	u64 max_safe_elapsed_ms;
+	u32 load_percent;
+	u64 denominator;
+	u64 aie_clk_hz;
+	u64 elapsed_ms;
+	u64 sum_delta;
+	u32 i;
+
+	if (!act || !act->counter_modulus || !act->counters ||
+	    act->counters > AIE4_AIE_ACTIVITY_COUNTERS_MAX)
+		return -EINVAL;
+
+	modulus = act->counter_modulus;
+	ncounters = act->counters;
+
+	if (second->timestamp_ms <= first->timestamp_ms) {
+		XDNA_ERR(ndev->aie.xdna,
+			 "timestamp did not advance (first=%llu second=%llu)",
+			 first->timestamp_ms, second->timestamp_ms);
+		return -EAGAIN;
+	}
+
+	elapsed_ms = second->timestamp_ms - first->timestamp_ms;
+
+	aie_clk_hz = ndev->dpm_clk_tbl[ndev->max_dpm_level].hclk;
+	if (aie_clk_hz)
+		aie_clk_hz *= 1000000ULL;
+	else
+		aie_clk_hz = AIE4_ARRAY_MAX_CLOCK_HZ;
+
+	max_safe_elapsed_ms = modulus / (aie_clk_hz / 1000ULL) / 2ULL;
+	if (elapsed_ms >= max_safe_elapsed_ms) {
+		XDNA_ERR(ndev->aie.xdna,
+			 "elapsed=%llu ms exceeds safe single-wrap window=%llu ms",
+			 elapsed_ms, max_safe_elapsed_ms);
+		return -ERANGE;
+	}
+
+	sum_delta = 0;
+	for (i = 0; i < ncounters; i++)
+		sum_delta += (second->activity_counters[i] + modulus -
+			      first->activity_counters[i]) % modulus;
+
+	denominator = elapsed_ms * (u64)act->hw_monitors * aie_clk_hz;
+	load_percent = denominator ?
+		(u32)min(sum_delta * 100000ULL / denominator, 100ULL) : 0;
+	load->load_percent = load_percent;
+	load->operations_per_second = elapsed_ms ? sum_delta * 1000ULL / elapsed_ms : 0;
+
+	return 0;
+}
+
+static int aie4_query_aie_load(struct amdxdna_client *client,
+			       struct amdxdna_drm_get_info *args)
+{
+	struct aie4_msg_get_aie_activity_counters_resp second = {};
+	struct aie4_msg_get_aie_activity_counters_resp first = {};
+	struct amdxdna_drm_query_aie_load __user *user_load;
+	struct amdxdna_drm_query_aie_load load = {};
+	const struct amdxdna_aie_activity *act;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	u32 counters;
+	u32 duration_ms;
+	u32 hdr_size;
+	u32 out_size;
+	int ret;
+
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
+	act = xdna->dev_info->aie_activity;
+	if (!act)
+		return -EOPNOTSUPP;
+
+	counters = act->counters;
+	if (!counters || counters > AIE4_AIE_ACTIVITY_COUNTERS_MAX)
+		return -EOPNOTSUPP;
+
+	hdr_size = offsetof(struct amdxdna_drm_query_aie_load, activity_counters);
+	out_size = hdr_size + counters * sizeof(u64);
+
+	if (args->buffer_size < hdr_size)
+		return -EINVAL;
+
+	if (args->buffer_size < out_size) {
+		args->buffer_size = out_size;
+		return -ENOSPC;
+	}
+	user_load = u64_to_user_ptr(args->buffer);
+	if (copy_from_user(&duration_ms, user_load, sizeof(duration_ms)))
+		return -EFAULT;
+
+	duration_ms = duration_ms ?: AIE4_AIE_LOAD_SAMPLE_INTERVAL_MS;
+	duration_ms = min(duration_ms, AIE4_AIE_LOAD_SAMPLE_MAX_MS);
+	load.sample_duration_ms = duration_ms;
+
+	ret = aie4_get_aie_activity_counters(ndev, &first);
+	if (ret)
+		return ret;
+
+	if (first.sample_state == AIE4_AIE_ACTIVITY_COUNTERS_STATE_RAIL_OFF) {
+		load.load_percent = 0;
+		load.timestamp_ms = first.timestamp_ms;
+		goto out;
+	}
+
+	if (first.sample_state != AIE4_AIE_ACTIVITY_COUNTERS_STATE_SAMPLED &&
+	    first.sample_state != AIE4_AIE_ACTIVITY_COUNTERS_STATE_RESET_SAMPLED) {
+		XDNA_WARN(xdna, "first activity counter sample unavailable (state=%u)",
+			  first.sample_state);
+		return -EIO;
+	}
+
+	mutex_unlock(&xdna->dev_lock);
+	msleep(duration_ms);
+	mutex_lock(&xdna->dev_lock);
+
+	ret = aie4_get_aie_activity_counters(ndev, &second);
+	if (ret)
+		return ret;
+
+	load.timestamp_ms = second.timestamp_ms;
+	load.num_activity_counters = counters;
+
+	if (second.sample_state == AIE4_AIE_ACTIVITY_COUNTERS_STATE_RAIL_OFF) {
+		load.load_percent = 0;
+		goto out;
+	}
+
+	if (second.sample_state != AIE4_AIE_ACTIVITY_COUNTERS_STATE_SAMPLED) {
+		XDNA_WARN(xdna, "second activity counter sample unavailable (state=%u)",
+			  second.sample_state);
+		return -EIO;
+	}
+
+	ret = aie4_aie_load_from_samples(ndev, &first, &second, &load);
+	if (ret)
+		return ret;
+
+out:
+	out_size = struct_size(&load, activity_counters, load.num_activity_counters);
+	if (copy_to_user(user_load, &load, hdr_size))
+		return -EFAULT;
+	if (load.num_activity_counters &&
+	    copy_to_user(user_load->activity_counters, second.activity_counters,
+			 load.num_activity_counters * sizeof(u64)))
+		return -EFAULT;
+
+	args->buffer_size = out_size;
+	return 0;
+}
+
 int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -343,6 +508,9 @@ int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *ar
 		break;
 	case DRM_AMDXDNA_GET_AUTO_COREDUMP:
 		ret = amdxdna_get_auto_coredump_mode(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_AIE_LOAD:
+		ret = aie4_query_aie_load(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

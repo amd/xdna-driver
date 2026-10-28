@@ -123,6 +123,21 @@ struct amdxdna_fw_feature_tbl {
 };
 
 /*
+ * Parameters for DRM_AMDXDNA_QUERY_AIE_LOAD. One instance per device family.
+ * @counters: counters firmware returns, at most AIE4_AIE_ACTIVITY_COUNTERS_MAX.
+ * @counter_modulus: wrap modulus of each counter.
+ * @hw_monitors: monitors in the utilization denominator.
+ * @resp_tail: extra bytes firmware appends after the counters. The mailbox
+ * response size has to include them.
+ */
+struct amdxdna_aie_activity {
+	u32 counters;
+	u64 counter_modulus;
+	u32 hw_monitors;
+	u32 resp_tail;
+};
+
+/*
  * struct amdxdna_dev_info - Device hardware information
  * Record device static information, like reg, mbox, PSP, SMU bar index
  */
@@ -157,6 +172,9 @@ struct amdxdna_dev_info {
 	/* Asynchronous error reporting data (per AIE generation). */
 	const struct aie_error_lut_set	*luts;
 	u32				async_max_status_code;
+
+	/* NULL when the device does not support DRM_AMDXDNA_QUERY_AIE_LOAD. */
+	const struct amdxdna_aie_activity *aie_activity;
 };
 
 struct amdxdna_carveout;
