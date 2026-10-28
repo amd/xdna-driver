@@ -9,46 +9,118 @@
  * npu12 DRAM work-buffer attach is not used: VE2 CERT has no such buffer, and
  * that opcode stays unimplemented.
  *
- * The ops below are the attachment to the shared aie4 core. Partition,
- * hardware-context, and command opcodes are not implemented yet, so those
- * calls return -EOPNOTSUPP. The doorbell hooks are present because aie4_ctx.c
- * calls them; they do nothing until the command path is added.
+ * The ops below are the attachment to the shared aie4 core, which runs the
+ * context and kernel-mode command path. The partition and hardware-context
+ * opcodes it sends are carried out by amdxdna_mailbox_ve2.c. The transport
+ * hooks here ring CERT through an AIE user event, and wake the aie4 cert_comp
+ * from the AIE partition's completion callback.
  */
 
 #include <drm/drm_drv.h>
+#include <drm/drm_gem.h>
 #include <drm/drm_managed.h>
 #include <linux/xarray.h>
 
 #include "aie4.h"
+#include "aie4_host_queue.h"
 #include "ve2.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_dpt.h"
 #include "amdxdna_drv.h"
+#include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_pm.h"
 
+/*
+ * Layout aie4_hwctx_umq_init() requires when hsa_level2_indirect is set.
+ * The KMQ shim passes no queue, so the driver allocates this buffer.
+ */
+static size_t ve2_hsa_queue_size(void)
+{
+	return sizeof(struct host_queue_header) +
+	       CTX_MAX_CMDS * sizeof(struct host_queue_packet) +
+	       CTX_MAX_CMDS * sizeof(struct host_queue_indirect_hdr) +
+	       CTX_MAX_CMDS * HSA_MAX_LEVEL2_INDIRECT_ENTRIES *
+	       sizeof(struct host_indirect_packet_data);
+}
+
+static int ve2_hsa_queue_alloc(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_drm_create_bo args = {
+		.type = AMDXDNA_BO_SHARE,
+		.size = ve2_hsa_queue_size(),
+	};
+	int ret;
+
+	ret = amdxdna_drm_create_bo_ioctl(&client->xdna->ddev, &args, client->filp);
+	if (ret)
+		return ret;
+
+	hwctx->umq_bo_hdl = args.handle;
+	return 0;
+}
+
+static void ve2_hsa_queue_free(struct amdxdna_hwctx *hwctx)
+{
+	if (hwctx->umq_bo_hdl != AMDXDNA_INVALID_BO_HANDLE)
+		drm_gem_handle_delete(hwctx->client->filp, hwctx->umq_bo_hdl);
+}
+
+static int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
+{
+	int ret;
+
+	ret = ve2_hsa_queue_alloc(hwctx);
+	if (ret)
+		return ret;
+
+	ret = aie4_hwctx_init(hwctx);
+	if (ret)
+		ve2_hsa_queue_free(hwctx);
+	return ret;
+}
+
+static void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
+{
+	aie4_hwctx_fini(hwctx);
+	ve2_hsa_queue_free(hwctx);
+}
+
+/* The doorbell is addressed by priv->hw_ctx_id; there is nothing to map. */
 int aie4_doorbell_setup(struct amdxdna_hwctx *hwctx,
 			const struct aie4_msg_create_hw_context_resp *resp)
 {
-	(void)hwctx;
-	(void)resp;
 	return 0;
 }
 
 void aie4_doorbell_ring(struct amdxdna_hwctx *hwctx)
 {
-	(void)hwctx;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	ret = ve2_mbox_ring_doorbell(ndev->mbox, hwctx->priv->hw_ctx_id);
+	if (ret)
+		XDNA_ERR(xdna, "ctx %s doorbell failed: %d", hwctx->name, ret);
+}
+
+static void ve2_cert_comp_notify(void *data)
+{
+	struct cert_comp *comp = data;
+
+	wake_up_all(&comp->waitq);
 }
 
 int aie4_request_notification(struct cert_comp *comp)
 {
-	/* No MSI-X or IPI on VE2. Completion is added with the command path. */
-	(void)comp;
-	return 0;
+	return ve2_mbox_attach_notify(comp->ndev->mbox, comp->msix_idx,
+				      ve2_cert_comp_notify, comp);
 }
 
 void aie4_free_notification(struct cert_comp *comp)
 {
+	ve2_mbox_detach_notify(comp->ndev->mbox, comp->msix_idx);
 }
 
 bool aie4_is_vf(struct amdxdna_dev_hdl *ndev)
@@ -206,8 +278,8 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.init			= ve2_init,
 	.fini			= ve2_fini,
 	.debugfs_init		= aie4_debugfs_init,
-	.hwctx_init		= aie4_hwctx_init,
-	.hwctx_fini		= aie4_hwctx_fini,
+	.hwctx_init		= ve2_hwctx_init,
+	.hwctx_fini		= ve2_hwctx_fini,
 	.hwctx_config		= aie4_hwctx_config,
 	.cmd_submit		= aie4_cmd_submit,
 	.cmd_wait		= aie4_cmd_wait,

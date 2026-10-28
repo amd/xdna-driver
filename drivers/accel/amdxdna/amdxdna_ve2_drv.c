@@ -122,7 +122,7 @@ static int amdxdna_ve2_probe(struct auxiliary_device *auxdev,
 	}
 
 	amdxdna_debugfs_init(xdna);
-	XDNA_INFO(xdna, "VE2 device probed");
+	XDNA_INFO(xdna, "VE2 device ready in interrupt mode");
 	return 0;
 
 failed_sysfs_fini:
