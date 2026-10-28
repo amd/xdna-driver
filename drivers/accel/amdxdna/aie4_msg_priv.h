@@ -587,8 +587,13 @@ struct aie4_msg_get_aie_activity_counters_req {
 	__u32 resv;
 } __packed;
 
-#define AIE4_AIE_ACTIVITY_COUNTERS		8
-#define AIE4_AIE_ACTIVITY_COUNTER_MODULUS	0xFFFFFFFF0ULL
+/*
+ * Largest activity-counter payload this response can hold. The live count,
+ * wrap modulus, and any bytes firmware appends after the counters come from
+ * struct amdxdna_dev_info. The mailbox response size must match firmware, so
+ * the sender trims the notify size to that device's payload.
+ */
+#define AIE4_AIE_ACTIVITY_COUNTERS_MAX		8
 
 enum aie4_aie_activity_counters_sample_state {
 	AIE4_AIE_ACTIVITY_COUNTERS_STATE_UNSPECIFIED,
@@ -602,7 +607,7 @@ struct aie4_msg_get_aie_activity_counters_resp {
 	enum aie4_msg_status status;
 	__u32 sample_state;
 	__u64 timestamp_ms;
-	__u64 activity_counters[AIE4_AIE_ACTIVITY_COUNTERS];
+	__u64 activity_counters[AIE4_AIE_ACTIVITY_COUNTERS_MAX];
 } __packed;
 
 /*
