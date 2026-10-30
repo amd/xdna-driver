@@ -1850,8 +1850,9 @@ std::vector<test_case> test_list {
   // test_case{ "AIE4 PF FLR", {},
     // TEST_POSITIVE, {npu3vf}, {amdxdna}, TEST_aie4_pf_flr_entry, {}
   // },
+  // Needs the native driver; not supported on the virtio-gpu guest.
   test_case{ "create user pointer bo from mapped bo", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, npu12}, {}, TEST_create_uptr_bo_from_mapped_bo, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, npu12}, {amdxdna}, TEST_create_uptr_bo_from_mapped_bo, {}
   },
   test_case{ "debug bo sync after suspend", {},
     TEST_POSITIVE, {npu1, npu4}, {amdxdna}, TEST_debug_bo_after_suspend, { 0x1000 }
