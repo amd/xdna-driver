@@ -76,6 +76,13 @@ const struct dpm_clk_freq npu3_dpm_clk_table[] = {
 	{ 0 }
 };
 
+/* AIE4 tile monitors: 8 counters, 36-bit modulus, 12 hardware monitors. */
+static const struct amdxdna_aie_activity npu3_aie_activity = {
+	.counters		= 8,
+	.counter_modulus	= 0xFFFFFFFF0ULL,
+	.hw_monitors		= 12,
+};
+
 static int npu3_set_dpm(struct aie_device *aie, u32 dpm_level)
 {
 	struct amdxdna_dev_hdl *ndev = aie->xdna->dev_handle;
@@ -181,6 +188,7 @@ const struct amdxdna_dev_info dev_npu3_pf_info = {
 	.ops			= &aie4_pf_ops,
 	.luts			= &aie4_error_luts,
 	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.aie_activity		= &npu3_aie_activity,
 };
 
 const struct amdxdna_dev_info dev_npu3_vf_info = {
@@ -211,6 +219,7 @@ const struct amdxdna_dev_info dev_npu3_classic_info = {
 	.ops			= &aie4_classic_ops,
 	.luts			= &aie4_error_luts,
 	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.aie_activity		= &npu3_aie_activity,
 };
 
 const struct amdxdna_dev_info dev_npu9_pf_info = {
@@ -226,6 +235,7 @@ const struct amdxdna_dev_info dev_npu9_pf_info = {
 	.ops			= &aie4_pf_ops,
 	.luts			= &aie4_error_luts,
 	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.aie_activity		= &npu3_aie_activity,
 };
 
 const struct amdxdna_dev_info dev_npu9_vf_info = {
@@ -256,6 +266,7 @@ const struct amdxdna_dev_info dev_npu9_classic_info = {
 	.ops			= &aie4_classic_ops,
 	.luts			= &aie4_error_luts,
 	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.aie_activity		= &npu3_aie_activity,
 };
 
 const struct amdxdna_dev_info dev_npu10_pf_info = {
@@ -271,6 +282,7 @@ const struct amdxdna_dev_info dev_npu10_pf_info = {
 	.ops			= &aie4_pf_ops,
 	.luts			= &aie4_error_luts,
 	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.aie_activity		= &npu3_aie_activity,
 };
 
 const struct amdxdna_dev_info dev_npu10_vf_info = {
@@ -301,6 +313,7 @@ const struct amdxdna_dev_info dev_npu10_classic_info = {
 	.ops			= &aie4_classic_ops,
 	.luts			= &aie4_error_luts,
 	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.aie_activity		= &npu3_aie_activity,
 };
 
 const struct amdxdna_dev_info dev_npu11_pf_info = {
@@ -316,6 +329,7 @@ const struct amdxdna_dev_info dev_npu11_pf_info = {
 	.ops			= &aie4_pf_ops,
 	.luts			= &aie4_error_luts,
 	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.aie_activity		= &npu3_aie_activity,
 };
 
 const struct amdxdna_dev_info dev_npu11_vf_info = {
@@ -346,4 +360,5 @@ const struct amdxdna_dev_info dev_npu11_classic_info = {
 	.ops			= &aie4_classic_ops,
 	.luts			= &aie4_error_luts,
 	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.aie_activity		= &npu3_aie_activity,
 };

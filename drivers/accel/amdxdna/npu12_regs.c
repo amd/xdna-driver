@@ -49,6 +49,17 @@ static const struct amdxdna_fw_feature_tbl npu12_cert_feature_table[] = {
 	{ 0 }
 };
 
+/*
+ * RPU aie2ps: one array-load accumulator, 40-bit wrap. Firmware appends two
+ * raw u32s after that counter; they are not reported.
+ */
+static const struct amdxdna_aie_activity npu12_aie_activity = {
+	.counters		= 1,
+	.counter_modulus	= 0x10000000000ULL,
+	.hw_monitors		= 1,
+	.resp_tail		= sizeof(u32) * 2,
+};
+
 const struct amdxdna_dev_info dev_npu12_info = {
 	.default_vbnv	= "RyzenAI-npu12-aie2ps",
 	.device_type	= AMDXDNA_DEV_TYPE_UMQ,
@@ -59,4 +70,5 @@ const struct amdxdna_dev_info dev_npu12_info = {
 	.cert_feature_tbl = npu12_cert_feature_table,
 	.luts			= &aie4_error_luts,
 	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.aie_activity		= &npu12_aie_activity,
 };
