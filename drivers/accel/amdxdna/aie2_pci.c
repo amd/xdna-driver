@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
 #include "drm/amdxdna_accel.h"
@@ -801,6 +801,40 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 	return 0;
 }
 
+static int aie2_query_aie_load(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
+	struct amdxdna_drm_query_aie_load __user *user_load;
+	struct amdxdna_drm_query_aie_load load = {};
+	struct amdxdna_sensors sensors;
+	u32 total_col;
+	u32 hdr_size;
+	u32 sum = 0;
+	int ret;
+	u32 i;
+
+	hdr_size = offsetof(struct amdxdna_drm_query_aie_load, activity_counters);
+	if (args->buffer_size < hdr_size)
+		return -EINVAL;
+
+	ret = amdxdna_get_sensors(&sensors);
+	if (ret)
+		return ret;
+
+	total_col = min_t(u32, ndev->total_col, AMDXDNA_NPU_MAX_PMF_COLUMNS);
+	for (i = 0; i < total_col; i++)
+		sum += sensors.npu_busy[i];
+
+	load.load_percent = total_col ? sum / total_col : 0;
+
+	user_load = u64_to_user_ptr(args->buffer);
+	if (copy_to_user(user_load, &load, hdr_size))
+		return -EFAULT;
+
+	args->buffer_size = hdr_size;
+	return 0;
+}
+
 static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -853,6 +887,9 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		break;
 	case DRM_AMDXDNA_GET_AUTO_COREDUMP:
 		ret = amdxdna_get_auto_coredump_mode(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_AIE_LOAD:
+		ret = aie2_query_aie_load(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
