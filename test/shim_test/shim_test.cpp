@@ -119,6 +119,7 @@ void TEST_dbgbuf_empty_slices(device::id_type, std::shared_ptr<device>&, arg_typ
 void TEST_npu_fw_time_monotonic(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_df_bw(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_ctx_hysteresis_set_get(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_dpm_config_read(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_aie4_flr(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_aie4_pf_flr(device::id_type, std::shared_ptr<device>&,
                       std::shared_ptr<device>&);
@@ -1841,6 +1842,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "ctx_switch_hysteresis_us: set/get round-trip", {},
     TEST_POSITIVE, {npu3}, {}, TEST_ctx_hysteresis_set_get, {}
+  },
+  test_case{ "dpm_config: DPM config read-back", {},
+    TEST_POSITIVE, {npu3}, {amdxdna}, TEST_dpm_config_read, {}
   },
   // Disable until fw FLR bug is fixed
   // test_case{ "AIE4 Classic/VF FLR then recovers hwctx", {},

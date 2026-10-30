@@ -976,6 +976,60 @@ int aie4_get_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 *timeout_us)
 	return 0;
 }
 
+int aie4_get_dpm_compute_params(struct amdxdna_dev_hdl *ndev,
+				struct aie4_msg_runtime_config_configure_dpm *cfg)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_dpm_compute, AIE4_MSG_OP_GET_RUNTIME_CONFIG);
+	u32 type = AIE4_RUNTIME_CONFIG_CONFIGURE_DPM;
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_CONFIGURE_DPM) ||
+	    !aie4_role_allowed(&ndev->aie, aie4_runtime_cfg_allow,
+			       ARRAY_SIZE(aie4_runtime_cfg_allow), type)) {
+		XDNA_DBG(ndev->aie.xdna, "runtime cfg %u not supported on this device", type);
+		return -EOPNOTSUPP;
+	}
+
+	req.type = type;
+
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Failed to get DPM compute params: %d", ret);
+		return ret;
+	}
+
+	*cfg = resp.cfg;
+
+	return 0;
+}
+
+int aie4_get_dpm_bw_params(struct amdxdna_dev_hdl *ndev,
+			   struct aie4_msg_runtime_config_configure_dpm_bw *cfg)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_dpm_bw, AIE4_MSG_OP_GET_RUNTIME_CONFIG);
+	u32 type = AIE4_RUNTIME_CONFIG_CONFIGURE_DPM_BW;
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_DPM_BW_BUSYNESS) ||
+	    !aie4_role_allowed(&ndev->aie, aie4_runtime_cfg_allow,
+			       ARRAY_SIZE(aie4_runtime_cfg_allow), type)) {
+		XDNA_DBG(ndev->aie.xdna, "runtime cfg %u not supported on this device", type);
+		return -EOPNOTSUPP;
+	}
+
+	req.type = type;
+
+	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Failed to get DPM BW params: %d", ret);
+		return ret;
+	}
+
+	*cfg = resp.cfg;
+
+	return 0;
+}
+
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
 		      struct amdxdna_msg_buf_hdl *buf_hdl, u8 level,
 		      size_t size, u32 *msi_idx, u32 *msi_address)

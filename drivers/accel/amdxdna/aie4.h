@@ -245,6 +245,10 @@ int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie4_configure_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u8 mode);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
 int aie4_get_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 *timeout_us);
+int aie4_get_dpm_compute_params(struct amdxdna_dev_hdl *ndev,
+				struct aie4_msg_runtime_config_configure_dpm *cfg);
+int aie4_get_dpm_bw_params(struct amdxdna_dev_hdl *ndev,
+			   struct aie4_msg_runtime_config_configure_dpm_bw *cfg);
 void aie4_set_dpm_cap_percent_table(struct amdxdna_dev_hdl *ndev);
 void aie4_set_dpm_compute_params(struct amdxdna_dev_hdl *ndev);
 void aie4_set_dpm_pwr_ovr_percent_table(struct amdxdna_dev_hdl *ndev);

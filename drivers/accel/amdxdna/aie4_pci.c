@@ -14,6 +14,7 @@
 #include <linux/interrupt.h>
 #include <linux/pci.h>
 #include <linux/rcupdate.h>
+#include <linux/seq_file.h>
 #include <linux/sizes.h>
 #include <linux/pm_runtime.h>
 
@@ -2630,6 +2631,66 @@ unlock:
 DEFINE_DEBUGFS_ATTRIBUTE(aie4_npufw_time_fops, aie4_npufw_time_get,
 			 NULL, "%llu\n");
 
+/*
+ * DPM activity monitor parameters currently in effect in firmware (read-only).
+ * The compute and BW configs are independent, so print whichever could be read
+ * and fail only if neither could.
+ */
+static int aie4_dpm_config_show(struct seq_file *m, void *unused)
+{
+	struct aie4_msg_runtime_config_configure_dpm_bw bw = {};
+	struct aie4_msg_runtime_config_configure_dpm dpm = {};
+	struct amdxdna_dev_hdl *ndev = m->private;
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret, ret_dpm = -EOPNOTSUPP, ret_bw = -EOPNOTSUPP;
+	int idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	mutex_lock(&xdna->dev_lock);
+
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto unlock;
+
+	if (AIE_FEATURE_ON(&ndev->aie, AIE4_CONFIGURE_DPM))
+		ret_dpm = aie4_get_dpm_compute_params(ndev, &dpm);
+	if (AIE_FEATURE_ON(&ndev->aie, AIE4_DPM_BW_BUSYNESS))
+		ret_bw = aie4_get_dpm_bw_params(ndev, &bw);
+
+	amdxdna_pm_suspend_put(xdna);
+
+	if (ret_dpm && ret_bw)
+		ret = ret_dpm != -EOPNOTSUPP ? ret_dpm : ret_bw;
+
+unlock:
+	mutex_unlock(&xdna->dev_lock);
+	drm_dev_exit(idx);
+
+	if (ret)
+		return ret;
+
+	if (!ret_dpm) {
+		seq_printf(m, "active_hysteresis_ms: %u\n", dpm.active_hysteresis_ms);
+		seq_printf(m, "sampling_window_ms: %u\n", dpm.sampling_window_ms);
+		seq_printf(m, "up_threshold: %u\n", dpm.up_threshold);
+		seq_printf(m, "down_threshold: %u\n", dpm.down_threshold);
+		seq_printf(m, "compute_sys_efficiency_percent: %u\n",
+			   dpm.compute_sys_efficiency_percent);
+		seq_printf(m, "bw_sys_efficiency_percent: %u\n",
+			   dpm.bw_sys_efficiency_percent);
+	}
+	if (!ret_bw) {
+		seq_printf(m, "bw_high_cac_threshold: %u\n", bw.bw_high_cac_threshold);
+		seq_printf(m, "bw_low_cac_threshold: %u\n", bw.bw_low_cac_threshold);
+		seq_printf(m, "bw_sampling_window_ms: %u\n", bw.bw_sampling_window_ms);
+	}
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(aie4_dpm_config);
+
 void aie4_debugfs_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -2664,6 +2725,18 @@ void aie4_debugfs_init(struct amdxdna_dev *xdna)
 		debugfs_create_file_unsafe("npu_fw_time", 0400,
 					   xdna->ddev.accel->debugfs_root, ndev,
 					   &aie4_npufw_time_fops);
+
+	/*
+	 * The driver programs and permits the DPM runtime configs only on the
+	 * PF and classic paths (see aie4_runtime_cfg_allow), so expose them
+	 * there alone.
+	 */
+	if (xdna->dev_info->ops != &aie4_vf_ops &&
+	    (AIE_FEATURE_ON(&ndev->aie, AIE4_CONFIGURE_DPM) ||
+	     AIE_FEATURE_ON(&ndev->aie, AIE4_DPM_BW_BUSYNESS)))
+		debugfs_create_file("dpm_config", 0400,
+				    xdna->ddev.accel->debugfs_root, ndev,
+				    &aie4_dpm_config_fops);
 }
 
 const struct amdxdna_dev_ops aie4_pf_ops = {
