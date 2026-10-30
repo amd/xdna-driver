@@ -56,6 +56,8 @@ struct driver_version {
 };
 
 driver_version current_drv;
+// Apply the hw/driver filters to tests given by ID or name too (-s)
+bool filter_named_tests = false;
 std::string cur_path;
 std::string xclbin_path;
 int base_write_speed;
@@ -140,6 +142,7 @@ usage(const std::string& prog)
   std::cout << "\nUsage: " << prog << " [options] [test case ID/name separated by spaces]\n";
   std::cout << "Options:\n";
   std::cout << "\t" << "-h" << ": print this help message and available test cases\n";
+  std::cout << "\t" << "-s" << ": skip tests given by ID or name that are not declared for the device\n";
   std::cout << "\t" << "-k" << ": evaluate test result based on driver version\n";
   std::cout << "\t" << "-x <xclbin_path>" << ": run test cases with specified xclbin file\n";
   std::cout << "Device node: <bus>/devices/<dev>/accel; PCI also drm/renderD* (virtio guest)\n";
@@ -1968,7 +1971,7 @@ run_all_test(std::vector<int>& tests)
   // Run specified tests
   for (auto id : tests) {
     const auto& t = test_list[id];
-    run_test(id, t, true, total_dev);
+    run_test(id, t, !filter_named_tests, total_dev);
     std::cout << std::endl;
   }
 }
@@ -2043,12 +2046,15 @@ main(int argc, char **argv)
   std::string program = std::filesystem::path(argv[0]).filename();
 
   int option;
-  while ((option = getopt(argc, argv, ":hx:k")) != -1) {
+  while ((option = getopt(argc, argv, ":hsx:k")) != -1) {
     switch (option) {
     case 'h':
       usage(program);
       print_available_tests();
       return 0;
+    case 's':
+      filter_named_tests = true;
+      break;
     case 'x': {
       std::ifstream xclbin(optarg);
       if (xclbin) {
