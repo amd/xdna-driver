@@ -1858,7 +1858,7 @@ std::vector<test_case> test_list {
     TEST_NEGATIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_write_to_readonly_uptr_bo, {}
   },
   test_case{ "create user pointer bo from mapped bo", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_create_uptr_bo_from_mapped_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_create_uptr_bo_from_mapped_bo, {}
   },
 };
 
