@@ -428,14 +428,14 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   }
 
   // Submit commands and wait for results
-  auto start_busy = get_npu_busy_time_ns();
   auto start = clk::now();
+  auto start_busy = get_npu_busy_time_ns();
   if (io_test_parameters.perf == IO_TEST_THRUPUT_PERF)
     io_test_cmd_submit_and_wait_thruput(hwq, total_hwq_submit, cmdlist_bos, bo_set, cmds_per_list);
   else
     io_test_cmd_submit_and_wait_latency(hwq, total_hwq_submit, cmdlist_bos, bo_set, cmds_per_list);
-  auto end = clk::now();
   auto end_busy = get_npu_busy_time_ns();
+  auto end = clk::now();
 
   // Verify preemption counters
   if (preemption_enabled) {
@@ -463,15 +463,15 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
 
   // Report the performance numbers
   if (io_test_parameters.perf != IO_TEST_NO_PERF) {
-    auto duration_us = std::chrono::duration_cast<us_t>(end - start).count();
-    auto busy_us = (end_busy - start_busy) / 1000;
-    auto cps = (total_hwq_submit * cmds_per_list * 1000000.0) / duration_us;
-    auto latency_us = 1000000.0 / cps;
+    auto duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    auto busy_ns = end_busy - start_busy;
+    auto cps = (total_hwq_submit * cmds_per_list * 1e9) / duration_ns;
+    auto latency_us = 1e6 / cps;
     std::cout << total_hwq_submit * cmds_per_list << " commands finished in "
-              << duration_us << " us, " << cmds_per_list << " commands per list, "
+              << duration_ns / 1000 << " us, " << cmds_per_list << " commands per list, "
               << cps << " Command/sec,"
               << " Average latency " << latency_us << " us,"
-              << " Device was " << busy_us * 100.0 / duration_us << "% busy"
+              << " Device was " << busy_ns * 100.0 / duration_ns << "% busy"
               << std::endl;
   }
 }
