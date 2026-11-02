@@ -73,6 +73,9 @@ public:
   void
   drv_ioctl(drv_ioctl_cmd cmd, void* arg) const;
 
+  bool
+  is_ptr_mapped_from_dev(const void *ptr) const;
+
   // Cache-maintain @bo's [offset, offset+size) for @dir. The concrete device
   // class knows whether and how: coherent devices no-op, x86 non-coherent
   // devices flush from user space, the non-coherent aarch64 platform routes it
