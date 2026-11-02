@@ -712,6 +712,11 @@ void xdna_mailbox_drain_channel(struct mailbox_channel *mailbox_chann)
 {
 }
 
+bool xdna_mailbox_channel_alive(struct mailbox_channel *mb_chann)
+{
+	return mb_chann && mb_chann->started;
+}
+
 int xdna_mailbox_send_msg(struct mailbox_channel *mailbox_chann,
 			  const struct xdna_mailbox_msg *msg)
 {

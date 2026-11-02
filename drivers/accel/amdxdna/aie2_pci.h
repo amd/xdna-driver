@@ -212,6 +212,7 @@ extern const struct amdxdna_dev_ops aie2_ops;
 
 int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev,
 		     enum rt_config_category category, u32 *val);
+bool aie2_mgmt_alive(struct amdxdna_dev_hdl *ndev);
 
 /* aie2 npu hw config */
 extern const struct dpm_clk_freq npu1_dpm_clk_table[];

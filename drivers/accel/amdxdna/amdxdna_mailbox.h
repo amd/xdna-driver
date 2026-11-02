@@ -154,6 +154,17 @@ void xdna_mailbox_stop_channel(struct mailbox_channel *mailbox_chann);
 void xdna_mailbox_drain_channel(struct mailbox_channel *mailbox_chann);
 
 /*
+ * xdna_mailbox_channel_alive() -- check whether a channel can still be used
+ *
+ * @mb_chann: the handle returned from xdna_mailbox_alloc_channel()
+ *
+ * Return: false while the transport refuses to send on the channel, true
+ * otherwise. The receive path puts a channel in bad state when it cannot
+ * handle a message, and sends stay refused until the channel is started again.
+ */
+bool xdna_mailbox_channel_alive(struct mailbox_channel *mb_chann);
+
+/*
  * xdna_mailbox_send_msg() -- Send a message
  *
  * @mailbox_chann: Mailbox channel handle
