@@ -513,6 +513,11 @@ void xdna_mailbox_drain_channel(struct mailbox_channel *mb_chann)
 	flush_work(&mb_chann->rx_work);
 }
 
+bool xdna_mailbox_channel_alive(struct mailbox_channel *mb_chann)
+{
+	return !READ_ONCE(mb_chann->bad_state);
+}
+
 int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 			  const struct xdna_mailbox_msg *msg)
 {

@@ -782,6 +782,11 @@ void xdna_mailbox_drain_channel(struct mailbox_channel *mailbox_chann)
 	flush_work(&mb->rx_work);
 }
 
+bool xdna_mailbox_channel_alive(struct mailbox_channel *mb_chann)
+{
+	return !READ_ONCE(mb_chann->mb->bad_state);
+}
+
 /*
  * Produce a command into the mgmt TX ring and raise the IPI.  There is no
  * TX-side completion tracking here; the sender already bounds the round

@@ -255,8 +255,23 @@ void aie2_hwctx_suspend(struct amdxdna_client *client)
 static int aie2_hwctx_resume_cb(struct amdxdna_hwctx *hwctx, void *arg)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	int ret;
 
-	return aie2_hwctx_restart(xdna, hwctx);
+	if (!aie2_mgmt_alive(xdna->dev_handle))
+		return -ENODEV;
+
+	/*
+	 * While firmware answers, a failed restart affects this context alone,
+	 * for example because its process unmapped the heap on the way out.
+	 * The context is left without a firmware context: its commands fail
+	 * and the next resume tries it again. aie2_hw_resume() fails the
+	 * resume if the restart took the management channel down.
+	 */
+	ret = aie2_hwctx_restart(xdna, hwctx);
+	if (ret)
+		XDNA_WARN(xdna, "%s not restarted, ret %d", hwctx->name, ret);
+
+	return 0;
 }
 
 int aie2_hwctx_resume(struct amdxdna_client *client)

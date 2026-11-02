@@ -483,6 +483,21 @@ static int aie2_hw_suspend(struct amdxdna_dev *xdna)
 	return 0;
 }
 
+/*
+ * A management message that times out destroys the channel, and the mailbox
+ * gives up on a channel it cannot read. Either way firmware can no longer be
+ * reached until the hardware is started again.
+ */
+bool aie2_mgmt_alive(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	return ndev->aie.mgmt_chann &&
+	       xdna_mailbox_channel_alive(ndev->aie.mgmt_chann);
+}
+
 static int aie2_hw_resume(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_client *client;
@@ -495,12 +510,21 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 	}
 
 	list_for_each_entry(client, &xdna->client_list, node) {
-		ret = aie2_hwctx_resume(client);
-		if (ret)
+		if (aie2_hwctx_resume(client))
 			break;
 	}
 
-	return ret;
+	if (!aie2_mgmt_alive(xdna->dev_handle)) {
+		/*
+		 * Runtime PM treats a device whose resume failed as suspended
+		 * and does not suspend it again, so stop the hardware here.
+		 */
+		XDNA_ERR(xdna, "Management channel lost, stopping hardware");
+		aie2_hw_suspend(xdna);
+		return -ENODEV;
+	}
+
+	return 0;
 }
 
 /*
