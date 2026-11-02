@@ -6,7 +6,13 @@
 #include "core/common/trace.h"
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <fcntl.h>
+#include <cstdint>
+#include <cstdlib>
+#include <fstream>
+#include <string>
 
 namespace {
 
@@ -132,6 +138,77 @@ get_pdrv() const
 {
   return m_driver;
 }
+
+bool
+platform_drv::
+is_ptr_mapped_from_dev(const void *ptr) const
+{
+  struct stat st;
+  if (fstat(dev_fd(), &st) != 0)
+    return false;
+
+  std::ifstream maps("/proc/self/maps");
+  if (!maps)
+    return false;
+
+  const auto addr = reinterpret_cast<std::uintptr_t>(ptr);
+  std::string line;
+
+  while (std::getline(maps, line)) {
+    const char *p = line.c_str();
+    char *endptr;
+
+    auto start = std::strtoull(p, &endptr, 16);
+    if (endptr == p || *endptr != '-')
+      continue;
+
+    p = endptr + 1;
+    auto end = std::strtoull(p, &endptr, 16);
+    if (endptr == p)
+      continue;
+
+    if (addr < start)
+      return false;
+
+    if (addr >= end)
+      continue;
+
+    // Skip permissions and offset.
+    p = endptr;
+    for (int i = 0; i < 2; ++i) {
+      while (*p == ' ' || *p == '\t')
+        ++p;
+      while (*p && *p != ' ' && *p != '\t')
+        ++p;
+    }
+
+    while (*p == ' ' || *p == '\t')
+      ++p;
+
+    // Parse major:minor.
+    auto dev_major = std::strtoull(p, &endptr, 16);
+    if (endptr == p || *endptr != ':')
+      return false;
+
+    p = endptr + 1;
+    auto dev_minor = std::strtoull(p, &endptr, 16);
+    if (endptr == p)
+      return false;
+
+    // Parse inode.
+    p = endptr;
+    auto inode = std::strtoull(p, &endptr, 10);
+    if (endptr == p)
+      return false;
+
+    return dev_major == major(st.st_dev) &&
+           dev_minor == minor(st.st_dev) &&
+           inode == st.st_ino;
+  }
+
+  return false;
+}
+
 
 void
 platform_drv::

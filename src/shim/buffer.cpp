@@ -359,6 +359,10 @@ buffer(const pdev& dev, size_t size, int type, void *uptr)
   // Based on the above reasons, we'll enforce the pointer to be page aligned.
   if (!is_page_aligned(m_uptr))
     shim_err(EINVAL, "User pointer %p must be page aligned.", m_uptr);
+  if (m_uptr && dev.is_ptr_mapped_from_dev(m_uptr))
+    shim_info("WARNING: Creating a userptr BO from an XDNA BO mmap "
+              "(%p) is deprecated and will not be supported "
+              "in the next release.", m_uptr);
   if (m_uptr && type != AMDXDNA_BO_SHARE)
     shim_err(EINVAL, "User pointer BO must be AMDXDNA_BO_SHARE type.");
 

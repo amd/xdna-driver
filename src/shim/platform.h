@@ -195,6 +195,9 @@ public:
   std::shared_ptr<const drv>
   get_pdrv() const;
 
+  bool
+  is_ptr_mapped_from_dev(const void *ptr) const;
+
   static int64_t
   timeout_ms2abs_ns(int64_t timeout_ms);
 

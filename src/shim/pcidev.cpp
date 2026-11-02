@@ -93,6 +93,13 @@ drv_ioctl(drv_ioctl_cmd cmd, void* arg) const
   m_driver->drv_ioctl(cmd, arg);
 }
 
+bool
+pdev::
+is_ptr_mapped_from_dev(const void *ptr) const
+{
+  return m_driver->is_ptr_mapped_from_dev(ptr);
+}
+
 std::shared_ptr<xrt_core::device>
 pdev::
 create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const
