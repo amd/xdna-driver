@@ -181,7 +181,9 @@ size_t
 hwctx::
 get_num_uc() const
 {
-  return m_col_cnt * 2;
+  // One CERT per column on a platform part. PCI NPU3 has two.
+  const size_t certs_per_col = m_device.is_platform_part() ? 1 : 2;
+  return m_col_cnt * certs_per_col;
 }
 
 xrt_core::cuidx_type
