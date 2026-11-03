@@ -30,6 +30,9 @@ struct amdxdna_dev_priv;
 /* Default context switch hysteresis timeout in microseconds. */
 #define AIE4_CTX_HYSTERESIS_US	1000
 
+/* Default CERT opcode deadlock interval in milliseconds. 0 disables it. */
+#define AIE4_CERT_TIMEOUT_MS	50
+
 struct cert_comp {
 	struct amdxdna_dev_hdl          *ndev;
 	u32                             msix_idx;
@@ -163,6 +166,14 @@ struct amdxdna_dev_hdl {
 	 */
 	u32				ctx_switch_hysteresis_us;
 
+	/*
+	 * CERT opcode deadlock interval in milliseconds. The platform device
+	 * programs it at firmware setup. Root can change it through debugfs.
+	 * 0 disables the checker. Other aie4 devices leave this at 0 until a
+	 * debugfs write succeeds.
+	 */
+	u32				cert_timeout_ms;
+
 	struct amdxdna_drm_query_firmware_version cert_version;
 };
 
@@ -244,6 +255,7 @@ int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie4_configure_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u8 mode);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
+int aie4_set_cert_timeout(struct amdxdna_dev_hdl *ndev, u32 timeout_ms);
 int aie4_get_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 *timeout_us);
 void aie4_set_dpm_cap_percent_table(struct amdxdna_dev_hdl *ndev);
 void aie4_set_dpm_compute_params(struct amdxdna_dev_hdl *ndev);

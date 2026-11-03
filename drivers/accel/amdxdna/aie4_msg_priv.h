@@ -123,6 +123,7 @@ struct aie4_msg_runtime_config_force_preemption {
 enum aie4_msg_runtime_config_type {
 	AIE4_RUNTIME_CONFIG_FORCE_PREEMPTION		= 0x1,
 	AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL		= 0x5,
+	AIE4_RUNTIME_CONFIG_CERT_TIMEOUT		= 0x6,
 	AIE4_RUNTIME_CONFIG_HWS_DEBUG_MODE		= 0xB,
 	AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS	= 0xD,
 	AIE4_RUNTIME_CONFIG_CONFIGURE_DPM		= 0xF,
@@ -207,6 +208,11 @@ struct aie4_msg_runtime_config_hws_debug_mode {
 	__u8	mode;
 	__u8	reserved;
 	__u16	ctx_id;
+} __packed;
+
+/* CERT opcode deadlock interval. 0 disables the checker. */
+struct aie4_msg_runtime_config_cert_timeout {
+	__u32 timeout_ms;
 } __packed;
 
 struct aie4_msg_set_runtime_cfg_req {

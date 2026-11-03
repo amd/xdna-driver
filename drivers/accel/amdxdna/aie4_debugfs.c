@@ -82,6 +82,49 @@ unlock:
 DEFINE_DEBUGFS_ATTRIBUTE(aie4_ctx_hysteresis_fops, aie4_ctx_hysteresis_get,
 			 aie4_ctx_hysteresis_set, "%llu\n");
 
+static int aie4_cert_timeout_get(void *data, u64 *val)
+{
+	struct amdxdna_dev_hdl *ndev = data;
+
+	*val = ndev->cert_timeout_ms;
+	return 0;
+}
+
+static int aie4_cert_timeout_set(void *data, u64 val)
+{
+	struct amdxdna_dev_hdl *ndev = data;
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret, idx;
+
+	if (val > U32_MAX)
+		return -EINVAL;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	mutex_lock(&xdna->dev_lock);
+
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto unlock;
+
+	ret = aie4_set_cert_timeout(ndev, (u32)val);
+	if (!ret)
+		ndev->cert_timeout_ms = (u32)val;
+
+	amdxdna_pm_suspend_put(xdna);
+
+unlock:
+	mutex_unlock(&xdna->dev_lock);
+	drm_dev_exit(idx);
+
+	return ret;
+}
+
+/* CERT opcode deadlock interval in milliseconds. 0 disables the checker. */
+DEFINE_DEBUGFS_ATTRIBUTE(aie4_cert_timeout_fops, aie4_cert_timeout_get,
+			 aie4_cert_timeout_set, "%llu\n");
+
 static int aie4_kernel_submit_get(void *data, u64 *val)
 {
 	struct amdxdna_dev_hdl *ndev = data;
@@ -126,4 +169,13 @@ void aie4_debugfs_init(struct amdxdna_dev *xdna)
 	debugfs_create_file_unsafe("ctx_switch_hysteresis_us", 0600,
 				   xdna->ddev.accel->debugfs_root, ndev,
 				   &aie4_ctx_hysteresis_fops);
+
+	/*
+	 * Programmed at setup on the platform device. A read elsewhere is 0.
+	 * A write sends runtime-config 0x6 and returns the firmware error
+	 * when that device does not implement it. 0 disables the checker.
+	 */
+	debugfs_create_file_unsafe("cert_timeout_ms", 0600,
+				   xdna->ddev.accel->debugfs_root, ndev,
+				   &aie4_cert_timeout_fops);
 }
