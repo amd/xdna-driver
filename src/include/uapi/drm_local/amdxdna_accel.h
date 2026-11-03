@@ -586,6 +586,7 @@ struct amdxdna_drm_get_resource_info {
 	__u64 npu_task_max;
 	__u64 npu_tops_curr;
 	__u64 npu_task_curr;
+	__u64 npu_curr_clk_max;
 };
 
 /**
