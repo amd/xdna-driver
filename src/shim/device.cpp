@@ -2778,6 +2778,16 @@ device::
   m_pdev.close();
 }
 
+bool
+device::
+is_platform_part() const
+{
+  /* Non-empty for an identified platform part: amd,xdna-<part>, or a VE2
+   * auxiliary device whose board device_id is a known part. PCI NPUs have
+   * no of_node part string. */
+  return !platform_device_id_str(get_pcidev(this)).empty();
+}
+
 const pdev&
 device::
 get_pdev() const
