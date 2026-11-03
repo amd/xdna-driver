@@ -64,8 +64,6 @@
 #define NPU4_SMU_BAR_BASE	MMNPU_APERTURE4_BASE
 #define NPU4_SRAM_BAR_BASE	MMNPU_APERTURE1_BASE
 
-#define NPU4_DPM_TOPS(ndev, hclk) (4096 * (ndev)->total_col * (hclk) / 1000000)
-
 const struct rt_config npu4_default_rt_cfg[] = {
 	{ 5, 1, AIE2_RT_CFG_INIT }, /* PDI APP LOAD MODE */
 	{ 10, 1, AIE2_RT_CFG_INIT }, /* DEBUG BUF */
@@ -120,8 +118,8 @@ static int npu4_set_dpm(struct aie_device *aie, u32 dpm_level)
 
 	aie->npuclk_freq = ndev->priv->dpm_clk_tbl[dpm_level].npuclk;
 	aie->hclk_freq = ndev->priv->dpm_clk_tbl[dpm_level].hclk;
-	aie->max_tops = NPU4_DPM_TOPS(ndev, ndev->priv->dpm_clk_tbl[ndev->max_dpm_level].hclk);
-	aie->curr_tops = NPU4_DPM_TOPS(ndev, aie->hclk_freq);
+	aie->max_tops = AIE_DPM_TOPS(ndev, ndev->priv->dpm_clk_tbl[ndev->max_dpm_level].hclk);
+	aie->curr_tops = AIE_DPM_TOPS(ndev, aie->hclk_freq);
 
 	XDNA_DBG(aie->xdna, "MP-NPU clock %d, H clock %d\n",
 		 aie->npuclk_freq, aie->hclk_freq);
@@ -132,16 +130,17 @@ static int npu4_set_dpm(struct aie_device *aie, u32 dpm_level)
 static int npu4_update_counters(struct aie_device *aie)
 {
 	struct amdxdna_dev_hdl *ndev = aie->xdna->dev_handle;
-	struct amdxdna_sensors npu_metrics;
+	struct amdxdna_sensors sensors;
 	int ret;
 
-	ret = amdxdna_get_sensors(&npu_metrics);
-	if (ret)
-		return ret;
-
-	aie->npuclk_freq = npu_metrics.mpnpuclk_freq;
-	aie->hclk_freq = npu_metrics.npuclk_freq;
-	aie->curr_tops = NPU4_DPM_TOPS(ndev, aie->hclk_freq);
+	ret = amdxdna_get_sensors(&sensors);
+	if (!ret && sensors.npuclk_freq && sensors.mpnpuclk_freq) {
+		aie->npuclk_freq = sensors.mpnpuclk_freq;
+		aie->hclk_freq = sensors.npuclk_freq;
+	} else {
+		aie->npuclk_freq = ndev->priv->dpm_clk_tbl[ndev->dpm_level].npuclk;
+		aie->hclk_freq = ndev->priv->dpm_clk_tbl[ndev->dpm_level].hclk;
+	}
 
 	return 0;
 }

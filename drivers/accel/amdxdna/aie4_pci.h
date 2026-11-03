@@ -38,6 +38,8 @@ static inline int aie4_create_vfs(struct amdxdna_dev_hdl *ndev, int num_vfs) { r
 static inline int aie4_vfs_alive(struct amdxdna_dev *xdna) { return 0; }
 #endif
 
+void aie4_max_clks_at_curr_dpm(struct amdxdna_dev_hdl *ndev, u32 *npuclk, u32 *hclk);
+
 extern const struct amdxdna_dev_ops aie4_pf_ops;
 extern const struct amdxdna_dev_ops aie4_vf_ops;
 extern const struct amdxdna_dev_ops aie4_classic_ops;

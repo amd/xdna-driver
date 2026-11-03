@@ -88,6 +88,8 @@ struct aie_hw_ops {
 	int (*update_counters)(struct aie_device *aie);
 };
 
+#define AIE_DPM_TOPS(ndev, hclk) (4096 * (ndev)->total_col * (hclk) / 1000000)
+
 #define aie_update_counters(ndev)					\
 ({									\
 	typeof(ndev) _ndev = ndev;					\

@@ -53,9 +53,10 @@
  *       cursor predates a ring restart
  * 0.18: Report the non-coherent UMQ device type AMDXDNA_DEV_TYPE_UMQ_NONCOHERENT
  *       via the device_type sysfs
+ * 0.19: Add npu_curr_clk_max to amdxdna_drm_get_resource_info
  */
 #define AMDXDNA_DRIVER_MAJOR		0
-#define AMDXDNA_DRIVER_MINOR		18
+#define AMDXDNA_DRIVER_MINOR		19
 
 #ifndef AMDXDNA_NPU3A
 static int amdxdna_sva_init(struct amdxdna_client *client)

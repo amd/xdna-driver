@@ -9,6 +9,7 @@
 #include "aie4_msg_priv.h"
 #include "aie4_pci.h"
 #include "amdxdna_pci_drv.h"
+#include "amdxdna_sensors.h"
 
 #define NPU3_MBOX_BAR		0
 
@@ -37,8 +38,6 @@
 #define MP1_C2PMSG_59_ALT_1     0x3B109EC
 #define MP1_C2PMSG_61_ALT_1     0x3B109F4
 #define MP1_C2PMSG_60_ALT_1     0x3B109F0
-
-#define NPU3_DPM_TOPS(ndev, hclk) (4096 * (ndev)->total_col * (hclk) / 1000000)
 
 static const struct amdxdna_fw_feature_tbl npu3_fw_feature_table[] = {
 	{ .major = 6, .min_minor = 0 },
@@ -100,8 +99,8 @@ static int npu3_set_dpm(struct aie_device *aie, u32 dpm_level)
 
 	aie->npuclk_freq = ndev->priv->dpm_clk_tbl[dpm_level].npuclk;
 	aie->hclk_freq = ndev->priv->dpm_clk_tbl[dpm_level].hclk;
-	aie->max_tops = NPU3_DPM_TOPS(ndev, ndev->priv->dpm_clk_tbl[max_dpm_level].hclk);
-	aie->curr_tops = NPU3_DPM_TOPS(ndev, aie->hclk_freq);
+	aie->max_tops = AIE_DPM_TOPS(ndev, ndev->priv->dpm_clk_tbl[max_dpm_level].hclk);
+	aie->curr_tops = AIE_DPM_TOPS(ndev, aie->hclk_freq);
 
 	XDNA_DBG(aie->xdna, "MP-NPU clock %d, H clock %d\n",
 		 aie->npuclk_freq, aie->hclk_freq);
@@ -113,21 +112,19 @@ static int npu3_set_dpm(struct aie_device *aie, u32 dpm_level)
 static int npu3_update_counters(struct aie_device *aie)
 {
 	struct amdxdna_dev_hdl *ndev = aie->xdna->dev_handle;
-	u32 aieclk_level, npuhclk_level;
+	struct amdxdna_sensors sensors;
+	u32 npuclk, hclk;
 	int ret;
 
-	ret = aie4_query_dpm_level(ndev, &aieclk_level, &npuhclk_level);
-	if (!ret) {
-		aie->npuclk_freq = ndev->dpm_clk_tbl[aieclk_level].npuclk;
-		aie->hclk_freq = ndev->dpm_clk_tbl[npuhclk_level].hclk;
-		aie->max_tops = NPU3_DPM_TOPS(ndev, ndev->dpm_clk_tbl[ndev->max_dpm_level].hclk);
-		if (!aie->hclk_freq)
-			XDNA_WARN(aie->xdna, "dpm freq table not populated, clk is 0");
+	ret = amdxdna_get_sensors(&sensors);
+	if (!ret && sensors.npuclk_freq && sensors.mpnpuclk_freq) {
+		aie->npuclk_freq = sensors.mpnpuclk_freq;
+		aie->hclk_freq = sensors.npuclk_freq;
 	} else {
-		XDNA_WARN(aie->xdna, "cannot get dpm level from fw, using default");
+		aie4_max_clks_at_curr_dpm(ndev, &npuclk, &hclk);
+		aie->npuclk_freq = npuclk;
+		aie->hclk_freq = hclk;
 	}
-
-	aie->curr_tops = NPU3_DPM_TOPS(ndev, aie->hclk_freq);
 
 	return 0;
 }
