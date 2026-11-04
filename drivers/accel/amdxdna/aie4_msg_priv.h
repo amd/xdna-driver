@@ -63,11 +63,14 @@ enum aie4_msg_opcode {
 
 	/*
 	 * Async event carrying only ids, in the mailbox message itself. Sent
-	 * with message ID 0, no response expected. Firmware
+	 * with message ID AIE4_ASYNC_MSG_ID, no response expected. Firmware
 	 * NPU_MSG_OP_FIRMWARE_EVENT.
 	 */
 	AIE4_MSG_OP_ASYNC_EVENT_NOTE                 = 0x10012,
 };
+
+/* Firmware uses this ID for every message it sends on its own. */
+#define AIE4_ASYNC_MSG_ID	0U
 
 enum aie4_msg_status {
 	AIE4_MSG_STATUS_SUCCESS = 0x0,

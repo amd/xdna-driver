@@ -399,19 +399,26 @@ static void aie4_async_note_worker(struct work_struct *work)
 
 /*
  * Channel async callback for firmware-initiated messages. Runs in the mailbox
- * RX worker, so it must not block and defers the real work. Always returns 0 so
- * a notification can never wedge the channel.
+ * RX worker, so it must not block and defers the real work. Returns -ENOMSG for
+ * any ID other than AIE4_ASYNC_MSG_ID, and 0 otherwise so a notification can
+ * never wedge the channel.
  */
-int aie4_mgmt_async_event_handler(void *handle, u32 opcode, void __iomem *data, size_t size)
+int aie4_mgmt_async_event_handler(void *handle, u32 msg_id, u32 opcode,
+				  void __iomem *data, size_t size)
 {
 	struct aie4_msg_async_note __iomem *msg = data;
 	struct amdxdna_dev_hdl *ndev = handle;
 	struct aie_device *aie = &ndev->aie;
-	struct amdxdna_dev *xdna = aie->xdna;
 	struct aie4_async_note_work *ev;
+	struct amdxdna_dev *xdna;
 	u32 async_event_type = 0;
 	u32 ctx_id = 0;
 	u32 event_id;
+
+	xdna = aie->xdna;
+
+	if (msg_id != AIE4_ASYNC_MSG_ID)
+		return -ENOMSG;
 
 	if (opcode != AIE4_MSG_OP_ASYNC_EVENT_NOTE) {
 		XDNA_WARN(xdna, "Unhandled async mailbox opcode 0x%x", opcode);

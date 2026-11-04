@@ -161,7 +161,7 @@ struct mailbox {
 struct mailbox_channel {
 	struct mailbox		*mb;
 
-	/* Firmware-initiated (id 0) message sink, installed by aie4_mailbox_init() */
+	/* Firmware-initiated message sink, installed by aie4_mailbox_init() */
 	void			*async_handle;
 	xdna_mailbox_async_cb_t	async_cb;
 };
@@ -336,11 +336,12 @@ static int plat_rings_init(struct mailbox *mb)
  */
 static void plat_mailbox_drain(struct mailbox *mb)
 {
-	struct plat_inflight_msg *ifm;
-	struct mailbox_channel *chann;
 	struct plat_ring_msg_hdr msg_hdr;
 	u8 buf[PLAT_RING_MAX_RESP_SIZE];
+	struct plat_inflight_msg *ifm;
+	struct mailbox_channel *chann;
 	int payload_size;
+	int ret;
 
 	/*
 	 * NULL means the channel is not live: start_channel() has not installed
@@ -384,30 +385,24 @@ static void plat_mailbox_drain(struct mailbox *mb)
 		}
 
 		/*
-		 * Id 0 marks a firmware-initiated message, routed to the async
-		 * sink instead of the inflight table.  buf is a normal kernel
-		 * buffer; the __iomem __force cast only satisfies the shared
-		 * callback signature, which is typed for transports that read
-		 * responses straight out of a mapping.
+		 * A message that answers no inflight command goes to the async
+		 * sink, which decides whether firmware sent it on its own.  buf
+		 * is a normal kernel buffer; the __iomem __force cast only
+		 * satisfies the shared callback signature, which is typed for
+		 * transports that read responses straight out of a mapping.
 		 */
-		if (!msg_hdr.id) {
-			if (chann->async_cb)
-				chann->async_cb(chann->async_handle,
-						msg_hdr.opcode,
-						(void __iomem __force *)buf,
-						payload_size);
-			else
-				XDNA_WARN(mb->xdna,
-					  "Async mgmt message opcode 0x%x with no handler",
-					  msg_hdr.opcode);
-			continue;
-		}
-
 		ifm = xa_erase(&mb->msg_xa, msg_hdr.id);
 		if (!ifm) {
-			XDNA_DBG(mb->xdna,
-				 "Unexpected mgmt response id %u opcode 0x%x",
-				 msg_hdr.id, msg_hdr.opcode);
+			ret = -ENOMSG;
+			if (chann->async_cb)
+				ret = chann->async_cb(chann->async_handle,
+						      msg_hdr.id, msg_hdr.opcode,
+						      (void __iomem __force *)buf,
+						      payload_size);
+			if (ret == -ENOMSG)
+				XDNA_DBG(mb->xdna,
+					 "Unexpected mgmt response id %u opcode 0x%x",
+					 msg_hdr.id, msg_hdr.opcode);
 			continue;
 		}
 
@@ -722,9 +717,9 @@ int xdna_mailbox_start_channel(struct mailbox_channel *mb_chann,
 }
 
 /*
- * Register the sink for firmware-initiated (id 0) messages.  Unlocked: the
- * caller runs this before xdna_mailbox_start_channel(), and the RX drain --
- * the only reader -- returns early while mgmt_chann is NULL.
+ * Register the sink for firmware-initiated messages.  Unlocked: the caller
+ * runs this before xdna_mailbox_start_channel(), and the RX drain -- the only
+ * reader -- returns early while mgmt_chann is NULL.
  */
 void xdna_mailbox_set_async_cb(struct mailbox_channel *mailbox_chann,
 			       void *async_handle, xdna_mailbox_async_cb_t async_cb)

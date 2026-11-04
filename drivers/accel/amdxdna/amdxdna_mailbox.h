@@ -10,8 +10,14 @@ struct drm_device;
 struct mailbox;
 struct mailbox_channel;
 
-/* Handler for firmware-initiated messages, sent with ID 0, routed by @opcode. */
-typedef int (*xdna_mailbox_async_cb_t)(void *handle, u32 opcode, void __iomem *data, size_t size);
+/*
+ * Handler for firmware-initiated messages, routed by @opcode. The mailbox
+ * calls it for every message that is not a reply. It returns -ENOMSG if
+ * @msg_id is not an ID its firmware uses for the messages it sends on its
+ * own, and the mailbox then handles the message as one with a bad ID.
+ */
+typedef int (*xdna_mailbox_async_cb_t)(void *handle, u32 msg_id, u32 opcode,
+				       void __iomem *data, size_t size);
 
 /*
  * xdna_mailbox_msg - message struct
@@ -111,9 +117,12 @@ xdna_mailbox_start_channel(struct mailbox_channel *mb_chann,
  *
  * @mailbox_chann: the handle returned from xdna_mailbox_alloc_channel()
  * @async_handle: opaque handle passed back to @async_cb
- * @async_cb: callback invoked for firmware-initiated messages, which arrive
- *            with message ID 0, routed by @opcode. Must be non-blocking; its
- *            return value is advisory only and never tears the channel down.
+ * @async_cb: callback invoked with the message ID of every message that is not
+ *            a reply, routed by @opcode. It returns -ENOMSG for an ID its
+ *            firmware does not use for the messages it sends on its own,
+ *            which the mailbox then handles as a bad ID. Must be
+ *            non-blocking; any other return value is advisory only and never
+ *            tears the channel down.
  */
 void xdna_mailbox_set_async_cb(struct mailbox_channel *mailbox_chann, void *async_handle,
 			       xdna_mailbox_async_cb_t async_cb);
