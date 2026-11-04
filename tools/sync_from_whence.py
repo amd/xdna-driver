@@ -320,8 +320,8 @@ def prune_device_dir(out_dir, rel_dir):
     ".sbin" blobs in each amdnpu/<dir>/. The packaging glob (pkg.cmake,
     PATTERN "*sbin*") would then ship every stale version into the plugin .deb.
 
-    KEEP set for the directory = { the stable ".dev.sbin" alias symlink names
-    present (npu.dev.sbin, cert.dev.sbin) } union { the basenames of the
+    KEEP set for the directory = { the stable ".sbin" alias symlink names
+    present (npu.dev.sbin, cert.rsa.sbin, ...) } union { the basenames of the
     versioned files those aliases currently resolve to }. Every other plain
     regular file is a stale/superseded versioned ".sbin" left over from an
     earlier sync and is removed. Symlinks (the stable aliases and any device-
@@ -345,10 +345,11 @@ def prune_device_dir(out_dir, rel_dir):
     keep = set()
     for name in os.listdir(dir_path):
         full = os.path.join(dir_path, name)
-        # Stable aliases are symlinks named "*.dev.sbin" (npu.dev.sbin,
-        # cert.dev.sbin). Keep the alias itself and the versioned file it
-        # currently resolves to (readlink, so we never follow the link).
-        if os.path.islink(full) and name.endswith(".dev.sbin"):
+        # Stable aliases are symlinks named "*.sbin" (npu.dev.sbin,
+        # npu.rsa.sbin, npu.lms.sbin, ...). Keep the alias itself and the
+        # versioned file it currently resolves to (readlink, so we never
+        # follow the link).
+        if os.path.islink(full) and name.endswith(".sbin"):
             keep.add(name)
             target = os.readlink(full)
             # Only protect the versioned blob when it lives in this same

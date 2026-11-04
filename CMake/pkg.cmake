@@ -111,6 +111,7 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/firmware/
   COMPONENT ${XDNA_COMPONENT}
   FILES_MATCHING
   PATTERN "*.sbin*"
+  PATTERN "*.mbin*"
   PATTERN "download_raw" EXCLUDE
   )
 
