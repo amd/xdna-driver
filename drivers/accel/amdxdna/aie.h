@@ -211,6 +211,7 @@ void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl);
 
 /* aie_psp.c */
 struct psp_device *aiem_psp_create(struct drm_device *ddev, struct psp_config *conf);
+void aiem_psp_destroy(struct psp_device *psp);
 int aie_psp_start(struct psp_device *psp);
 void aie_psp_stop(struct psp_device *psp);
 int aie_psp_waitmode_poll(struct psp_device *psp);
