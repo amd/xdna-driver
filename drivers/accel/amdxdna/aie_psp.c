@@ -247,3 +247,16 @@ done:
 
 	return psp;
 }
+
+/* Only for a PSP whose firmware was never started, so no buffer is in use */
+void aiem_psp_destroy(struct psp_device *psp)
+{
+	struct drm_device *ddev = psp->ddev;
+
+	drmm_release_action(ddev, amdxdna_xen_bufs_drmm_release, &psp->xen_mgr);
+	if (!amdxdna_is_xen_initial_pvh_domain()) {
+		drmm_kfree(ddev, psp->certfw_buffer);
+		drmm_kfree(ddev, psp->fw_buffer);
+	}
+	drmm_kfree(ddev, psp);
+}

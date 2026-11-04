@@ -884,6 +884,7 @@ static void aie4_classic_hw_stop(struct amdxdna_dev_hdl *ndev)
 }
 
 static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
+				 const char *npufw_name, const char *certfw_name,
 				 const struct firmware **npufw,
 				 const struct firmware **certfw)
 {
@@ -893,7 +894,7 @@ static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 	int ret;
 
 	ret = snprintf(fw_name, sizeof(fw_name), "amdnpu/%04x_%02x/%s",
-		       pdev->device, pdev->revision, ndev->priv->npufw_path);
+		       pdev->device, pdev->revision, npufw_name);
 	if (ret >= sizeof(fw_name)) {
 		XDNA_ERR(xdna, "npu firmware path is truncated");
 		return -EINVAL;
@@ -901,12 +902,12 @@ static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 
 	ret = request_firmware(npufw, fw_name, &pdev->dev);
 	if (ret) {
-		XDNA_ERR(xdna, "failed to request_firmware %s, ret %d", fw_name, ret);
+		XDNA_DBG(xdna, "no firmware %s, ret %d", fw_name, ret);
 		return ret;
 	}
 
 	ret = snprintf(fw_name, sizeof(fw_name), "amdnpu/%04x_%02x/%s",
-		       pdev->device, pdev->revision, ndev->priv->certfw_path);
+		       pdev->device, pdev->revision, certfw_name);
 	if (ret >= sizeof(fw_name)) {
 		XDNA_ERR(xdna, "cert firmware path is truncated");
 		ret = -EINVAL;
@@ -915,7 +916,7 @@ static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 
 	ret = request_firmware(certfw, fw_name, &pdev->dev);
 	if (ret) {
-		XDNA_ERR(xdna, "failed to request_firmware %s, ret %d", fw_name, ret);
+		XDNA_INFO(xdna, "no firmware file %s found", fw_name);
 		goto release_npufw;
 	}
 
@@ -943,15 +944,20 @@ static void aie4_release_firmware(struct amdxdna_dev_hdl *ndev,
 	release_firmware(npufw);
 }
 
-static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
-				 const struct firmware *npufw,
-				 const struct firmware *certfw,
-				 void __iomem *tbl[PCI_NUM_RESOURCES])
+static struct psp_device *aie4_create_psp(struct amdxdna_dev_hdl *ndev,
+					  const char *npufw_name,
+					  const char *certfw_name,
+					  void __iomem *tbl[PCI_NUM_RESOURCES])
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	struct smu_config smu_conf = {};
+	const struct firmware *npufw, *certfw;
 	struct psp_config psp_conf;
-	int i;
+	struct psp_device *psp;
+	int ret, i;
+
+	ret = aie4_request_firmware(ndev, npufw_name, certfw_name, &npufw, &certfw);
+	if (ret)
+		return ERR_PTR(ret);
 
 	psp_conf.fw_size = npufw->size;
 	psp_conf.fw_buf = npufw->data;
@@ -961,11 +967,39 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	psp_conf.notify_val = PSP_NOTIFY_INTR;
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(ndev, i)] + PSP_REG_OFF(ndev, i);
-	ndev->aie.psp_hdl = aiem_psp_create(&xdna->ddev, &psp_conf);
-	if (!ndev->aie.psp_hdl) {
+	psp = aiem_psp_create(&xdna->ddev, &psp_conf);
+	aie4_release_firmware(ndev, npufw, certfw);
+	if (!psp) {
 		XDNA_ERR(xdna, "failed to create psp");
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 	}
+
+	return psp;
+}
+
+/* Firmware images, tried in this order: DEV, RSA, LMS signed */
+static const struct {
+	const char	*npufw;
+	const char	*certfw;
+} aie4_fw_images[] = {
+	{ "npu.dev.sbin", "cert.dev.sbin" },
+	{ "npu.rsa.sbin", "cert.rsa.sbin" },
+	{ "npu.lms.sbin", "cert.lms.sbin" },
+};
+
+/*
+ * Create the SMU, find the first image the PSP starts and keep its PSP
+ * in ndev->aie.psp_hdl for aie4_fw_load(). The SMU is not powered off
+ * between tries. The started firmware is left running, so probe skips
+ * aie4_fw_load().
+ */
+static int aie4_select_fw(struct amdxdna_dev_hdl *ndev,
+			  void __iomem *tbl[PCI_NUM_RESOURCES])
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct smu_config smu_conf = {};
+	struct psp_device *psp;
+	int ret, i;
 
 	for (i = 0; i < SMU_MAX_REGS; i++)
 		smu_conf.smu_regs[i] = tbl[SMU_REG_BAR(ndev, i)] + SMU_REG_OFF(ndev, i);
@@ -975,7 +1009,48 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 		return -ENOMEM;
 	}
 
-	return 0;
+	/*
+	 * Probe only: power the SMU on once, then try each firmware image as a
+	 * fallback. While the SMU is on, the PSP rejects an image that does not
+	 * match this platform, and the next one is tried. On success, the
+	 * firmware is up and running when this function returns.
+	 */
+	ret = aie_smu_init(ndev->aie.smu_hdl);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to init smu, ret %d", ret);
+		return ret;
+	}
+
+	ret = -ENOENT;
+	for (i = 0; i < ARRAY_SIZE(aie4_fw_images); i++) {
+		psp = aie4_create_psp(ndev, aie4_fw_images[i].npufw,
+				      aie4_fw_images[i].certfw, tbl);
+		if (IS_ERR(psp)) {
+			/* A missing image must not hide why an earlier one failed */
+			if (PTR_ERR(psp) != -ENOENT)
+				ret = PTR_ERR(psp);
+			if (PTR_ERR(psp) == -ENOMEM)
+				break;
+			continue;
+		}
+
+		ret = aie_psp_start(psp);
+		if (!ret) {
+			XDNA_INFO(xdna, "firmware %s started", aie4_fw_images[i].npufw);
+			ndev->aie.psp_hdl = psp;
+			return 0;
+		}
+		/* A timed out command may still be reading the buffers */
+		if (ret != -EIO)
+			break;
+		aiem_psp_destroy(psp);
+		XDNA_INFO(xdna, "%s is not for this platform, trying the next firmware",
+			  aie4_fw_images[i].npufw);
+	}
+
+	XDNA_ERR(xdna, "no working NPU firmware found, ret %d", ret);
+	aie_smu_fini(ndev->aie.smu_hdl);
+	return ret;
 }
 
 static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
@@ -1037,21 +1112,16 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 
 	pci_set_master(pdev);
 
-	if (ndev->priv->npufw_path && ndev->priv->certfw_path) {
-		const struct firmware *npufw = NULL, *certfw = NULL;
-
-		ret = aie4_request_firmware(ndev, &npufw, &certfw);
-		if (ret)
-			return ret;
-		ret = aie4_prepare_firmware(ndev, npufw, certfw, tbl);
-		aie4_release_firmware(ndev, npufw, certfw);
-		if (ret)
-			return ret;
-	}
-
 	ret = aie4_irq_init(xdna);
 	if (ret)
 		return ret;
+
+	/* Leaves the firmware running; probe skips aie4_fw_load() */
+	if (ndev->priv->npufw_path && ndev->priv->certfw_path) {
+		ret = aie4_select_fw(ndev, tbl);
+		if (ret)
+			return ret;
+	}
 
 	amdxdna_vbnv_init(xdna);
 
@@ -2234,16 +2304,18 @@ static int aie4_pf_init(struct amdxdna_dev *xdna)
 
 	ret = aie4_alloc_work_buffer(xdna->dev_handle);
 	if (ret)
-		return ret;
+		goto fw_unload;
 
-	ret = aie4_pf_hw_start(xdna->dev_handle);
+	/* aie4_select_fw() left the firmware running, so skip aie4_fw_load() */
+	ret = aie4_pf_hw_restart(xdna->dev_handle);
 	if (ret)
-		goto free_work_buf;
+		goto fw_unload;
 
 	aie4_xdna_init(xdna);
 	return 0;
 
-free_work_buf:
+fw_unload:
+	aie4_fw_unload(xdna->dev_handle);
 	aie4_free_work_buffer(xdna->dev_handle);
 	return ret;
 }
@@ -2274,16 +2346,18 @@ static int aie4_classic_init(struct amdxdna_dev *xdna)
 
 	ret = aie4_alloc_work_buffer(xdna->dev_handle);
 	if (ret)
-		return ret;
+		goto fw_unload;
 
-	ret = aie4_classic_hw_start(xdna->dev_handle);
+	/* aie4_select_fw() left the firmware running, so skip aie4_fw_load() */
+	ret = aie4_classic_hw_restart(xdna->dev_handle);
 	if (ret)
-		goto free_work_buf;
+		goto fw_unload;
 
 	aie4_xdna_init(xdna);
 	return 0;
 
-free_work_buf:
+fw_unload:
+	aie4_fw_unload(xdna->dev_handle);
 	aie4_free_work_buffer(xdna->dev_handle);
 	return ret;
 }
