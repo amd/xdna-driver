@@ -380,6 +380,9 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto disable_dev;
 	}
 
+	/* Firmware-initiated message IDs start at AIE2_ASYNC_MSG_START_ID. */
+	xdna_mailbox_set_async_cb(ndev->aie.mgmt_chann, ndev, aie2_mgmt_async_event_handler);
+
 	ret = aie_smu_init(ndev->aie.smu_hdl);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to init smu, ret %d", ret);
