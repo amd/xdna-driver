@@ -66,7 +66,7 @@ struct mailbox_channel {
 	u32				i2x_head;
 	bool				bad_state;
 
-	/* Optional handler for firmware-initiated messages, sent with ID 0 */
+	/* Optional handler for firmware-initiated messages */
 	void				*async_handle;
 	xdna_mailbox_async_cb_t		async_cb;
 
@@ -299,9 +299,11 @@ check_again:
 }
 
 /*
- * Handle a firmware-initiated message, sent with message ID 0. Always reports
- * success so one unexpected notification cannot put the channel in bad_state
- * and disable its irq.
+ * Offer a message that is not a reply to the channel's async handler, which
+ * decides whether firmware sent it on its own. Returns -ENOMSG if the channel
+ * has no handler or the handler rejects the ID. Otherwise reports success,
+ * even if the handler fails, so one unexpected notification cannot put the
+ * channel in bad_state and disable its irq.
  */
 static int
 mailbox_handle_async_msg(struct mailbox_channel *mb_chann,
@@ -309,16 +311,17 @@ mailbox_handle_async_msg(struct mailbox_channel *mb_chann,
 {
 	int ret;
 
-	if (mb_chann->async_cb) {
-		ret = mb_chann->async_cb(mb_chann->async_handle, header->opcode,
-					 data, header->total_size);
-		if (ret)
-			MB_ERR(mb_chann, "Async handler for opcode 0x%x id 0x%x ret %d",
-			       header->opcode, header->id, ret);
-	} else {
-		MB_ERR(mb_chann, "Dropping unhandled async msg opcode 0x%x id 0x%x",
-		       header->opcode, header->id);
-	}
+	if (!mb_chann->async_cb)
+		return -ENOMSG;
+
+	ret = mb_chann->async_cb(mb_chann->async_handle, header->id,
+				 header->opcode, data, header->total_size);
+	if (ret == -ENOMSG)
+		return ret;
+
+	if (ret)
+		MB_ERR(mb_chann, "Async handler for opcode 0x%x id 0x%x ret %d",
+		       header->opcode, header->id, ret);
 
 	return 0;
 }
@@ -333,17 +336,12 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 	u32 slot;
 
 	msg_id = header->id;
-	if (!msg_id) {
-		/*
-		 * Firmware sends notifications of its own accord with message
-		 * ID 0, which lacks MAGIC_VAL. Not a protocol error.
-		 */
-		return mailbox_handle_async_msg(mb_chann, header, data);
-	}
-
-	if (!mailbox_validate_msgid(msg_id)) {
-		MB_ERR(mb_chann, "Bad message ID 0x%x", msg_id);
-		return -EINVAL;
+	if (unlikely(!mailbox_validate_msgid(msg_id))) {
+		if (mailbox_handle_async_msg(mb_chann, header, data)) {
+			MB_ERR(mb_chann, "Bad message ID 0x%x", msg_id);
+			return -EINVAL;
+		}
+		return 0;
 	}
 
 	slot = msg_id & ~MAGIC_VAL_MASK;
