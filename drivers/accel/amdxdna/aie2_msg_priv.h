@@ -43,11 +43,15 @@ enum aie2_msg_opcode {
 	MSG_OP_GET_COREDUMP                = 0x119,
 	MSG_OP_CALIBRATE_CLOCK             = 0x11C,
 	MSG_OP_MAX_DRV_OPCODE,
+	MSG_OP_ASYNC_EVENT_CLEANUP_FAILURE = 0x202,
 	MSG_OP_AIE_RW_ACCESS               = 0x203,
 	MSG_OP_MAX_ASYNC_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
 };
+
+/* Firmware numbers the messages it sends on its own from here up. */
+#define AIE2_ASYNC_MSG_START_ID	0x80000000U
 
 enum aie2_msg_status {
 	AIE2_STATUS_SUCCESS				= 0x0,
@@ -372,6 +376,17 @@ struct async_event_msg_req {
 struct async_event_msg_resp {
 	enum aie2_msg_status	status;
 	enum async_event_type	type;
+} __packed;
+
+/*
+ * Sent by firmware when it cannot clean up a partition before running the
+ * context on it. Only context_id carries information: the rest is an echo
+ * of CREATE_CONTEXT, reset values once the context's columns are released,
+ * or never written.
+ */
+struct async_cleanup_failure {
+	__u32	context_id;
+	__u32	reserved[3];
 } __packed;
 
 #define MAX_CHAIN_CMDBUF_SIZE SZ_4K

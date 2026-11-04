@@ -234,6 +234,8 @@ int aie2_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,
 			      void *handle, int (*cb)(void *, void __iomem *, size_t));
 int aie2_get_array_async_error(struct amdxdna_dev_hdl *ndev,
 			       struct amdxdna_drm_get_array *args);
+int aie2_mgmt_async_event_handler(void *handle, u32 msg_id, u32 opcode,
+				  void __iomem *data, size_t size);
 
 /* aie2_message.c */
 void aie2_msg_init(struct amdxdna_dev_hdl *ndev);
