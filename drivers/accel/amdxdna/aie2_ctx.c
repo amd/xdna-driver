@@ -486,12 +486,12 @@ static void aie2_job_run(struct amdxdna_sched_job *job)
 
 	if (!hwctx->priv->mbox_chann) {
 		ret = -ENODEV;
-		goto fail;
+		goto abort_job;
 	}
 
 	if (!mmget_not_zero(job->mm)) {
 		ret = -ESRCH;
-		goto fail;
+		goto abort_job;
 	}
 
 	amdxdna_io_stats_job_start(job->hwctx->client);
@@ -533,6 +533,7 @@ static void aie2_job_run(struct amdxdna_sched_job *job)
 
 fail:
 	amdxdna_io_stats_job_done(job->hwctx->client);
+abort_job:
 	if (job->drv_cmd)
 		job->drv_cmd->result = U32_MAX;
 	else
