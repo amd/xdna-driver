@@ -304,6 +304,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct cert_comp *cert_comp;
+	dma_addr_t hsa_addr;
 	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
@@ -328,8 +329,10 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	req.priority_band = aie4_qos2dev_priority_band(hwctx->qos.priority);
 	req.priority_level = aie4_band_to_priority_level(req.priority_band);
 	req.restore_id = priv->restore_id;
-	req.hsa_addr_high = upper_32_bits(amdxdna_gem_dev_addr(priv->umq_bo));
-	req.hsa_addr_low = lower_32_bits(amdxdna_gem_dev_addr(priv->umq_bo));
+	hsa_addr = priv->drv_umq_buf ? priv->drv_umq_buf->dma_addr :
+				       amdxdna_gem_dev_addr(priv->umq_bo);
+	req.hsa_addr_high = upper_32_bits(hsa_addr);
+	req.hsa_addr_low = lower_32_bits(hsa_addr);
 
 	XDNA_DBG(xdna, "pasid 0x%x, num_tiles %d, hsa[0x%x 0x%x]",
 		 req.pasid, req.request_num_tiles, req.hsa_addr_high, req.hsa_addr_low);
@@ -687,8 +690,17 @@ void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx
 
 static void aie4_hwctx_umq_fini(struct amdxdna_hwctx *hwctx)
 {
-	if (hwctx->priv && hwctx->priv->umq_bo)
+	if (!hwctx->priv)
+		return;
+
+	if (hwctx->priv->drv_umq_buf) {
+		amdxdna_free_msg_buff(hwctx->priv->drv_umq_buf);
+		hwctx->priv->drv_umq_buf = NULL;
+	}
+	if (hwctx->priv->umq_bo) {
 		amdxdna_gem_put_obj_async(hwctx->priv->umq_bo);
+		hwctx->priv->umq_bo = NULL;
+	}
 }
 
 static int aie4_hwctx_umq_init(struct amdxdna_hwctx *hwctx)
@@ -711,14 +723,22 @@ static int aie4_hwctx_umq_init(struct amdxdna_hwctx *hwctx)
 	int i;
 
 	/*
-	 * The HSA queue lives in a user-allocated BO (umq_bo_hdl) in both user- and
-	 * kernel-mode submission; the driver does not allocate it privately.  Under
-	 * PASID/SVA the device reaches the queue through the submitting process's
-	 * own page tables, so it must have a user virtual address - a kernel-private
-	 * buffer would be unreachable by the device.  This is also safe: a forged
-	 * read_index in this shared BO can only make the owning process complete its
-	 * own command early and harm itself, never another context (NO_PASID/IOVA is
-	 * a single-trust bring-up mode with no inter-process isolation).
+	 * The HSA queue lives in a user-allocated BO (umq_bo_hdl) for user-mode
+	 * submission, where the user fully owns the queue content and doorbell.
+	 * For kernel-mode submission, the driver fills the queue and rings the
+	 * doorbell.
+	 *
+	 * Under PASID/SVA the device reaches memory through the submitting
+	 * process's own page tables, so using the user-allocated umq_bo for
+	 * kernel-mode submission is safe: a forged read_index can only make the
+	 * owning process complete its own command early, never harming another.
+	 *
+	 * Without PASID (IOVA/physical mode) the device walks a shared IOMMU
+	 * domain.  For kernel-mode submission the driver allocates its own
+	 * private queue buffer so that user space cannot directly manipulate
+	 * the queue headers or indices via CPU access to umq_bo.  Payload
+	 * addresses remain user-supplied and unvalidated; device DMA via those
+	 * addresses can still reach any mapping in the shared domain.
 	 */
 	umq_bo = amdxdna_gem_get_obj(hwctx->client, hwctx->umq_bo_hdl, AMDXDNA_BO_SHARE);
 	if (!umq_bo) {
@@ -727,42 +747,69 @@ static int aie4_hwctx_umq_init(struct amdxdna_hwctx *hwctx)
 	}
 	priv->umq_bo = umq_bo;
 
+	/* User-mode submission: user owns the queue content, header and doorbell. */
+	if (!priv->kernel_submit) {
+		if (umq_bo->mem.size < sizeof(*qhdr)) {
+			XDNA_ERR(xdna, "umq_bo size %zu is too small",
+				 (size_t)umq_bo->mem.size);
+			ret = -EINVAL;
+			goto err_fini;
+		}
+		umq_va = amdxdna_gem_vmap(umq_bo);
+		if (!umq_va) {
+			ret = -ENOMEM;
+			goto err_fini;
+		}
+		qhdr = umq_va;
+		priv->umq_read_index = &qhdr->read_index;
+		priv->umq_write_index = &qhdr->write_index;
+		return 0;
+	}
+
 	/*
-	 * Kernel-mode submission: the driver fills the host queue and rings the
-	 * doorbell, so the user umq_bo must hold the header, direct packet ring
-	 * and indirect packet pool. Parts with two-level HSA indirection also
-	 * place one level-2 header per slot between the ring and pool. User-mode
-	 * submission only needs the header (the user owns the queue content).
+	 * Kernel-mode submission: driver fills the queue.  When PASID is off,
+	 * use a private driver buffer for the full queue so that a malicious
+	 * user cannot manipulate the queue structure (headers, read/write
+	 * indices) via the shared umq_bo.  Note: packet payload addresses
+	 * (instruction_buffer, dtrace_buffer) still originate from the user's
+	 * cmd_abo and are not validated here; NO_PASID/IOVA mode remains a
+	 * single-trust environment with no full inter-process isolation.
 	 */
-	if (umq_bo->mem.size < sizeof(*qhdr) ||
-	    (priv->kernel_submit &&
-	     umq_bo->mem.size < sizeof(*qhdr) + pkts_sz + indir_hdrs_sz + indir_pkts_sz)) {
-		XDNA_ERR(xdna, "umq_bo size %zu is too small",
-			 (size_t)umq_bo->mem.size);
-		ret = -EINVAL;
-		goto err_fini;
+	if (!amdxdna_pasid_on(hwctx->client)) {
+		size_t drv_buf_sz = sizeof(*qhdr) + pkts_sz + indir_hdrs_sz + indir_pkts_sz;
+
+		priv->drv_umq_buf = amdxdna_alloc_msg_buff(xdna, (u32)drv_buf_sz);
+		if (IS_ERR(priv->drv_umq_buf)) {
+			ret = PTR_ERR(priv->drv_umq_buf);
+			priv->drv_umq_buf = NULL;
+			goto err_fini;
+		}
+		umq_va = priv->drv_umq_buf->vaddr;
+		data_dev_addr = priv->drv_umq_buf->dma_addr + sizeof(*qhdr);
+		/*
+		 * The user umq_bo is not used for queue content.  Its
+		 * read_index and write_index remain 0 (from the shim's
+		 * memset), which user-space poll_command() uses to detect
+		 * that the driver is not updating this BO.
+		 */
+	} else {
+		if (umq_bo->mem.size < sizeof(*qhdr) + pkts_sz + indir_hdrs_sz + indir_pkts_sz) {
+			XDNA_ERR(xdna, "umq_bo size %zu is too small",
+				 (size_t)umq_bo->mem.size);
+			ret = -EINVAL;
+			goto err_fini;
+		}
+		umq_va = amdxdna_gem_vmap(umq_bo);
+		if (!umq_va) {
+			ret = -ENOMEM;
+			goto err_fini;
+		}
+		data_dev_addr = amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr);
 	}
 
-	umq_va = amdxdna_gem_vmap(umq_bo);
-	if (!umq_va) {
-		ret = -ENOMEM;
-		goto err_fini;
-	}
 	qhdr = umq_va;
-
 	priv->umq_read_index = &qhdr->read_index;
 	priv->umq_write_index = &qhdr->write_index;
-
-	/* User-mode submission: user owns the queue content and the doorbell. */
-	if (!priv->kernel_submit)
-		return 0;
-
-	/*
-	 * The queue content is driver-owned and never trusted from user space
-	 * (only read_index is read back to detect completion). Direct packets
-	 * follow the header. Level-2 headers (if present) follow the packet ring.
-	 */
-	data_dev_addr = amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr);
 	priv->umq_pkts = umq_va + sizeof(*qhdr);
 	if (level2) {
 		priv->umq_indirect_hdrs = umq_va + sizeof(*qhdr) + pkts_sz;
@@ -772,12 +819,14 @@ static int aie4_hwctx_umq_init(struct amdxdna_hwctx *hwctx)
 	priv->umq_indirect_pkts_dev_addr = data_dev_addr + pkts_sz + indir_hdrs_sz;
 
 	/*
-	 * Only the header + direct/indirect packet regions are driver-owned and
-	 * used for kernel submission; the size check above guarantees they fit.
-	 * Clear just that range, not the whole user-sized BO, so an oversized
-	 * umq_bo cannot force a huge memset (and page faults) under dev_lock.
+	 * For drv_umq_buf, clear the full allocation to avoid leaking stale
+	 * kernel data to the device.  For umq_bo, clear only the queue
+	 * sub-range (header + packets + indirect pool); umq_bo may be
+	 * oversized by the user and a full memset under dev_lock could be
+	 * huge.
 	 */
-	memset(umq_va, 0, sizeof(*qhdr) + pkts_sz + indir_hdrs_sz + indir_pkts_sz);
+	memset(umq_va, 0, priv->drv_umq_buf ? priv->drv_umq_buf->size :
+	       sizeof(*qhdr) + pkts_sz + indir_hdrs_sz + indir_pkts_sz);
 	priv->write_index = QUEUE_INDEX_START;
 	qhdr->read_index = QUEUE_INDEX_START;
 	qhdr->write_index = QUEUE_INDEX_START;
@@ -933,11 +982,12 @@ static u64 get_read_index(struct amdxdna_hwctx *hwctx)
 	 * and the device never writes it).  In user-mode submission the user
 	 * owns the queue, so fall back to the shared UMQ copy.
 	 *
-	 * Security: read_index lives in the umq_bo, which the owning process can
-	 * map.  Under PASID/SVA the device reaches the queue through that process's
-	 * own page tables, so a forged read_index only completes the process's own
-	 * command early and corrupts or hangs itself - it cannot reach another
-	 * context.
+	 * Security: under PASID/SVA, read_index lives in the umq_bo which the
+	 * owning process can map.  The device reaches the queue through that
+	 * process's own page tables, so a forged read_index only completes the
+	 * process's own command early and corrupts or hangs itself - it cannot
+	 * reach another context.  Without PASID (KMQ), read_index lives in the
+	 * driver-private drv_umq_buf and is not CPU-accessible from user space.
 	 */
 	ri = READ_ONCE(*priv->umq_read_index);
 	/* Order the read_index sample before the write_index sample. */
@@ -1568,11 +1618,14 @@ static void job_worker(struct work_struct *work)
 	struct amdxdna_sched_job *job;
 
 	while ((job = peek_running_job(hwctx))) {
+		u64 ri;
+
 		wait_till_seq_completed(hwctx, job->seq);
-		if (get_read_index(hwctx) > job->seq) {
+		ri = get_read_index(hwctx);
+		if (ri > job->seq) {
 			trace_xdna_job_queue(hwctx->name, job->seq,
-					     READ_ONCE(hwctx->priv->write_index) -
-					     get_read_index(hwctx), "job complete");
+					     READ_ONCE(hwctx->priv->write_index) - ri,
+					     "job complete");
 			dequeue_running_job(hwctx, job);
 			/*
 			 * read_index advanced past this job. A fully published
