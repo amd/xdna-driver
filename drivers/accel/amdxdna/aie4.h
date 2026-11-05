@@ -98,11 +98,22 @@ struct amdxdna_hwctx_priv {
 	struct aie4_async_ctx_error     cached_ctx_error;
 	bool				has_reset; /* if hwctx disconnection due to reset */
 
-	/* Kernel-mode submission: driver fills the user HSA queue and rings
-	 * the doorbell.  umq_pkts/umq_indirect_pkts alias the user umq_bo;
-	 * their content is driver-owned, only read_index is trusted from the
-	 * shared queue.
+	/*
+	 * Kernel-mode submission: the driver fills the HSA queue and rings
+	 * the doorbell.
+	 *
+	 * With PASID, the queue resides in the user umq_bo.
+	 * Without PASID (IOVA/physical mode), the device walks a shared IOMMU
+	 * domain.  A malicious user could manipulate the queue structure via the
+	 * shared umq_bo.  The driver therefore allocates its own private queue
+	 * buffer (drv_umq_buf) and passes its DMA address to firmware.  Note:
+	 * packet payload addresses remain user-supplied and unvalidated;
+	 * NO_PASID/IOVA is still a single-trust environment.
+	 *
+	 * The driver owns the queue packet contents.  The read_index is updated
+	 * by firmware to indicate consumed queue entries.
 	 */
+	struct amdxdna_msg_buf_hdl      *drv_umq_buf;
 	u64                             write_index;
 	struct host_queue_packet        *umq_pkts;
 	struct host_queue_indirect_hdr  *umq_indirect_hdrs;
