@@ -1395,7 +1395,8 @@ struct telemetry_probe {
 void
 TEST_query_telemetry(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  uint32_t type = dev_filter_is_aie4(id, sdev.get()) ?
+  // TEST ONLY: npu12 RPU firmware only implements type 0 (plain snapshot).
+  uint32_t type = (dev_filter_is_aie4(id, sdev.get()) && !is_npu12(sdev.get())) ?
     AIE4_TELEMETRY_PERF_COUNTER : 0;
 
   auto probe = fork_query<telemetry_probe>(sdev.get(), [type](int fd) {
@@ -1732,7 +1733,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, npu12}, {amdxdna}, TEST_query_memory_usage, {}
   },
   test_case{ "query telemetry", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_query_telemetry, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu12}, {amdxdna}, TEST_query_telemetry, {}
   },
   test_case{ "query telemetry header-only buffer fails", {},
     TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_query_telemetry_short_buf, {}
