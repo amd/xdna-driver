@@ -2866,6 +2866,17 @@ device::
 alloc_bo(void* userptr, size_t size, uint64_t flags)
 {
   auto f = xcl_bo_flags{flags};
+  /*
+   * xrt::bo(hwctx, size, group) uses flags::normal, which is flag 0. VE2 has
+   * no device DRAM, and the buffers that work today are host-only SHARE BOs
+   * (xrt::ext::bo). multi_uc_6 allocates with the normal flag, so treat that
+   * as host-only on this device.
+   */
+  if (f.boflags == XCL_BO_FLAGS_NONE &&
+      get_pdev().m_sysfs_name.find("xilinx_aie.amdxdna") != std::string::npos)
+    flags = XCL_BO_FLAGS_HOST_ONLY;
+
+  f = xcl_bo_flags{flags};
   if (f.boflags == XCL_BO_FLAGS_NONE)
     shim_not_supported_err("unsupported buffer type: none flag");
 

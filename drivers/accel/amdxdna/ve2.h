@@ -15,9 +15,12 @@ extern const struct amdxdna_dev_ops ve2_ops;
 
 void ve2_mbox_release(struct mailbox *mb);
 int ve2_mbox_load_fw(struct mailbox *mb);
+int ve2_mbox_set_max_cols(struct mailbox *mb, u32 max_cols);
 int ve2_mbox_attach_notify(struct mailbox *mb, u32 index, void (*cb)(void *data),
 			   void *data);
 void ve2_mbox_detach_notify(struct mailbox *mb, u32 index);
+int ve2_mbox_bind_ctx(struct mailbox *mb, u32 hw_ctx_id, u64 *read_index,
+		      u64 *write_index);
 int ve2_mbox_ring_doorbell(struct mailbox *mb, u32 hw_ctx_id);
 
 #endif /* _VE2_H_ */

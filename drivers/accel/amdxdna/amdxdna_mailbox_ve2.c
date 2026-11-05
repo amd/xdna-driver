@@ -14,11 +14,12 @@
  * xrt-smi examine uses; and the partition and hardware-context opcodes the
  * shared aie4 context path sends.
  *
- * CREATE_PARTITION takes an AIE column-range partition, and CREATE_HW_CONTEXT
- * starts CERT on it. CERT runs the host queue at the aie4 request's
- * hsa_addr. The AIE partition id is returned as the partition, hw context and
- * completion index, because each partition carries exactly one context.
- * The aie4 doorbell and completion hooks reach that partition through
+ * CREATE_PARTITION takes or shares an AIE column-range partition, while
+ * CREATE_HW_CONTEXT creates a logical context with its own HSA queue. CERT
+ * runs one such queue at a time; the per-partition scheduler switches the
+ * handshake when a waiting context needs the partition. The physical AIE
+ * partition id remains the shared completion index, while logical context IDs
+ * route doorbells. The aie4 hooks reach this layer through
  * ve2_mbox_ring_doorbell() and ve2_mbox_attach_notify().
  */
 
@@ -28,10 +29,12 @@
 #include <linux/bitmap.h>
 #include <linux/firmware.h>
 #include <linux/ktime.h>
+#include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
+#include <linux/workqueue.h>
 #include <linux/xarray.h>
 
 #include "aie4_msg_priv.h"
@@ -67,13 +70,20 @@
 #define VE2_CERT_ALIVE_MAGIC		0x404C5645
 #define VE2_HS_PARTITION_SIZE		GENMASK(6, 0)
 #define VE2_HS_ADDR_INVALID		0xFFFFFFFF
+/* CERT's handshake location in the lead shim tile's privileged memory. */
+#define VE2_CERT_HANDSHAKE_OFF		0x88000
+#define VE2_CERT_HSA_NOT_EMPTY		BIT(0)
+#define VE2_CERT_IDLE			BIT(2)
+#define VE2_CERT_CTX_SWITCH_SHARE	BIT(0)
 
 /*
  * CERT handshake image, one per column, at the start of the uC private data
- * memory. Named fields are the only ones this driver programs. reserved0 and
- * reserved1 are not used; they keep host_time and the debug-queue address at
- * the offsets CERT reads. The image is allocated zeroed, so those gaps start
- * clear. The copy ends at dbg_hsa_addr_low.
+ * memory. Named fields are the only ones this driver programs or reads.
+ * reserved0..reserved2 keep ctx_switch_req, cert_idle_status, host_time and
+ * the debug-queue address at the offsets CERT uses. reserved3 is the rest of
+ * the 0x104-byte firmware image (context save, counters, and similar state
+ * this driver does not interpret). The image is allocated zeroed and copied
+ * in full on every CERT restart, so a context switch clears that tail.
  */
 struct ve2_cert_handshake {
 	u32 mpaie_alive;
@@ -81,27 +91,60 @@ struct ve2_cert_handshake {
 	u32 aie_info;
 	u32 hsa_addr_high;
 	u32 hsa_addr_low;
-	u32 reserved0[7];
+	u32 ctx_switch_req;
+	u32 reserved0;
+	u32 cert_idle_status;
+	u32 reserved1[4];
 	u32 host_time_high;
 	u32 host_time_low;
-	u32 reserved1[7];
+	u32 reserved2[7];
 	u32 dbg_hsa_addr_high;
 	u32 dbg_hsa_addr_low;
+	u32 reserved3[42];
 };
 
-static_assert(sizeof(struct ve2_cert_handshake) == 0x5c);
+static_assert(sizeof(struct ve2_cert_handshake) == 0x104);
+static_assert(offsetof(struct ve2_cert_handshake, ctx_switch_req) == 0x14);
+static_assert(offsetof(struct ve2_cert_handshake, cert_idle_status) == 0x1c);
 static_assert(offsetof(struct ve2_cert_handshake, host_time_high) == 0x30);
 static_assert(offsetof(struct ve2_cert_handshake, dbg_hsa_addr_high) == 0x54);
 
+struct ve2_ctx;
+
 struct ve2_part {
 	struct device			*aie_dev;
+	struct amdxdna_dev		*xdna;
+	struct ve2_ctx			*active;
+	struct mutex			sched_lock; /* protects contexts and scheduler state */
+	struct list_head		contexts;
+	struct list_head		runq;
+	struct delayed_work		sched_work;
+	void				(*notify_cb)(void *data);
+	void				*notify_data;
+	spinlock_t			notify_lock; /* protects notify_cb and notify_data */
 	u32				id;
 	u32				start_col;
 	u32				num_col;
-	bool				has_ctx;
-	spinlock_t			notify_lock; /* protects notify_cb, notify_data */
-	void				(*notify_cb)(void *data);
-	void				*notify_data;
+	u32				users;
+	bool				dead;
+	bool				switch_requested;
+};
+
+/*
+ * Logical hardware context sharing a physical AIE partition. The HSA queue
+ * remains owned by aie4; the pointers registered at doorbell setup are used
+ * only to verify the active queue is drained during teardown.
+ */
+struct ve2_ctx {
+	struct ve2_part		*part;
+	struct list_head	part_node;
+	struct list_head	run_node;
+	u64			hsa_addr;
+	u64			*read_index;
+	u64			*write_index;
+	u32			id;
+	bool			bound;
+	bool			queued;
 };
 
 struct mailbox {
@@ -110,6 +153,7 @@ struct mailbox {
 	bool				dropped;
 	bool				cert_ready;
 	bool				dev_info_ready;
+	u16				max_cols;
 	struct ve2_aie_device_info	dev_info;
 	u8				cert_major;
 	u8				cert_minor;
@@ -118,6 +162,7 @@ struct mailbox {
 	char				cert_git[VE2_FW_HASH_LEN];
 	char				cert_date[VE2_FW_DATE_LEN];
 	struct xarray			parts; /* struct ve2_part, by AIE partition id */
+	struct xarray			ctxs; /* struct ve2_ctx, by hardware context id */
 	DECLARE_BITMAP(used_cols, VE2_MAX_COLS);
 };
 
@@ -136,6 +181,8 @@ static int ve2_reply(const struct xdna_mailbox_msg *msg, const void *resp, size_
 	return msg->notify_cb(msg->handle, (void __iomem *)resp, len);
 }
 
+static void ve2_part_schedule(struct ve2_part *part);
+
 /* AIE user_event1 callback: CERT raised its completion interrupt. */
 static void ve2_part_event(u32 partition_id, void *priv)
 {
@@ -145,20 +192,32 @@ static void ve2_part_event(u32 partition_id, void *priv)
 	spin_lock_irqsave(&part->notify_lock, flags);
 	if (part->notify_cb)
 		part->notify_cb(part->notify_data);
+	if (!part->dead)
+		ve2_part_schedule(part);
 	spin_unlock_irqrestore(&part->notify_lock, flags);
 }
 
 static void ve2_part_free(struct mailbox *mb, struct ve2_part *part)
 {
+	unsigned long flags;
+
+	spin_lock_irqsave(&part->notify_lock, flags);
+	part->dead = true;
+	part->notify_cb = NULL;
+	part->notify_data = NULL;
+	spin_unlock_irqrestore(&part->notify_lock, flags);
+	cancel_delayed_work_sync(&part->sched_work);
 	xa_erase(&mb->parts, part->id);
 	ve2_aie_partition_teardown(part->aie_dev);
 	ve2_aie_partition_release(part->aie_dev);
 	bitmap_clear(mb->used_cols, part->start_col, part->num_col);
+	mutex_destroy(&part->sched_lock);
 	kfree(part);
 }
 
 static void ve2_mbox_drop(struct mailbox *mb)
 {
+	struct ve2_ctx *ctx;
 	struct ve2_part *part;
 	unsigned long id;
 
@@ -166,8 +225,17 @@ static void ve2_mbox_drop(struct mailbox *mb)
 		return;
 
 	mb->dropped = true;
+	/*
+	 * Stop every scheduler before freeing the logical contexts it may still
+	 * reference through part->active or part->runq.
+	 */
 	xa_for_each(&mb->parts, id, part)
 		ve2_part_free(mb, part);
+	xa_for_each(&mb->ctxs, id, ctx) {
+		xa_erase(&mb->ctxs, id);
+		kfree(ctx);
+	}
+	xa_destroy(&mb->ctxs);
 	xa_destroy(&mb->parts);
 	mutex_destroy(&mb->lock);
 }
@@ -303,6 +371,20 @@ int ve2_mbox_load_fw(struct mailbox *mb)
 	return ve2_ensure_cert(mb);
 }
 
+int ve2_mbox_set_max_cols(struct mailbox *mb, u32 max_cols)
+{
+	int ret;
+
+	ret = ve2_ensure_dev_info(mb);
+	if (ret)
+		return ret;
+	if (max_cols && max_cols > mb->dev_info.cols)
+		return -ERANGE;
+
+	mb->max_cols = max_cols;
+	return 0;
+}
+
 static int ve2_op_identify(struct mailbox *mb, const struct xdna_mailbox_msg *msg)
 {
 	struct aie4_msg_identify_resp resp = { };
@@ -388,12 +470,74 @@ static bool ve2_cols_free(struct mailbox *mb, u32 start, u32 count)
 	return find_next_bit(mb->used_cols, start + count, start) >= start + count;
 }
 
+static struct ve2_part *
+ve2_find_shared_part(struct mailbox *mb, u32 start, u32 count, bool pinned)
+{
+	struct ve2_part *part, *best = NULL;
+	unsigned long id;
+
+	xa_for_each(&mb->parts, id, part) {
+		if (part->num_col != count || (pinned && part->start_col != start))
+			continue;
+		if (!best || part->users < best->users)
+			best = part;
+	}
+
+	return best;
+}
+
+static void ve2_part_scheduler(struct work_struct *work);
+
+static int ve2_part_alloc(struct mailbox *mb, u32 start, u32 count,
+			  struct ve2_part **out)
+{
+	struct ve2_part *part;
+	int ret;
+
+	part = kzalloc_obj(*part);
+	if (!part)
+		return -ENOMEM;
+
+	mutex_init(&part->sched_lock);
+	INIT_LIST_HEAD(&part->contexts);
+	INIT_LIST_HEAD(&part->runq);
+	INIT_DELAYED_WORK(&part->sched_work, ve2_part_scheduler);
+	spin_lock_init(&part->notify_lock);
+	part->start_col = start;
+	part->num_col = count;
+	part->users = 1;
+	part->xdna = mb->xdna;
+	part->aie_dev = ve2_aie_partition_request(start, count, ve2_part_event, part,
+						  &part->id);
+	if (IS_ERR(part->aie_dev)) {
+		ret = PTR_ERR(part->aie_dev);
+		XDNA_ERR(mb->xdna, "AIE partition request col %u+%u failed: %d",
+			 start, count, ret);
+		mutex_destroy(&part->sched_lock);
+		kfree(part);
+		return ret;
+	}
+
+	ret = xa_insert(&mb->parts, part->id, part, GFP_KERNEL);
+	if (ret) {
+		ve2_aie_partition_release(part->aie_dev);
+		mutex_destroy(&part->sched_lock);
+		kfree(part);
+		return ret;
+	}
+
+	bitmap_set(mb->used_cols, start, count);
+	*out = part;
+	return 0;
+}
+
 static int ve2_op_create_partition(struct mailbox *mb, const struct xdna_mailbox_msg *msg)
 {
 	const struct aie4_msg_create_partition_req *req = (const void *)msg->send_data;
 	struct aie4_msg_create_partition_resp resp = { };
 	struct ve2_part *part;
-	u32 start, count, cols;
+	bool pinned;
+	u32 start = 0, count, cols;
 	int ret;
 
 	if (msg->send_size < sizeof(*req))
@@ -403,56 +547,56 @@ static int ve2_op_create_partition(struct mailbox *mb, const struct xdna_mailbox
 	if (ret)
 		return ret;
 
-	cols = mb->dev_info.cols;
+	cols = mb->max_cols ? mb->max_cols : mb->dev_info.cols;
 	count = req->partition_col_count;
 	if (!count || !IS_ALIGNED(count, VE2_PART_COL_ALIGN) || count > cols)
 		return -EINVAL;
 
-	if (req->partition_col_start == VE2_PART_AUTO_COL) {
+	pinned = req->partition_col_start != VE2_PART_AUTO_COL;
+	if (!pinned) {
 		for (start = 0; start + count <= cols; start += VE2_PART_COL_ALIGN) {
 			if (ve2_cols_free(mb, start, count))
 				break;
 		}
-		if (start + count > cols)
-			return -EBUSY;
 	} else {
 		start = req->partition_col_start;
 		if (!IS_ALIGNED(start, VE2_PART_COL_ALIGN) || start >= cols ||
 		    count > cols - start)
 			return -ERANGE;
-		if (!ve2_cols_free(mb, start, count))
+	}
+
+	/*
+	 * A pinned request shares an existing matching physical range, or creates
+	 * that exact range when it is free. An automatic request takes a free
+	 * range first, then shares the least-used matching partition once the
+	 * array has no suitable free range.
+	 */
+	if (pinned) {
+		part = ve2_find_shared_part(mb, start, count, pinned);
+		if (part) {
+			part->users++;
+		} else if (ve2_cols_free(mb, start, count)) {
+			ret = ve2_part_alloc(mb, start, count, &part);
+			if (ret)
+				return ret;
+		} else {
 			return -EBUSY;
+		}
+	} else if (start + count > cols) {
+		part = ve2_find_shared_part(mb, start, count, false);
+		if (!part)
+			return -EBUSY;
+		part->users++;
+	} else {
+		ret = ve2_part_alloc(mb, start, count, &part);
+		if (ret)
+			return ret;
 	}
-
-	part = kzalloc_obj(*part);
-	if (!part)
-		return -ENOMEM;
-
-	spin_lock_init(&part->notify_lock);
-	part->start_col = start;
-	part->num_col = count;
-	part->aie_dev = ve2_aie_partition_request(start, count, ve2_part_event, part,
-						  &part->id);
-	if (IS_ERR(part->aie_dev)) {
-		ret = PTR_ERR(part->aie_dev);
-		XDNA_ERR(mb->xdna, "AIE partition request col %u+%u failed: %d",
-			 start, count, ret);
-		kfree(part);
-		return ret;
-	}
-
-	ret = xa_insert(&mb->parts, part->id, part, GFP_KERNEL);
-	if (ret) {
-		ve2_aie_partition_release(part->aie_dev);
-		kfree(part);
-		return ret;
-	}
-	bitmap_set(mb->used_cols, start, count);
 
 	resp.status = AIE4_MSG_STATUS_SUCCESS;
 	resp.partition_id = part->id;
 	ret = ve2_reply(msg, &resp, sizeof(resp));
-	if (ret)
+	if (ret && !--part->users)
 		ve2_part_free(mb, part);
 	return ret;
 }
@@ -469,19 +613,28 @@ static int ve2_op_destroy_partition(struct mailbox *mb, const struct xdna_mailbo
 	part = xa_load(&mb->parts, req->partition_id);
 	if (!part)
 		return -ENOENT;
-	if (part->has_ctx)
-		return -EBUSY;
 
-	ve2_part_free(mb, part);
+	if (!part->users)
+		return -EINVAL;
+	/*
+	 * Each aie4 context releases its partition lease after destroying its
+	 * own hardware context. Other sharers can still be live, so dropping a
+	 * non-final lease must succeed rather than returning -EBUSY; aie4 does
+	 * not retry a partition destroy that it regards as complete.
+	 */
+	if (part->users == 1 && !list_empty(&part->contexts))
+		return -EBUSY;
+	if (!--part->users)
+		ve2_part_free(mb, part);
 	resp.status = AIE4_MSG_STATUS_SUCCESS;
 	return ve2_reply(msg, &resp, sizeof(resp));
 }
 
 /*
  * Write the CERT handshake into every column of @part, then wake the lead uC.
- * Only the lead column runs the host queue at @hsa_addr.
+ * Only the lead column runs the host queue of @ctx.
  */
-static int ve2_part_start_cert(struct mailbox *mb, struct ve2_part *part, u64 hsa_addr)
+static int ve2_part_start_cert(struct ve2_part *part, struct ve2_ctx *ctx)
 {
 	struct ve2_aie_handshake *hs_data;
 	struct ve2_cert_handshake *hs;
@@ -501,8 +654,8 @@ static int ve2_part_start_cert(struct mailbox *mb, struct ve2_part *part, u64 hs
 		hs[col].partition_base_address = part->start_col << VE2_COL_SHIFT;
 		hs[col].aie_info = FIELD_PREP(VE2_HS_PARTITION_SIZE, part->num_col);
 		if (!col) {
-			hs[col].hsa_addr_high = upper_32_bits(hsa_addr);
-			hs[col].hsa_addr_low = lower_32_bits(hsa_addr);
+			hs[col].hsa_addr_high = upper_32_bits(ctx->hsa_addr);
+			hs[col].hsa_addr_low = lower_32_bits(ctx->hsa_addr);
 		} else {
 			hs[col].hsa_addr_high = VE2_HS_ADDR_INVALID;
 			hs[col].hsa_addr_low = VE2_HS_ADDR_INVALID;
@@ -520,17 +673,165 @@ static int ve2_part_start_cert(struct mailbox *mb, struct ve2_part *part, u64 hs
 	ret = ve2_aie_partition_initialize(part->aie_dev, VE2_AIE_INIT_RUNTIME,
 					   hs_data, part->num_col);
 	if (ret) {
-		XDNA_ERR(mb->xdna, "partition 0x%x runtime init failed: %d", part->id, ret);
+		XDNA_ERR(part->xdna, "partition 0x%x runtime init failed: %d", part->id, ret);
 		goto out;
 	}
 
 	ret = ve2_aie_partition_wake_lead_uc(part->aie_dev);
 	if (ret)
-		XDNA_ERR(mb->xdna, "partition 0x%x lead uC wake-up failed: %d", part->id, ret);
+		XDNA_ERR(part->xdna, "partition 0x%x lead uC wake-up failed: %d", part->id, ret);
 out:
 	kfree(hs_data);
 	kfree(hs);
 	return ret;
+}
+
+static int ve2_part_ring_locked(struct ve2_part *part)
+{
+	u32 event = VE2_USER_EVENT_ID;
+
+	return ve2_aie_write(part->aie_dev, 0, 0, VE2_EVENT_GENERATE_REG,
+			     sizeof(event), &event);
+}
+
+static int ve2_part_request_switch_locked(struct ve2_part *part)
+{
+	u32 req = 0;
+	int ret;
+
+	if (part->switch_requested)
+		return 0;
+
+	ret = ve2_aie_priv_read(part->aie_dev,
+				VE2_CERT_HANDSHAKE_OFF +
+				offsetof(struct ve2_cert_handshake, ctx_switch_req),
+				sizeof(req), &req);
+	if (ret)
+		return ret;
+
+	req |= VE2_CERT_CTX_SWITCH_SHARE;
+	ret = ve2_aie_priv_write(part->aie_dev,
+				 VE2_CERT_HANDSHAKE_OFF +
+				 offsetof(struct ve2_cert_handshake, ctx_switch_req),
+				 sizeof(req), &req);
+	if (!ret)
+		part->switch_requested = true;
+	return ret;
+}
+
+static int ve2_part_activate_locked(struct ve2_part *part, struct ve2_ctx *ctx)
+{
+	int ret;
+
+	ret = ve2_part_start_cert(part, ctx);
+	if (ret)
+		return ret;
+
+	if (ctx->queued) {
+		list_del_init(&ctx->run_node);
+		ctx->queued = false;
+	}
+	part->active = ctx;
+	part->switch_requested = false;
+	return 0;
+}
+
+static void ve2_part_schedule(struct ve2_part *part)
+{
+	/*
+	 * CERT can complete a short command while the previous scheduler pass
+	 * is still reprogramming the partition. A plain work item drops that
+	 * completion because it is already running. Delayed work with no delay
+	 * is explicitly requeueable from this IRQ callback.
+	 */
+	mod_delayed_work(system_wq, &part->sched_work, 0);
+}
+
+/* CERT has consumed every command published for this context. */
+static bool ve2_ctx_queue_drained(struct ve2_ctx *ctx)
+{
+	u64 ri, wi;
+
+	if (!ctx->read_index || !ctx->write_index)
+		return false;
+
+	ri = READ_ONCE(*ctx->read_index);
+	/* Order the CERT-owned read index before the driver-owned write index. */
+	smp_rmb();
+	wi = READ_ONCE(*ctx->write_index);
+	return ri >= wi;
+}
+
+/* CERT has acknowledged a switch request or has gone idle on its own. */
+static bool ve2_part_cert_yielded(struct ve2_part *part)
+{
+	u32 status = 0;
+	int ret;
+
+	ret = ve2_aie_priv_read(part->aie_dev,
+				VE2_CERT_HANDSHAKE_OFF +
+				offsetof(struct ve2_cert_handshake, cert_idle_status),
+				sizeof(status), &status);
+	return !ret && (status & (VE2_CERT_HSA_NOT_EMPTY | VE2_CERT_IDLE));
+}
+
+/*
+ * Install @ctx's HSA queue and ring CERT. The command was published before
+ * the context was queued, so reinitialization alone does not start it.
+ */
+static int ve2_part_dispatch_locked(struct ve2_part *part, struct ve2_ctx *ctx)
+{
+	int ret;
+
+	ret = ve2_part_activate_locked(part, ctx);
+	if (ret)
+		return ret;
+
+	return ve2_part_ring_locked(part);
+}
+
+static void ve2_part_scheduler(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct ve2_part *part = container_of(dwork, struct ve2_part, sched_work);
+	struct ve2_ctx *next;
+	int ret;
+
+	mutex_lock(&part->sched_lock);
+	if (part->dead || list_empty(&part->runq))
+		goto out;
+
+	next = list_first_entry(&part->runq, struct ve2_ctx, run_node);
+	/*
+	 * Switch immediately only when the active context has no published
+	 * command left. CERT's HSA-not-empty bit is set while a command is
+	 * running, so it is a yield acknowledgment only after this scheduler
+	 * has asked CERT to yield. Restarting the partition earlier aborts the
+	 * running command and the host observes a zero output.
+	 */
+	if (!part->active || ve2_ctx_queue_drained(part->active) ||
+	    (part->switch_requested && ve2_part_cert_yielded(part))) {
+		XDNA_INFO(part->xdna, "dispatch VE2 context %u on partition 0x%x",
+			  next->id, part->id);
+		ret = ve2_part_dispatch_locked(part, next);
+		if (ret)
+			XDNA_ERR(part->xdna, "dispatch VE2 context %u failed: %d",
+				 next->id, ret);
+		goto out;
+	}
+
+	if (!part->switch_requested) {
+		ret = ve2_part_request_switch_locked(part);
+		if (ret) {
+			XDNA_ERR(part->xdna, "request VE2 context switch failed: %d", ret);
+			goto out;
+		}
+		ret = ve2_part_ring_locked(part);
+		if (ret)
+			XDNA_ERR(part->xdna, "ring VE2 context switch failed: %d", ret);
+	}
+out:
+	mutex_unlock(&part->sched_lock);
 }
 
 static int ve2_op_create_hw_context(struct mailbox *mb, const struct xdna_mailbox_msg *msg)
@@ -538,6 +839,8 @@ static int ve2_op_create_hw_context(struct mailbox *mb, const struct xdna_mailbo
 	const struct aie4_msg_create_hw_context_req *req = (const void *)msg->send_data;
 	struct aie4_msg_create_hw_context_resp resp = { };
 	struct ve2_part *part;
+	struct ve2_ctx *ctx;
+	u32 id;
 	u64 hsa_addr;
 	int ret;
 
@@ -547,42 +850,89 @@ static int ve2_op_create_hw_context(struct mailbox *mb, const struct xdna_mailbo
 	part = xa_load(&mb->parts, req->partition_id);
 	if (!part)
 		return -ENOENT;
-	if (part->has_ctx)
-		return -EBUSY;
 
 	hsa_addr = ((u64)req->hsa_addr_high << 32) | req->hsa_addr_low;
 	if (!hsa_addr)
 		return -EINVAL;
 
-	ret = ve2_part_start_cert(mb, part, hsa_addr);
-	if (ret)
+	ctx = kzalloc_obj(*ctx);
+	if (!ctx)
+		return -ENOMEM;
+	INIT_LIST_HEAD(&ctx->part_node);
+	INIT_LIST_HEAD(&ctx->run_node);
+	ctx->part = part;
+	ctx->hsa_addr = hsa_addr;
+	ret = xa_alloc(&mb->ctxs, &id, ctx, XA_LIMIT(1, U32_MAX), GFP_KERNEL);
+	if (ret) {
+		kfree(ctx);
 		return ret;
-	part->has_ctx = true;
+	}
+	ctx->id = id;
+
+	mutex_lock(&part->sched_lock);
+	list_add_tail(&ctx->part_node, &part->contexts);
+	if (!part->active)
+		ret = ve2_part_activate_locked(part, ctx);
+	if (ret)
+		list_del_init(&ctx->part_node);
+	mutex_unlock(&part->sched_lock);
+	if (ret) {
+		xa_erase(&mb->ctxs, ctx->id);
+		kfree(ctx);
+		return ret;
+	}
 
 	resp.status = AIE4_MSG_STATUS_SUCCESS;
-	resp.hw_context_id = part->id;
+	resp.hw_context_id = ctx->id;
 	resp.job_complete_msix_idx = part->id;
 	ret = ve2_reply(msg, &resp, sizeof(resp));
-	if (ret)
-		part->has_ctx = false;
+	if (ret) {
+		mutex_lock(&part->sched_lock);
+		if (part->active == ctx)
+			part->active = NULL;
+		list_del(&ctx->part_node);
+		mutex_unlock(&part->sched_lock);
+		xa_erase(&mb->ctxs, ctx->id);
+		kfree(ctx);
+	}
 	return ret;
 }
 
-/* CERT keeps running until DESTROY_PARTITION tears the partition down. */
 static int ve2_op_destroy_hw_context(struct mailbox *mb, const struct xdna_mailbox_msg *msg)
 {
 	const struct aie4_msg_destroy_hw_context_req *req = (const void *)msg->send_data;
 	struct aie4_msg_destroy_hw_context_resp resp = { };
+	struct ve2_ctx *ctx, *next = NULL;
 	struct ve2_part *part;
+	int ret = 0;
 
 	if (msg->send_size < sizeof(*req))
 		return -EINVAL;
 
-	part = xa_load(&mb->parts, req->hw_context_id);
-	if (!part || !part->has_ctx)
+	ctx = xa_load(&mb->ctxs, req->hw_context_id);
+	if (!ctx)
 		return -ENOENT;
+	part = ctx->part;
 
-	part->has_ctx = false;
+	mutex_lock(&part->sched_lock);
+	if (ctx->queued) {
+		list_del_init(&ctx->run_node);
+		ctx->queued = false;
+	}
+	if (part->active == ctx) {
+		part->active = NULL;
+		if (!list_empty(&part->runq))
+			next = list_first_entry(&part->runq, struct ve2_ctx, run_node);
+		if (next)
+			ret = ve2_part_dispatch_locked(part, next);
+	}
+	list_del(&ctx->part_node);
+	mutex_unlock(&part->sched_lock);
+	if (ret)
+		return ret;
+
+	xa_erase(&mb->ctxs, ctx->id);
+	kfree(ctx);
 	resp.status = AIE4_MSG_STATUS_SUCCESS;
 	return ve2_reply(msg, &resp, sizeof(resp));
 }
@@ -624,20 +974,72 @@ void ve2_mbox_detach_notify(struct mailbox *mb, u32 index)
 	mutex_unlock(&mb->lock);
 }
 
-/* aie4 doorbell hook: tell CERT on @hw_ctx_id's partition the queue moved. */
+int ve2_mbox_bind_ctx(struct mailbox *mb, u32 hw_ctx_id, u64 *read_index,
+		      u64 *write_index)
+{
+	struct ve2_ctx *ctx;
+	struct ve2_part *part;
+	int ret = 0;
+
+	if (!read_index || !write_index)
+		return -EINVAL;
+
+	mutex_lock(&mb->lock);
+	ctx = xa_load(&mb->ctxs, hw_ctx_id);
+	if (!ctx) {
+		ret = -ENOENT;
+		goto out_mbox;
+	}
+
+	part = ctx->part;
+	mutex_lock(&part->sched_lock);
+	if (part->dead) {
+		ret = -ENODEV;
+	} else {
+		ctx->read_index = read_index;
+		ctx->write_index = write_index;
+		ctx->bound = true;
+	}
+	mutex_unlock(&part->sched_lock);
+out_mbox:
+	mutex_unlock(&mb->lock);
+	return ret;
+}
+
+/*
+ * aie4 doorbell hook: an active context can ring CERT directly. A context
+ * sharing the partition is queued, asks CERT to yield, and is started by the
+ * per-partition worker after CERT reports idle.
+ */
 int ve2_mbox_ring_doorbell(struct mailbox *mb, u32 hw_ctx_id)
 {
-	u32 event = VE2_USER_EVENT_ID;
+	struct ve2_ctx *ctx;
 	struct ve2_part *part;
 	int ret;
 
 	mutex_lock(&mb->lock);
-	part = xa_load(&mb->parts, hw_ctx_id);
-	if (part && part->has_ctx)
-		ret = ve2_aie_write(part->aie_dev, 0, 0, VE2_EVENT_GENERATE_REG,
-				    sizeof(event), &event);
-	else
+	ctx = xa_load(&mb->ctxs, hw_ctx_id);
+	if (!ctx) {
 		ret = -ENOENT;
+		goto out_mbox;
+	}
+
+	part = ctx->part;
+	mutex_lock(&part->sched_lock);
+	if (part->dead || !ctx->bound) {
+		ret = -ENODEV;
+	} else if (part->active == ctx) {
+		ret = ve2_part_ring_locked(part);
+	} else {
+		if (!ctx->queued) {
+			list_add_tail(&ctx->run_node, &part->runq);
+			ctx->queued = true;
+		}
+		ve2_part_schedule(part);
+		ret = 0;
+	}
+	mutex_unlock(&part->sched_lock);
+out_mbox:
 	mutex_unlock(&mb->lock);
 	return ret < 0 ? ret : 0;
 }
@@ -655,6 +1057,7 @@ struct mailbox *xdnam_mailbox_create(struct drm_device *ddev,
 	mb->xdna = to_xdna_dev(ddev);
 	mutex_init(&mb->lock);
 	xa_init(&mb->parts);
+	xa_init_flags(&mb->ctxs, XA_FLAGS_ALLOC);
 
 	ret = drmm_add_action_or_reset(ddev, ve2_mbox_drop_action, mb);
 	if (ret)
