@@ -20,7 +20,7 @@ namespace shim_xdna_edge {
 
 namespace pt = boost::property_tree;
 
-// Minimum column alignment required by the driver (must be a multiple of this value)
+//  Minimum column alignment required by the driver (must be a multiple of this value)
 constexpr uint32_t MIN_COL_SUPPORT = 4;
 
 void read_aie_metadata_hw(const char* data, size_t size, pt::ptree& aie_project)
