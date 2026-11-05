@@ -639,6 +639,7 @@ static int ve2_aux_init(struct amdxdna_dev *xdna)
 		XDNA_WARN(xdna, "No parent DT node, skipping CMA region and topology init");
 	}
 
+	ve2_tdr_start(xdna);
 	XDNA_INFO(xdna, "VE2 device ready (host-queue=%s)",
 		  enable_polling ? "polling" : "interrupt");
 
@@ -652,6 +653,7 @@ static void ve2_aux_fini(struct amdxdna_dev *xdna)
 	if (!hdl)
 		return;
 
+	ve2_tdr_stop(xdna);
 	ve2_cma_mem_region_remove(xdna);
 	XDNA_DBG(xdna, "VE2 device cleanup");
 }
