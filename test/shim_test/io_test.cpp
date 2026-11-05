@@ -963,7 +963,7 @@ TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
  * uses), both unfiltered (all contexts) and per (ctx_id, pid) pair.
  *
  * Design: the test process creates APP_HEALTH_NUM_CTX "good run" contexts
- * (npu4: PREEMPT_PARTIAL_ELF, npu3: PREEMPT_FULL_ELF). All contexts share the
+ * (npu4: PREEMPT_PARTIAL_ELF, npu3: PREEMPT_FULL_ELF, npu12: FULL_ELF). All contexts share the
  * test's own pid and get distinct context_ids. The workload is replayed on
  * each context (io_test_bo_set_base::run_on_ctx()) until firmware reports
  * app-health for every context, bounded by APP_HEALTH_WARMUP_ITERS rounds.
@@ -980,13 +980,17 @@ TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sde
   auto dev = sdev.get();
   const int64_t pid = static_cast<int64_t>(::getpid());
   static const flow_type flow_preempt_partial = PREEMPT_PARTIAL_ELF;
-  static const flow_type flow_full = PREEMPT_FULL_ELF;
+  static const flow_type flow_preempt_full = PREEMPT_FULL_ELF;
+  static const flow_type flow_full = FULL_ELF;
   const flow_type flow = [&]() -> flow_type {
-    try {
-      return get_binary_info(dev, "good", &flow_preempt_partial).flow;
-    } catch (const std::runtime_error&) {
-      return get_binary_info(dev, "good", &flow_full).flow;
+    //  Full ELF fallback for npu's without preemptible ELF
+    for (const flow_type* f : {&flow_preempt_partial, &flow_preempt_full, &flow_full}) {
+      try {
+        return get_binary_info(dev, "good", f).flow;
+      } catch (const std::runtime_error&) {
+      }
     }
+    throw std::runtime_error("no \"good\" binary for app health test");
   }();
 
   io_test_parameter_init(IO_TEST_NO_PERF, IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT);
