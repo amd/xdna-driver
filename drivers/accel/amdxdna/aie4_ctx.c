@@ -490,13 +490,16 @@ static bool aie4_hwctx_has_reset(struct amdxdna_hwctx *hwctx)
  * All four rows are graceful destroys; a non-graceful destroy never asks for a
  * restore id and never reports NO_RESTORE.
  *
- * On resume, a failed create ctx is handled the same way on every row. The
- * create already cleared the restore id, so it is not used again.
- * aie4_hwctx_resume_all() stops at that ctx and returns the error, so some ctx
- * are created and some are not. The resume callback, aie4_vf_resume() or
- * aie4_classic_resume(), then destroys every ctx as AIE4_HWCTX_ERROR, drains
- * their jobs so user space gets its commands back, stops the hardware and
- * fails the resume. A failed reset does the same.
+ * On resume, a create ctx request that firmware fails with a restore id is
+ * retried once from scratch, as in row 3. The create already cleared the
+ * restore id, so it is not used again. A create that fails before it sends
+ * the request keeps the id and is not retried. Any other failed create is
+ * handled the same way on every row. aie4_hwctx_resume_all() stops at that
+ * ctx and returns the error, so some ctx are created and some are not. The
+ * resume callback, aie4_vf_resume() or aie4_classic_resume(), then destroys
+ * every ctx as AIE4_HWCTX_ERROR, drains their jobs so user space gets its
+ * commands back, stops the hardware and fails the resume. A failed reset does
+ * the same.
  */
 void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx, enum aie4_hwctx_flags flags)
 {
