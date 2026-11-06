@@ -27,7 +27,7 @@
  * and is common to the aie2 and aie4 firmware. The categorization of an
  * event_id (which category / driver error number it maps to) is specific to the
  * AIE generation, so it is NOT here: each back end supplies its own tables via
- * struct amdxdna_dev_info.luts.
+ * struct aie_async_error_desc.luts.
  */
 
 /* Do not pack, unless the AIE side changes */
@@ -174,7 +174,7 @@ enum aie_error_category
 aie_lookup_error_category(struct aie_device *aie,
 			  u8 row, u8 event_id, u32 mod_type, const char **name)
 {
-	const struct aie_error_lut_set *set = aie->xdna->dev_info->luts;
+	const struct aie_error_lut_set *set = &aie->xdna->dev_info->async_error->luts;
 	const struct aie_error_event *tbl;
 	const struct aie_error_event *e;
 
@@ -207,8 +207,9 @@ aie_lookup_error_category(struct aie_device *aie,
 }
 
 /*
- * Decode one AIE tile error into @d using the arch's category tables (ops->luts)
- * for the category and event name, then the shared num/module/string mapping.
+ * Decode one AIE tile error into @d using the arch's category tables
+ * (async_error->luts) for the category and event name, then the shared
+ * num/module/string mapping.
  */
 static void amdxdna_aie_decode_one(struct aie_device *aie,
 				   u8 row, u8 event_id, u32 mod_type,
@@ -339,10 +340,10 @@ static void amdxdna_async_error_worker(struct work_struct *err_work)
 	 * at the sentinel. Skip decode and re-registration in that case so the
 	 * dying channel is not touched.
 	 */
-	if (e->resp.status == info->async_max_status_code)
+	if (e->resp.status == info->async_error->max_status_code)
 		return;
 
-	e->resp.status = info->async_max_status_code;
+	e->resp.status = info->async_error->max_status_code;
 
 	/* Invalidate stale cache lines before reading the device-written report. */
 	amdxdna_cache_flush(e->buf, e->size);
@@ -418,7 +419,7 @@ int amdxdna_async_events_alloc(struct aie_device *aie,
 
 		INIT_WORK(&e->work, amdxdna_async_error_worker);
 
-		e->resp.status = xdna->dev_info->async_max_status_code;
+		e->resp.status = xdna->dev_info->async_error->max_status_code;
 		e->addr = to_dma_addr(e->hdl, 0);
 		e->buf = to_cpu_addr(e->hdl, 0);
 		e->size = ASYNC_BUF_SIZE;

@@ -73,7 +73,7 @@ struct amdxdna_rev_vbnv;
 struct amdxdna_sched_job;
 struct amdxdna_msg_buf_hdl;
 struct aie_device;
-struct aie_error_lut_set;
+struct aie_async_error_desc;
 
 /*
  * struct amdxdna_dev_ops - Device hardware operation callbacks
@@ -169,9 +169,8 @@ struct amdxdna_dev_info {
 	/* Use two-level HSA indirect packets for distributed commands. */
 	bool				hsa_level2_indirect;
 
-	/* Asynchronous error reporting data (per AIE generation). */
-	const struct aie_error_lut_set	*luts;
-	u32				async_max_status_code;
+	/* Asynchronous error protocol, shared by every part of an AIE generation. */
+	const struct aie_async_error_desc *async_error;
 
 	/* NULL when the device does not support DRM_AMDXDNA_QUERY_AIE_LOAD. */
 	const struct amdxdna_aie_activity *aie_activity;

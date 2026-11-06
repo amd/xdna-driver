@@ -6,7 +6,6 @@
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_device.h>
 
-#include "aie4_msg_priv.h"
 #include "aie4_pci.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_sensors.h"
@@ -183,8 +182,7 @@ const struct amdxdna_dev_info dev_npu3_pf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_pf_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
 };
 
@@ -198,8 +196,7 @@ const struct amdxdna_dev_info dev_npu3_vf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_vf_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 };
 
 const struct amdxdna_dev_info dev_npu3_classic_info = {
@@ -214,8 +211,7 @@ const struct amdxdna_dev_info dev_npu3_classic_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_classic_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
 };
 
@@ -230,8 +226,7 @@ const struct amdxdna_dev_info dev_npu9_pf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_pf_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
 };
 
@@ -245,8 +240,7 @@ const struct amdxdna_dev_info dev_npu9_vf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_vf_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 };
 
 const struct amdxdna_dev_info dev_npu9_classic_info = {
@@ -261,8 +255,7 @@ const struct amdxdna_dev_info dev_npu9_classic_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_classic_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
 };
 
@@ -277,8 +270,7 @@ const struct amdxdna_dev_info dev_npu10_pf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_pf_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
 };
 
@@ -292,8 +284,7 @@ const struct amdxdna_dev_info dev_npu10_vf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_vf_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 };
 
 const struct amdxdna_dev_info dev_npu10_classic_info = {
@@ -308,8 +299,7 @@ const struct amdxdna_dev_info dev_npu10_classic_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_classic_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
 };
 
@@ -324,8 +314,7 @@ const struct amdxdna_dev_info dev_npu11_pf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_pf_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
 };
 
@@ -339,8 +328,7 @@ const struct amdxdna_dev_info dev_npu11_vf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_vf_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 };
 
 const struct amdxdna_dev_info dev_npu11_classic_info = {
@@ -355,7 +343,6 @@ const struct amdxdna_dev_info dev_npu11_classic_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_classic_ops,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
 };
