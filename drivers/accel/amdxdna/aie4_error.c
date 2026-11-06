@@ -520,11 +520,14 @@ static const struct aie_error_event aie4_mem_tile_error_events[] = {
  * core and mem both point at the combined table because AIE4 merges the
  * core-tile core and mem module error broadcast switch.
  */
-const struct aie_error_lut_set aie4_error_luts = {
-	.shim		= aie4_shim_tile_error_events,
-	.core		= aie4_core_mem_error_events,
-	.mem_tile	= aie4_mem_tile_error_events,
-	.mem		= aie4_core_mem_error_events,
+const struct aie_async_error_desc aie4_async_error_desc = {
+	.luts			= {
+		.shim		= aie4_shim_tile_error_events,
+		.core		= aie4_core_mem_error_events,
+		.mem_tile	= aie4_mem_tile_error_events,
+		.mem		= aie4_core_mem_error_events,
+	},
+	.max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 int aie4_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,

@@ -7,7 +7,6 @@
 #include <linux/bits.h>
 
 #include "aie4.h"
-#include "aie4_msg_priv.h"
 #include "aie4_plat.h"
 #include "amdxdna_drv.h"
 #include "amdxdna_plat_drv.h"
@@ -69,7 +68,6 @@ const struct amdxdna_dev_info dev_npu12_info = {
 	.hsa_level2_indirect = true,
 	.fw_feature_tbl	= npu12_fw_feature_table,
 	.cert_feature_tbl = npu12_cert_feature_table,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu12_aie_activity,
 };
