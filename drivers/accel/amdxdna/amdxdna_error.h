@@ -75,8 +75,8 @@ enum amdxdna_error_module {
  * backtrack and last-error encode, and the GET_ARRAY query. The device specific
  * pieces come from the device tables: the register-event and handle-event
  * callbacks in struct amdxdna_dev_ops, and the MAX status code and the
- * per-generation AIE tile-error categorization tables (luts) in
- * struct amdxdna_dev_info.
+ * per-generation AIE tile-error categorization tables (luts) in the
+ * struct aie_async_error_desc that struct amdxdna_dev_info points at.
  */
 
 /* Per-event async report buffer size. Shared by aie2 and aie4 firmware. */
@@ -160,6 +160,16 @@ struct aie_error_lut_set {
 };
 
 /*
+ * Describes one AIE generation's asynchronous error protocol. Every part of
+ * that generation shares a single instance.
+ */
+struct aie_async_error_desc {
+	struct aie_error_lut_set	luts;
+	/* One past the last status firmware sends; marks an unanswered slot. */
+	u32				max_status_code;
+};
+
+/*
  * Shared module-dispatch + lookup for the per-arch event-category tables. Sets
  * *name (default "unknown"), selects the table by module (and row for MEM),
  * runs the match loop, and returns the error category.
@@ -192,7 +202,7 @@ struct amdxdna_aie_err_decode {
  * Fill the generic (arch-independent) parts of a decode: the driver error
  * number / module and the human-readable module, category and event strings.
  * The shared backtrack code calls this after looking up the category and event
- * name in the per-arch tables (via ops->luts).
+ * name in the per-arch tables (via async_error->luts).
  */
 void amdxdna_aie_fill_decode(enum aie_error_category cat, u32 mod_type,
 			     const char *event_name,
