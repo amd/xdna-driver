@@ -491,18 +491,24 @@ static int aie4_save_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
 
 /*
  * Push the pool back before any context is recreated: a restore id means
- * nothing to firmware until its pool is in place. A push that fails takes
- * every entry with it, so drop the ids too.
+ * nothing to firmware until its pool is in place. A VF cannot tell whether the
+ * PF suspended firmware after it, so the pool is pushed on every resume.
+ * Firmware that stayed up rejects it and still honours the ids. Any other
+ * failure takes every entry with it, so drop the ids too.
  */
 static void aie4_restore_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_msg_buf_hdl *buf_hdl = ndev->restore_pool_hdl;
+	int ret;
 
 	if (!buf_hdl)
 		return;
 
-	if (aie4_msg_set_ctx_restore_pool(ndev, to_dma_addr(buf_hdl, 0),
-					  to_buf_size(buf_hdl)))
+	ret = aie4_msg_set_ctx_restore_pool(ndev, to_dma_addr(buf_hdl, 0),
+					    to_buf_size(buf_hdl));
+	if (ret == -EEXIST)
+		XDNA_DBG(ndev->aie.xdna, "Firmware kept its ctx restore pool");
+	else if (ret)
 		aie4_clear_ctx_restore_ids(ndev);
 
 	aie4_free_ctx_restore_pool(ndev);
@@ -1827,7 +1833,19 @@ int aie4_hwctx_resume_all(struct amdxdna_dev_hdl *ndev)
 	amdxdna_for_each_client(xdna, client) {
 		idx = srcu_read_lock(&client->hwctx_srcu);
 		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+			bool restore = hwctx->priv->restore_id;
+
 			ret = aie4_hwctx_create(hwctx);
+			/*
+			 * Firmware lost the state behind the restore id. Retry from
+			 * scratch only if the create sent the id and dropped it; an
+			 * earlier failure would repeat with the same id.
+			 */
+			if (ret && restore && !hwctx->priv->restore_id) {
+				XDNA_WARN(xdna, "ctx %s restore failed %d, recreating it",
+					  hwctx->name, ret);
+				ret = aie4_hwctx_create(hwctx);
+			}
 			if (ret)
 				goto error;
 			aie4_hwctx_resume_jobs(hwctx);
