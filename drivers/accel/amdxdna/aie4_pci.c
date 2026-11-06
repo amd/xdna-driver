@@ -706,9 +706,9 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 			return ret;
 	}
 
-	ret = amdxdna_async_events_alloc(&ndev->aie, AMDXDNA_MAX_ASYNC_EVENT_BUFS);
+	ret = amdxdna_async_events_init(&ndev->aie);
 	if (ret) {
-		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
+		XDNA_ERR(ndev->aie.xdna, "Register async events failed, ret %d", ret);
 		goto partition_fini;
 	}
 
@@ -725,6 +725,45 @@ partition_fini:
 	if (!AIE4_PART_PER_HWCTX(ndev->aie.xdna))
 		aie4_partition_destroy(ndev, ndev->partition_id);
 	return ret;
+}
+
+/*
+ * Send firmware a full SUSPEND so that it drops the async error buffer
+ * registrations it is holding and the buffers behind them can be freed. There
+ * is no narrower opcode: firmware clears its registry only while handling a
+ * SUSPEND, which also powers the domains down and hands PMFW its consent to
+ * cut power. This costs more than the release it is here for.
+ *
+ * Firmware keeps the DMA addresses amdxdna_async_events_init() handed it, and
+ * it writes a report into one of them before it touches the mailbox, so the
+ * host cannot refuse the write once the memory is gone. Send from the hw
+ * restart error unwind, while the mailbox is still up, so a probe failing
+ * after any slot was armed does not free memory firmware still has an address
+ * for. amdxdna_async_events_init() can also fail partway and leave the slots
+ * it already armed registered, which this covers as well. The resume and
+ * reset_done unwinds reach here too, and keep their buffers, so for them the
+ * suspend is the whole of the effect.
+ *
+ * Best effort, because the failure being unwound may itself be a firmware or
+ * mailbox failure. A mailbox timeout destroys the management channel, and
+ * -ETIME says nothing about what firmware took, so this can be reached with
+ * slots still registered and no channel left to ask for them back, and the
+ * release is impossible by then. So only a suspend firmware acknowledged counts
+ * as one: amdxdna_async_events_abandon() keeps the registered buffers on any
+ * unwind that did not get that far, rather than handing back memory firmware
+ * can still write into. The send is bounded by a 100 us poll for x2i ring space
+ * and by RX_TIMEOUT, 5 s, waiting for the response; the TX_TIMEOUT
+ * xdna_mailbox_send_msg() takes is never read.
+ */
+static void aie4_fw_release_async_events(struct amdxdna_dev_hdl *ndev)
+{
+	if (!ndev->aie.mgmt_chann)
+		return;
+
+	if (aie4_suspend_fw(ndev))
+		return;
+
+	amdxdna_async_events_released(&ndev->aie);
 }
 
 //FIX this after fw_load can work after FLR
@@ -804,7 +843,15 @@ static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
 	return 0;
 
 mbox_fini:
+	/*
+	 * No aie4_fw_release_async_events() here: firmware routes a VF suspend
+	 * past the code that clears the async buffer registry, so it would cost
+	 * a full suspend and release nothing. A probe failing after any slot was
+	 * armed keeps those buffers instead, in amdxdna_async_events_abandon().
+	 */
 	aie4_mailbox_fini(ndev);
+	/* Unarm a partially-armed async pool after the mailbox is stopped. */
+	amdxdna_async_events_fini(&ndev->aie);
 	return ret;
 }
 
@@ -818,10 +865,13 @@ static void aie4_vf_hw_stop(struct amdxdna_dev_hdl *ndev)
 		aie4_partition_destroy(ndev, ndev->partition_id);
 	aie4_mailbox_fini(ndev);
 	/*
-	 * Free the async pool after the mailbox is torn down so channel teardown
-	 * cannot fire the async callback on freed event slots.
+	 * Unarm and drain after the mailbox is torn down: channel teardown
+	 * fires the async callback for every slot still registered, which
+	 * queues the report worker. Draining any earlier would leave those
+	 * workers to run unattended after this returns. The buffers stay
+	 * allocated for the next hw start.
 	 */
-	amdxdna_async_events_free(&ndev->aie);
+	amdxdna_async_events_fini(&ndev->aie);
 }
 
 //FIX this after fw_load can work after FLR
@@ -848,7 +898,10 @@ static int aie4_classic_hw_restart(struct amdxdna_dev_hdl *ndev)
 	return 0;
 
 mbox_fini:
+	aie4_fw_release_async_events(ndev);
 	aie4_mailbox_fini(ndev);
+	/* Unarm a partially-armed async pool after the mailbox is stopped. */
+	amdxdna_async_events_fini(&ndev->aie);
 	return ret;
 }
 
@@ -880,10 +933,13 @@ static void aie4_classic_hw_stop(struct amdxdna_dev_hdl *ndev)
 		aie4_partition_destroy(ndev, ndev->partition_id);
 	aie4_teardown_fw(ndev);
 	/*
-	 * Free the async pool after the mailbox is torn down so channel teardown
-	 * cannot fire the async callback on freed event slots.
+	 * Unarm and drain after the mailbox is torn down: channel teardown
+	 * fires the async callback for every slot still registered, which
+	 * queues the report worker. Draining any earlier would leave those
+	 * workers to run unattended after this returns. The buffers stay
+	 * allocated for the next hw start.
 	 */
-	amdxdna_async_events_free(&ndev->aie);
+	amdxdna_async_events_fini(&ndev->aie);
 }
 
 static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
@@ -1580,6 +1636,18 @@ void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
 	ndev->work_buf_hdl = NULL;
 }
 
+static int aie4_alloc_async_events(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	ret = amdxdna_async_events_alloc(&ndev->aie, AMDXDNA_MAX_ASYNC_EVENT_BUFS);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to alloc async events, ret %d", ret);
+
+	return ret;
+}
+
 int aie4_get_array(struct amdxdna_client *client,
 		   struct amdxdna_drm_get_array *args)
 {
@@ -1846,7 +1914,7 @@ int aie4_hwctx_reconnect_all(struct amdxdna_dev_hdl *ndev)
  * -> teardown_fw               |  Y    |  -    |   Y
  *      -> suspend_fw           |  Y    |  -    |   Y
  * -> mailbox_fini              |  -    |  Y    |   -
- * -> async_events_free         |  -    |  Y    |   Y
+ * -> unarm_async_event         |  -    |  Y    |   Y
  *    ---- power boundary ----
  * <- pci_enable + set_master   |  Y    |  Y    |   Y
  * <- fw_load                   |  Y    |  -    |   Y
@@ -1862,7 +1930,7 @@ int aie4_hwctx_reconnect_all(struct amdxdna_dev_hdl *ndev)
  *      <- set_dpm_cap_table    |  Y    |  -    |   Y
  * <- setup_aie                 |  -    |  Y    |   Y
  *      <- partition_init       |  -    |  Y    |   Y
- *      <- async_events_alloc   |  -    |  Y    |   Y
+ *      <- arm_async_event      |  -    |  Y    |   Y
  *      <- set_power_hint       |  -    |  Y    |   Y
  *      <- restore_power_mode   |  -    |  Y    |   Y
  * <- hwctx_resume_all          |  -    |  Y    |   Y
@@ -1901,11 +1969,10 @@ static int aie4_vf_suspend(struct amdxdna_dev *xdna)
 	/* when PF and VF both present, PF suspend will do cleanup for all VFs */
 	aie4_mailbox_fini(ndev);
 	/*
-	 * Mirror the stop path: free the async pool after the mailbox is torn
-	 * down (resume re-allocates it) to avoid leaking the workqueue and the
-	 * per-column DMA buffers across suspend/resume.
+	 * Mirror the stop path: unarm the async pool after the mailbox is torn
+	 * down. The buffers are kept so resume only has to re-arm them.
 	 */
-	amdxdna_async_events_free(&ndev->aie);
+	amdxdna_async_events_fini(&ndev->aie);
 
 	XDNA_DBG(xdna, "vf suspend done");
 	return 0;
@@ -2081,7 +2148,7 @@ pci_disable:
  * -> dpt_reset_prepare         |  Y  |  Y  |   Y
  * -> hwctx_disconnect_all      |  -  |  Y  |   Y
  * -> mailbox_fini              |  Y  |  Y  |   Y
- * -> async_events_free         |  -  |  Y  |   Y
+ * -> unarm_async_event         |  -  |  Y  |   Y
  * -> fw_clear_alive            |  Y  |  Y  |   Y
  *    ---- FLR boundary ----
  * <- zero_work_buffer          |  Y  |  -  |   Y
@@ -2098,7 +2165,7 @@ pci_disable:
  *      <- set_dpm_cap_table    |  Y  |  -  |   Y
  * <- setup_aie                 |  -  |  Y  |   Y
  *      <- partition_init       |  -  |  Y  |   Y
- *      <- async_events_alloc   |  -  |  Y  |   Y
+ *      <- arm_async_event      |  -  |  Y  |   Y
  *      <- set_power_hint       |  -  |  Y  |   Y
  *      <- restore_power_mode   |  -  |  Y  |   Y
  * <- restore_sriov             |  Y  |  -  |   -
@@ -2195,11 +2262,14 @@ static void aie4_vf_reset_prepare(struct amdxdna_dev *xdna)
 	aie4_hwctx_disconnect_all(ndev);
 	aie4_mailbox_fini(ndev);
 	/*
-	 * Free async event pool after mailbox teardown to prevent channel
-	 * cleanup from firing callbacks on freed slots.
-	 * reset_done re-allocates via aie4_setup_aie.
+	 * Unarm and drain after mailbox teardown: channel cleanup fires the
+	 * async callback for every slot still registered, which queues the
+	 * report worker. Draining any earlier would leave those workers to run
+	 * unattended into the reset window. The buffers outlive the reset; an
+	 * FLR makes firmware forget the registrations, so reset_done arms them
+	 * again via aie4_setup_aie().
 	 */
-	amdxdna_async_events_free(&ndev->aie);
+	amdxdna_async_events_fini(&ndev->aie);
 	aie4_fw_clear_alive(xdna);
 }
 
@@ -2258,11 +2328,14 @@ static void aie4_classic_reset_prepare(struct amdxdna_dev *xdna)
 	aie4_mailbox_fini(ndev);
 
 	/*
-	 * Free async event pool after mailbox teardown to prevent channel
-	 * cleanup from firing callbacks on freed slots.
-	 * reset_done re-allocates via aie4_setup_aie.
+	 * Unarm and drain after mailbox teardown: channel cleanup fires the
+	 * async callback for every slot still registered, which queues the
+	 * report worker. Draining any earlier would leave those workers to run
+	 * unattended into the reset window. The buffers outlive the reset; an
+	 * FLR makes firmware forget the registrations, so reset_done arms them
+	 * again via aie4_setup_aie().
 	 */
-	amdxdna_async_events_free(&ndev->aie);
+	amdxdna_async_events_fini(&ndev->aie);
 
 	aie4_fw_clear_alive(xdna);
 }
@@ -2351,12 +2424,20 @@ static int aie4_vf_init(struct amdxdna_dev *xdna)
 	if (ret)
 		return ret;
 
-	ret = aie4_vf_hw_start(xdna->dev_handle);
+	ret = aie4_alloc_async_events(xdna->dev_handle);
 	if (ret)
 		return ret;
 
+	ret = aie4_vf_hw_start(xdna->dev_handle);
+	if (ret)
+		goto free_async_events;
+
 	aie4_xdna_init(xdna);
 	return 0;
+
+free_async_events:
+	amdxdna_async_events_abandon(&xdna->dev_handle->aie);
+	return ret;
 }
 
 static int aie4_classic_init(struct amdxdna_dev *xdna)
@@ -2371,14 +2452,20 @@ static int aie4_classic_init(struct amdxdna_dev *xdna)
 	if (ret)
 		goto fw_unload;
 
+	ret = aie4_alloc_async_events(xdna->dev_handle);
+	if (ret)
+		goto fw_unload;
+
 	/* aie4_select_fw() left the firmware running, so skip aie4_fw_load() */
 	ret = aie4_classic_hw_restart(xdna->dev_handle);
 	if (ret)
-		goto fw_unload;
+		goto free_async_events;
 
 	aie4_xdna_init(xdna);
 	return 0;
 
+free_async_events:
+	amdxdna_async_events_abandon(&xdna->dev_handle->aie);
 fw_unload:
 	aie4_fw_unload(xdna->dev_handle);
 	aie4_free_work_buffer(xdna->dev_handle);
@@ -2406,6 +2493,7 @@ static void aie4_vf_fini(struct amdxdna_dev *xdna)
 	aie4_xdna_fini(xdna);
 	aie4_vf_hw_stop(xdna->dev_handle);
 	aie4_free_ctx_restore_pool(xdna->dev_handle);
+	amdxdna_async_events_free(&xdna->dev_handle->aie);
 }
 
 static void aie4_classic_fini(struct amdxdna_dev *xdna)
@@ -2413,6 +2501,7 @@ static void aie4_classic_fini(struct amdxdna_dev *xdna)
 	aie4_xdna_fini(xdna);
 	aie4_classic_hw_stop(xdna->dev_handle);
 	aie4_free_ctx_restore_pool(xdna->dev_handle);
+	amdxdna_async_events_free(&xdna->dev_handle->aie);
 	aie4_free_work_buffer(xdna->dev_handle);
 }
 

@@ -7,7 +7,6 @@
 #include <linux/bits.h>
 
 #include "aie4.h"
-#include "aie4_msg_priv.h"
 #include "ve2.h"
 #include "amdxdna_drv.h"
 #include "amdxdna_ve2_drv.h"
@@ -48,6 +47,5 @@ const struct amdxdna_dev_info dev_ve2_info = {
 	.hsa_level2_indirect	= true,
 	.fw_feature_tbl		= ve2_fw_feature_table,
 	.cert_feature_tbl	= ve2_cert_feature_table,
-	.luts			= &aie4_error_luts,
-	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+	.async_error		= &aie4_async_error_desc,
 };
