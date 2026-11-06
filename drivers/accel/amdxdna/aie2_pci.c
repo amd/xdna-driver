@@ -124,11 +124,10 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 	x2i->rb_size         = info_regs.x2i_buf_sz;
 
 	ndev->aie.mgmt_chan_idx  = info_regs.msi_id;
-	ndev->aie.mgmt_prot_major = info_regs.prot_major;
-	ndev->aie.mgmt_prot_minor = info_regs.prot_minor;
+	ndev->aie.fw_prot_major  = info_regs.prot_major;
+	ndev->aie.fw_prot_minor  = info_regs.prot_minor;
 
-	ret = aie_check_protocol(&ndev->aie, ndev->aie.mgmt_prot_major,
-				 ndev->aie.mgmt_prot_minor);
+	ret = aie_check_protocol(&ndev->aie);
 
 done:
 	aie_dump_mgmt_chann_debug(&ndev->aie);

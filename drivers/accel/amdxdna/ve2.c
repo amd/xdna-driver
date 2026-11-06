@@ -211,7 +211,9 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	if (ret)
 		goto mbox_fini;
 
-	ret = aie_check_protocol(&ndev->aie, xdna->fw_ver.major, xdna->fw_ver.minor);
+	ndev->aie.fw_prot_major = xdna->fw_ver.major;
+	ndev->aie.fw_prot_minor = xdna->fw_ver.minor;
+	ret = aie_check_protocol(&ndev->aie);
 	if (ret) {
 		XDNA_ERR(xdna, "firmware %u.%u is not supported",
 			 xdna->fw_ver.major, xdna->fw_ver.minor);
