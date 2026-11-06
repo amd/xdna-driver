@@ -34,8 +34,8 @@ void aie_dump_mgmt_chann_debug(struct aie_device *aie)
 	XDNA_DBG(xdna, "x2i ringbuf 0x%x", aie->mgmt_x2i.rb_start_addr);
 	XDNA_DBG(xdna, "x2i rsize   0x%x", aie->mgmt_x2i.rb_size);
 	XDNA_DBG(xdna, "x2i chann index 0x%x", aie->mgmt_chan_idx);
-	XDNA_DBG(xdna, "mailbox protocol major 0x%x", aie->mgmt_prot_major);
-	XDNA_DBG(xdna, "mailbox protocol minor 0x%x", aie->mgmt_prot_minor);
+	XDNA_DBG(xdna, "fw protocol major 0x%x", aie->fw_prot_major);
+	XDNA_DBG(xdna, "fw protocol minor 0x%x", aie->fw_prot_minor);
 }
 
 void aie_destroy_chann(struct aie_device *aie, struct mailbox_channel **chann)
@@ -98,9 +98,9 @@ static int aie_check_protocol_impl(struct aie_device *aie, u32 fw_major, u32 fw_
 	return found ? 0 : -EOPNOTSUPP;
 }
 
-int aie_check_protocol(struct aie_device *aie, u32 fw_major, u32 fw_minor)
+int aie_check_protocol(struct aie_device *aie)
 {
-	return aie_check_protocol_impl(aie, fw_major, fw_minor,
+	return aie_check_protocol_impl(aie, aie->fw_prot_major, aie->fw_prot_minor,
 				       aie->xdna->dev_info->fw_feature_tbl);
 }
 

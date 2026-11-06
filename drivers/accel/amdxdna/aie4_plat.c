@@ -235,7 +235,9 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 	 * the firmware supports it.  Must run before config_fw(), whose clock
 	 * calibration is gated on AIE4_CALIBRATE_CLOCK.
 	 */
-	ret = aie_check_protocol(&ndev->aie, xdna->fw_ver.major, xdna->fw_ver.minor);
+	ndev->aie.fw_prot_major = xdna->fw_ver.major;
+	ndev->aie.fw_prot_minor = xdna->fw_ver.minor;
+	ret = aie_check_protocol(&ndev->aie);
 	if (ret)
 		goto mbox_fini;
 

@@ -56,8 +56,8 @@ struct aie_device {
 	struct xdna_mailbox_chann_res mgmt_x2i;
 	struct xdna_mailbox_chann_res mgmt_i2x;
 	u32 mgmt_chan_idx;
-	u32 mgmt_prot_major;
-	u32 mgmt_prot_minor;
+	u32 fw_prot_major;
+	u32 fw_prot_minor;
 	unsigned long feature_mask;
 
 	struct psp_device *psp_hdl;
@@ -167,7 +167,7 @@ struct amdxdna_rev_vbnv {
 void aie_dump_mgmt_chann_debug(struct aie_device *aie);
 void aie_destroy_chann(struct aie_device *aie, struct mailbox_channel **chann);
 int aie_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg);
-int aie_check_protocol(struct aie_device *aie, u32 fw_major, u32 fw_minor);
+int aie_check_protocol(struct aie_device *aie);
 int aie_check_cert_protocol(struct aie_device *aie, u32 cert_major, u32 cert_minor);
 void amdxdna_vbnv_init(struct amdxdna_dev *xdna);
 int amdxdna_get_metadata(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);

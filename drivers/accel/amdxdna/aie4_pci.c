@@ -155,6 +155,7 @@ static void aie4_read_mbox_info(struct amdxdna_dev *xdna,
 static int aie4_mailbox_info(struct amdxdna_dev *xdna,
 			     struct mailbox_info *mbox_info)
 {
+	struct aie_device *aie = &xdna->dev_handle->aie;
 	int ret;
 
 	ret = aie4_fw_is_alive(xdna);
@@ -163,9 +164,10 @@ static int aie4_mailbox_info(struct amdxdna_dev *xdna,
 
 	aie4_read_mbox_info(xdna, mbox_info);
 
-	ret = aie_check_protocol(&xdna->dev_handle->aie,
-				 mbox_info->protocol_major,
-				 mbox_info->protocol_minor);
+	aie->fw_prot_major = mbox_info->protocol_major;
+	aie->fw_prot_minor = mbox_info->protocol_minor;
+
+	ret = aie_check_protocol(aie);
 	if (ret)
 		XDNA_ERR(xdna, "mailbox major.minor %d.%d is not supported",
 			 mbox_info->protocol_major, mbox_info->protocol_minor);
