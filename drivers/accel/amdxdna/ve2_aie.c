@@ -116,7 +116,12 @@ int ve2_aie_partition_initialize(struct device *aie_dev, enum ve2_aie_init_mode 
 
 	ret = aie_partition_initialize(aie_dev, &args);
 	kfree(hs);
-	return ret;
+	/*
+	 * The AIE partition driver returns a positive number of initialized
+	 * handshake columns on success. Keep the VE2 adapter convention used by
+	 * its callers: zero means success and negative values are errors.
+	 */
+	return ret < 0 ? ret : 0;
 }
 
 int ve2_aie_partition_wake_lead_uc(struct device *aie_dev)
@@ -144,5 +149,27 @@ int ve2_aie_write(struct device *aie_dev, u32 col, u32 row, size_t offset,
 {
 	struct aie_location loc = { .col = col, .row = row };
 
-	return aie_partition_write(aie_dev, loc, offset, size, buf, 0);
+	int ret;
+
+	ret = aie_partition_write(aie_dev, loc, offset, size, buf, 0);
+	/* A successful register write returns the number of bytes written. */
+	return ret < 0 ? ret : 0;
+}
+
+int ve2_aie_priv_read(struct device *aie_dev, size_t offset, size_t size, void *buf)
+{
+	int ret;
+
+	ret = aie_partition_read_privileged_mem(aie_dev, offset, size, buf);
+	/* Successful privileged reads return their byte count on this kernel. */
+	return ret < 0 ? ret : 0;
+}
+
+int ve2_aie_priv_write(struct device *aie_dev, size_t offset, size_t size, void *buf)
+{
+	int ret;
+
+	ret = aie_partition_write_privileged_mem(aie_dev, offset, size, buf);
+	/* Successful privileged writes return their byte count on this kernel. */
+	return ret < 0 ? ret : 0;
 }
