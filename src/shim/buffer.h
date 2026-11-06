@@ -4,6 +4,18 @@
 #ifndef BUFFER_XDNA_H
 #define BUFFER_XDNA_H
 
+// DMA read barrier: ensures device-written (non-cacheable DMA) memory is
+// visible.  On aarch64 uses outer-shareable ordering ("dmb oshld"),
+// equivalent to the kernel's dma_rmb().  On x86 TSO no barrier is needed.
+// Other architectures require an explicit port.
+#ifdef __aarch64__
+#define SHIM_DMA_RMB() asm volatile("dmb oshld" ::: "memory")
+#elif defined(__x86_64__) || defined(__i386__)
+#define SHIM_DMA_RMB() do {} while (0)
+#else
+#error "Add an appropriate DMA read barrier (SHIM_DMA_RMB) for this architecture"
+#endif
+
 #include "pcidev.h"
 #include "shared.h"
 #include "hwctx.h"
@@ -164,6 +176,17 @@ public:
   uint64_t
   wait_for_submitted() const;
 
+  // Serialize complete_command() calls on this buffer and issue a DMA
+  // read barrier so CERT-written fields in non-cacheable DMA memory are
+  // visible to all reads that follow.
+  std::unique_lock<std::mutex>
+  lock_completion() const
+  {
+    auto lg = std::unique_lock<std::mutex>(m_completion_lock);
+    SHIM_DMA_RMB();
+    return lg;
+  }
+
   std::set<bo_id>
   get_arg_bo_ids() const override;
 
@@ -184,6 +207,7 @@ private:
   mutable bool m_submitted = false;
   // Changed only once in the life time of cmd BO.
   mutable std::condition_variable m_submission_cv;
+  mutable std::mutex m_completion_lock;
 };
 
 class dbg_buffer : public buffer
