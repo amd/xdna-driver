@@ -91,6 +91,7 @@ static const struct aie4_role_allow aie4_opcode_allow[] = {
 static const struct aie4_role_allow aie4_runtime_cfg_allow[] = {
 	{ AIE4_RUNTIME_CONFIG_FORCE_PREEMPTION,		AIE4_OP_CP },
 	{ AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL,		AIE4_OP_CP },
+	{ AIE4_RUNTIME_CONFIG_CERT_TIMEOUT,		AIE4_OP_CP },
 	{ AIE4_RUNTIME_CONFIG_HWS_DEBUG_MODE,		AIE4_OP_CP },
 	{ AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS,	AIE4_OP_CP },
 	{ AIE4_RUNTIME_CONFIG_CONFIGURE_DPM,		AIE4_OP_CP },
@@ -775,6 +776,25 @@ int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us)
 			  timeout_us, ret);
 	else
 		XDNA_DBG(ndev->aie.xdna, "Context switch hysteresis set to %u us", timeout_us);
+
+	return ret;
+}
+
+int aie4_set_cert_timeout(struct amdxdna_dev_hdl *ndev, u32 timeout_ms)
+{
+	struct aie4_msg_runtime_config_cert_timeout cfg = {
+		.timeout_ms = timeout_ms,
+	};
+	int ret;
+
+	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_CERT_TIMEOUT,
+				   &cfg, sizeof(cfg));
+	if (ret)
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set CERT opcode timeout to %u ms (%d)",
+			  timeout_ms, ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "CERT opcode timeout set to %u ms", timeout_ms);
 
 	return ret;
 }

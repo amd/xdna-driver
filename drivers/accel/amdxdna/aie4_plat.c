@@ -159,8 +159,8 @@ static void aie4_mailbox_fini(struct amdxdna_dev_hdl *ndev)
 
 /*
  * Platform equivalent of the PCI aie4_config_fw(): calibrate the clock, attach
- * the DRAM work buffer and apply the context-switch hysteresis.  (The PCI-only
- * NPU3A iommu-bypass echo does not apply here.)
+ * the DRAM work buffer, and apply the context-switch hysteresis and the CERT
+ * opcode timeout.  (The PCI-only NPU3A iommu-bypass echo does not apply here.)
  */
 static int aie4_plat_config_fw(struct amdxdna_dev_hdl *ndev)
 {
@@ -175,8 +175,9 @@ static int aie4_plat_config_fw(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	/* Best-effort tuning knob; failure warns internally, does not fail init. */
+	/* Best-effort tuning knobs; failure warns internally, does not fail init. */
 	aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
+	aie4_set_cert_timeout(ndev, ndev->cert_timeout_ms);
 	return 0;
 }
 
@@ -204,6 +205,7 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 	 */
 	ndev->kernel_submit = true;
 	ndev->ctx_switch_hysteresis_us = AIE4_CTX_HYSTERESIS_US;
+	ndev->cert_timeout_ms = AIE4_CERT_TIMEOUT_MS;
 
 	/*
 	 * Bring the device up the same way aie4_classic_hw_start() does, minus the

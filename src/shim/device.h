@@ -39,6 +39,9 @@ public:
   uint32_t
   get_core_rows() const;
 
+  bool
+  is_platform_part() const;
+
 // ISHIM APIs supported are listed below
 public:
   void
