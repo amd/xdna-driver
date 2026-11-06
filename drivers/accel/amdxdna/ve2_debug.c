@@ -251,6 +251,16 @@ static int ve2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		return -EINVAL;
 	}
 
+	/*
+	 * Owning user (same euid) or CAP_SYS_ADMIN. Checked before any tile
+	 * memory is read, so a caller cannot dump another user's partition
+	 * by supplying that user's context_id and pid.
+	 */
+	if (!amdxdna_client_visible(hwctx->client)) {
+		XDNA_ERR(xdna, "Permission denied for hwctx %u", footer.context_id);
+		return -EPERM;
+	}
+
 	if (footer.col >= hwctx->num_col) {
 		XDNA_ERR(xdna, "col %u out of partition range [0, %u)",
 			 footer.col, hwctx->num_col);
