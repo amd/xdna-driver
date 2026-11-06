@@ -98,8 +98,15 @@ hwq::
 poll_command(xrt_core::buffer_handle *cmd) const
 {
   auto boh = static_cast<cmd_buffer*>(cmd);
+  // Hold m_completion_lock while reading state: serializes with
+  // complete_command() so the state read and any subsequent
+  // payload->error_index read are properly ordered.
+  auto lg = boh->lock_completion();
   auto cmdpkt = reinterpret_cast<volatile ert_packet *>(boh->vaddr());
   if (ert_cmd_state_is_terminal(cmdpkt->state)) {
+    // DMA read barrier: orders the terminal state load before any
+    // subsequent DMA result or health-data reads by the caller.
+    SHIM_DMA_RMB();
     XRT_TRACE_POINT_LOG(poll_command_done);
     return 1;
   }

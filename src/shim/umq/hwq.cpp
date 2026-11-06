@@ -338,7 +338,7 @@ issue_command(const cmd_buffer *cmd_bo)
 
   // Runlist command submission.
   auto payload = get_ert_cmd_chain_data(cmd);
-  if (payload->command_count == 0 || payload->command_count > 64)
+  if (payload->command_count == 0 || payload->command_count > m_umq_hdr->capacity)
     shim_err(EINVAL, "Runlist exec buf with bad num of subcmds: %zx", payload->command_count);
 
   uint64_t seq = 0;
@@ -391,34 +391,32 @@ hwq_umq::
 complete_command(xrt_core::buffer_handle *cmd) const
 {
   auto boh = static_cast<cmd_buffer*>(cmd);
+  auto lg = boh->lock_completion();
+  // Order the state loads below before the caller's DMA result reads, on
+  // every return path.
+  struct dma_rmb_on_exit { ~dma_rmb_on_exit() { SHIM_DMA_RMB(); } } rmb;
   auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
+
+  // Already completed: covers prior complete_command() calls and the KMS
+  // timeout/abort path where the driver sets the state before we run.
+  if (ert_cmd_state_is_terminal(cmdpkt->state))
+    return;
 
   // Single cmd completion, cmd state maybe updated by CERT (normal case), or by
   // driver (KMS + timeout), or by nobody (UMS + timeout).
   if (cmdpkt->opcode != ERT_CMD_CHAIN) {
-    if (!ert_cmd_state_is_terminal(cmdpkt->state)) {
-      // CERT failed to set error state properly.
-      if (is_kernel_mode_submission()) {
-        // In KMS, it is not expected.
-        shim_err(EINVAL, "Non-chained cmd completed with unexpected state: %u",
-          static_cast<unsigned int>(cmdpkt->state));
-      } else {
-        // In UMS, CERT may just timed out. Mark it as abort since no ctx health data.
-        cmdpkt->state = ERT_CMD_STATE_ABORT;
-      }
+    // CERT has not yet set a terminal state on this command.
+    if (is_kernel_mode_submission()) {
+      shim_err(EINPROGRESS, "Non-chained cmd not yet completed, state: %u",
+        static_cast<unsigned int>(cmdpkt->state));
     }
+    // In UMS, CERT may just timed out. Mark it as abort since no ctx health data.
+    cmdpkt->state = ERT_CMD_STATE_ABORT;
     return;
   }
 
-  // Chained cmd completion. Let's do some sanity check against the state.
-
-  // When cmd timed out, in KMS mode, driver will update state (either timeout or abort)
-  // and context health data (in case of timing out). Nothing needs to be done here.
-  if (cmdpkt->state == ERT_CMD_STATE_TIMEOUT || cmdpkt->state == ERT_CMD_STATE_ABORT)
-    return;
-  // When cmd timed out, in UMS mode, the state must stay as NEW.
-  // Or when cmd is completed by CERT normally, in both UMS/KMS mode, driver does not
-  // touch exec buf, so the state must also stay as NEW.
+  // Chained cmd completion. Command is completed by CERT normally (UMS or
+  // KMS): driver does not touch the exec buf, so the state must stay as NEW.
   if (cmdpkt->state != ERT_CMD_STATE_NEW) {
     shim_err(EINVAL, "Runlist exec buf completed with unexpected state: %u",
       static_cast<unsigned int>(cmdpkt->state));
@@ -446,34 +444,51 @@ complete_command(xrt_core::buffer_handle *cmd) const
   }
 
   // Error case, needs to walk through entire chain to see what happened.
+  // Only record the result here; the parent is not written until we know
+  // the chain is done, so a TIMEOUT and health data written by the driver
+  // are not overwritten when we bail out below.
+  uint32_t st = ERT_CMD_STATE_NEW;
+  size_t err_idx = 0;
+  bool found = false;
   for (size_t i = payload->command_count; i > 0; i--) {
     auto idx = i - 1;
     auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[idx]));
-    auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd->vaddr());
-    auto st = subcmd_pkt->state;
-    if (st != ERT_CMD_STATE_ABORT) {
-      payload->error_index = idx;
-      cmdpkt->state = st;
+    auto subcmd_pkt = reinterpret_cast<volatile ert_packet *>(subcmd->vaddr());
+    // Single snapshot: CERT may still be updating the state.
+    uint32_t sub_st = subcmd_pkt->state;
+    if (sub_st != ERT_CMD_STATE_ABORT) {
+      st = sub_st;
+      err_idx = idx;
+      found = true;
       break;
     }
   }
 
-  if (!ert_cmd_state_is_terminal(cmdpkt->state)) {
-    // CERT failed to set error state properly.
+  // CERT never aborts every sub-command, so this is a broken chain rather
+  // than one still in progress.
+  if (!found)
+    shim_err(EINVAL, "Chained cmd has all sub-cmds aborted");
+
+  if (!ert_cmd_state_is_terminal(st)) {
+    // Command not yet complete.
     if (is_kernel_mode_submission()) {
-      // In KMS, it is not expected.
       for (size_t j = 0; j < payload->command_count; j++) {
         auto sc = static_cast<const cmd_buffer *>(
           m_pdev.find_bo_by_handle(payload->data[j]));
         auto pkt = reinterpret_cast<ert_packet *>(sc->vaddr());
 	shim_debug("sub-cmd[%zu] state=%d", j, static_cast<unsigned int>(pkt->state));
       }
-      shim_err(EINVAL, "Chained cmd completed with unexpected state in subcmds");
-    } else {
-      // In UMS, CERT may just timed out. Mark it as abort since no ctx health data.
-      cmdpkt->state = ERT_CMD_STATE_ABORT;
+      shim_err(EINPROGRESS, "Chained cmd not yet completed");
     }
+    // In UMS, CERT may just timed out. Mark it as abort since no ctx health data.
+    st = ERT_CMD_STATE_ABORT;
   }
+
+  // m_completion_lock (held by lock_completion()) orders error_index
+  // before cmdpkt->state: poll_command() takes the same lock before
+  // reading state, so error_index is always visible when state is.
+  payload->error_index = err_idx;
+  cmdpkt->state = st;
 }
 
 int
@@ -514,16 +529,44 @@ int
 hwq_umq::
 poll_command(xrt_core::buffer_handle *cmd) const
 {
-  // Nothing needs to be done, if it's already completed.
+  // Check the BO state first.  For KMS, the driver or CERT always writes a
+  // terminal state; for UMS, CERT writes it on normal completion (a timeout
+  // with no CERT response leaves it NEW, handled below via read_index).
   if (hwq::poll_command(cmd))
-      return 1;
+    return 1;
 
   auto boh = static_cast<cmd_buffer*>(cmd);
   auto seq = boh->wait_for_submitted();
+
+  // When the driver uses a private queue buffer (no-PASID KMQ), write_index
+  // in umq_bo is never updated (stays 0 from the shim's memset).  Use this
+  // as the indicator and make a brief 1 ms driver round trip instead.
+  if (m_umq_hdr->write_index == 0) {
+    // Driver is not updating umq_bo.  Make a brief driver round trip to
+    // check command state.
+    try {
+      if (!hwq::wait_command(seq, 1))
+        return 0;
+    } catch (const xrt_core::system_error& ex) {
+      if (ex.get_code() == EAGAIN || ex.get_code() == EINTR)
+        return 0;  // transient: context recovering or signal interrupted
+      throw;
+    }
+    // complete_command() throws EINPROGRESS when the command is not yet
+    // done (e.g. spurious fence signal from virtio backend).
+    try {
+      complete_command(cmd);
+    } catch (const xrt_core::system_error& ex) {
+      if (ex.get_code() == EINPROGRESS)
+        return 0;  // spurious signal, command not done yet
+      throw;
+    }
+    return 1;
+  }
+
   if (m_umq_hdr->read_index <= seq)
     return 0;
 
-  // Command is completed as indicated by read index, update result.
   complete_command(cmd);
   return 1;
 }

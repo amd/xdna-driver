@@ -6,7 +6,7 @@
 
 namespace shim_xdna {
 
-// Allow at least one runlist (24 sub-cms) plus a few single cmds.
+// Queue capacity: limits both single commands in flight and chain length.
 const size_t total_queue_slots = 32;
 
 hwctx_umq::
