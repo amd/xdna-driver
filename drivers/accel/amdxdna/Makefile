@@ -65,7 +65,7 @@ modules:
 	if [ ! -f "$(SRC_DIR)/config_kernel.h" ]; then \
 		[ -f "$$cfg_script" ] || { echo "[ERROR] config_kernel.h missing and configure_kernel.sh not found"; exit 1; }; \
 		echo "[INFO] Generating config_kernel.h via $$cfg_script"; \
-		ARCH="$(ARCH)" CROSS_COMPILE="$(CROSS_COMPILE)" KERNEL_SRC="$(KERNEL_SRC)" \
+		$(if $(ARCH),ARCH="$(ARCH)") CROSS_COMPILE="$(CROSS_COMPILE)" KERNEL_SRC="$(KERNEL_SRC)" \
 			OUT="$(SRC_DIR)/config_kernel.h" sh "$$cfg_script" || \
 			{ echo "[ERROR] config_kernel.h generation failed"; exit 1; }; \
 	fi
