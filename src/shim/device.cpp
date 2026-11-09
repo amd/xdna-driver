@@ -2660,7 +2660,7 @@ initialize_query_table()
   emplace_func0_request<query::aie_partition_info,             partition_info>();
   emplace_func0_request<query::total_mem_usage,               total_mem_usage>();
   emplace_func0_request<query::xocl_errors,                    xocl_errors>();
-  emplace_func1_request<query::context_health_info,            context_health_info>();
+  emplace_func4_request<query::context_health_info,            context_health_info>();
   emplace_func0_request<query::aie_status_version,             aie_info>();
   emplace_func0_request<query::aie_tiles_stats,                aie_info>();
   emplace_func1_request<query::aie_tiles_status_info,          aie_info>();
@@ -2709,7 +2709,7 @@ initialize_query_table()
   emplace_func4_request<query::sdm_sensor_info,                sensor_info>();
   emplace_func4_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,                  xrt_smi_lists>();
-  emplace_func1_request<query::firmware_version,               firmware_version>();
+  emplace_func4_request<query::firmware_version,               firmware_version>();
   emplace_func0_request<query::cert_firmware_version,          cert_firmware_version>();
   emplace_func1_request<query::sub_device_path,                sub_device_path>();
   emplace_func1_request<query::aie_coredump,                   aie_coredump>();
