@@ -2656,7 +2656,7 @@ initialize_query_table()
   emplace_func0_request<query::aie_partition_info,             partition_info>();
   emplace_func0_request<query::total_mem_usage,               total_mem_usage>();
   emplace_func0_request<query::xocl_errors,                    xocl_errors>();
-  emplace_func4_request<query::context_health_info,            context_health_info>();
+  emplace_func1_request<query::context_health_info,            context_health_info>();
   emplace_func0_request<query::aie_status_version,             aie_info>();
   emplace_func0_request<query::aie_tiles_stats,                aie_info>();
   emplace_func1_request<query::aie_tiles_status_info,          aie_info>();
