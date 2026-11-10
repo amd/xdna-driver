@@ -19,6 +19,7 @@
 #include <drm/drm_drv.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_managed.h>
+#include <linux/moduleparam.h>
 #include <linux/xarray.h>
 
 #include "aie4.h"
@@ -30,6 +31,14 @@
 #include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_pm.h"
+
+/*
+ * Test-only maximum AIE column window. partition_arbitration loads the module
+ * with max_col=24 to exercise temporal sharing on a 24-column partition.
+ */
+static int ve2_max_col;
+module_param_named(max_col, ve2_max_col, int, 0644);
+MODULE_PARM_DESC(max_col, "Maximum AIE columns available to the VE2 allocator");
 
 /*
  * Layout aie4_hwctx_umq_init() requires when hsa_level2_indirect is set.
@@ -87,11 +96,20 @@ static void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	ve2_hsa_queue_free(hwctx);
 }
 
-/* The doorbell is addressed by priv->hw_ctx_id; there is nothing to map. */
+/*
+ * The doorbell is addressed by priv->hw_ctx_id; register the aie4-owned
+ * queue indices with the VE2 transport so a shared partition can schedule
+ * this context without changing the aie4 command path.
+ */
 int aie4_doorbell_setup(struct amdxdna_hwctx *hwctx,
 			const struct aie4_msg_create_hw_context_resp *resp)
 {
-	return 0;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	return ve2_mbox_bind_ctx(ndev->mbox, resp->hw_context_id,
+				 priv->umq_read_index, &priv->write_index);
 }
 
 void aie4_doorbell_ring(struct amdxdna_hwctx *hwctx)
@@ -223,6 +241,17 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	ret = aie4_setup_aie(ndev);
 	if (ret)
 		goto mbox_fini;
+
+	ret = ve2_mbox_set_max_cols(ndev->mbox, ve2_max_col);
+	if (ret) {
+		XDNA_ERR(xdna, "invalid max_col %d for %u-column AIE, ret %d",
+			 ve2_max_col, ndev->total_col, ret);
+		goto mbox_fini;
+	}
+	if (ve2_max_col) {
+		ndev->total_col = ve2_max_col;
+		XDNA_INFO(xdna, "VE2 allocator limited to %u columns", ndev->total_col);
+	}
 
 	aie4_msg_init(ndev);
 	amdxdna_dpt_init(&ndev->aie);
