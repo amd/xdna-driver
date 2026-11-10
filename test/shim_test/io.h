@@ -194,6 +194,7 @@ private:
 
   bool m_is_full_elf = false;
   bool m_is_aie4 = false;
+  bool m_is_vf = false;
   uint32_t m_expect_cmd_status;
   uint32_t m_expect_ctx_health_val;
   uint32_t m_expect_ctx_error_type = no_ctx_error_type;
