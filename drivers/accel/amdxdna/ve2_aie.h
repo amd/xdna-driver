@@ -51,5 +51,7 @@ int ve2_aie_read(struct device *aie_dev, u32 col, u32 row, size_t offset,
 		 size_t size, void *buf);
 int ve2_aie_write(struct device *aie_dev, u32 col, u32 row, size_t offset,
 		  size_t size, void *buf);
+int ve2_aie_priv_read(struct device *aie_dev, size_t offset, size_t size, void *buf);
+int ve2_aie_priv_write(struct device *aie_dev, size_t offset, size_t size, void *buf);
 
 #endif /* _VE2_AIE_H_ */
