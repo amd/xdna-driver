@@ -604,12 +604,17 @@ static int aie4_config_fw(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	/* Firmware releases the DRAM work buffer internally during suspend_fw */
-	ret = aie4_attach_work_buffer(ndev,
-				      to_dma_addr(ndev->work_buf_hdl, 0),
-				      to_buf_size(ndev->work_buf_hdl));
-	if (ret)
-		return ret;
+	/*
+	 * Firmware releases the DRAM work buffer internally during suspend_fw.
+	 * There is none when probe could not allocate it.
+	 */
+	if (ndev->work_buf_hdl) {
+		ret = aie4_attach_work_buffer(ndev,
+					      to_dma_addr(ndev->work_buf_hdl, 0),
+					      to_buf_size(ndev->work_buf_hdl));
+		if (ret)
+			return ret;
+	}
 
 	/* Best-effort tuning knobs; failure is warned inside and does not fail hw start. */
 	aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
@@ -727,6 +732,32 @@ partition_fini:
 	return ret;
 }
 
+/*
+ * Suspend the firmware before a failed restart tears its mailbox down, as
+ * aie4_teardown_fw() does. Firmware withdraws PMFW's consent to power-off on
+ * the first driver message and grants it again only while handling SUSPEND,
+ * so without one the aie4_fw_unload() of a failed probe or resume cannot power
+ * the NPU off, and the SMU then refuses every later probe. A timed-out message
+ * destroys the channel, and then no SUSPEND can be sent.
+ */
+static void aie4_restart_unwind_suspend(struct amdxdna_dev_hdl *ndev)
+{
+	if (ndev->aie.mgmt_chann)
+		aie4_suspend_fw(ndev);
+}
+
+/* Query and configure the firmware once its mailbox is up. */
+static int aie4_pf_hw_config(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	ret = aie4_query_fw(ndev);
+	if (ret)
+		return ret;
+
+	return aie4_config_fw(ndev);
+}
+
 //FIX this after fw_load can work after FLR
 static int aie4_pf_hw_restart(struct amdxdna_dev_hdl *ndev)
 {
@@ -736,17 +767,14 @@ static int aie4_pf_hw_restart(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	ret = aie4_query_fw(ndev);
-	if (ret)
-		goto mbox_fini;
-
-	ret = aie4_config_fw(ndev);
+	ret = aie4_pf_hw_config(ndev);
 	if (ret)
 		goto mbox_fini;
 
 	return 0;
 
 mbox_fini:
+	aie4_restart_unwind_suspend(ndev);
 	aie4_mailbox_fini(ndev);
 	return ret;
 }
@@ -824,6 +852,22 @@ static void aie4_vf_hw_stop(struct amdxdna_dev_hdl *ndev)
 	amdxdna_async_events_free(&ndev->aie);
 }
 
+/* Query, configure and set up the firmware once its mailbox is up. */
+static int aie4_classic_hw_config(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	ret = aie4_query_fw(ndev);
+	if (ret)
+		return ret;
+
+	ret = aie4_config_fw(ndev);
+	if (ret)
+		return ret;
+
+	return aie4_setup_aie(ndev);
+}
+
 //FIX this after fw_load can work after FLR
 static int aie4_classic_hw_restart(struct amdxdna_dev_hdl *ndev)
 {
@@ -833,21 +877,14 @@ static int aie4_classic_hw_restart(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	ret = aie4_query_fw(ndev);
-	if (ret)
-		goto mbox_fini;
-
-	ret = aie4_config_fw(ndev);
-	if (ret)
-		goto mbox_fini;
-
-	ret = aie4_setup_aie(ndev);
+	ret = aie4_classic_hw_config(ndev);
 	if (ret)
 		goto mbox_fini;
 
 	return 0;
 
 mbox_fini:
+	aie4_restart_unwind_suspend(ndev);
 	aie4_mailbox_fini(ndev);
 	return ret;
 }
@@ -2319,27 +2356,43 @@ static void aie4_xdna_fini(struct amdxdna_dev *xdna)
 
 static int aie4_pf_init(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev;
 	int ret;
 
 	ret = aie4m_pcidev_init(xdna);
 	if (ret)
 		return ret;
 
-	ret = aie4_alloc_work_buffer(xdna->dev_handle);
+	/*
+	 * aie4_select_fw() left the firmware running, so probe skips
+	 * aie4_fw_load(). No driver message has reached the firmware yet, and
+	 * until one does it lets aie4_fw_unload() shut it down through PSP and
+	 * SMU without a SUSPEND, which a failed mailbox setup relies on.
+	 */
+	ndev = xdna->dev_handle;
+	ret = aie4_mailbox_init(ndev);
 	if (ret)
 		goto fw_unload;
 
-	/* aie4_select_fw() left the firmware running, so skip aie4_fw_load() */
-	ret = aie4_pf_hw_restart(xdna->dev_handle);
+	/* Not fatal: without a work buffer firmware refuses hardware contexts */
+	ret = aie4_alloc_work_buffer(ndev);
 	if (ret)
-		goto fw_unload;
+		XDNA_WARN(xdna, "No work buffer, ret %d, hardware context creation will fail",
+			  ret);
+
+	ret = aie4_pf_hw_config(ndev);
+	if (ret)
+		goto mbox_fini;
 
 	aie4_xdna_init(xdna);
 	return 0;
 
+mbox_fini:
+	aie4_restart_unwind_suspend(ndev);
+	aie4_mailbox_fini(ndev);
 fw_unload:
-	aie4_fw_unload(xdna->dev_handle);
-	aie4_free_work_buffer(xdna->dev_handle);
+	aie4_fw_unload(ndev);
+	aie4_free_work_buffer(ndev);
 	return ret;
 }
 
@@ -2361,27 +2414,38 @@ static int aie4_vf_init(struct amdxdna_dev *xdna)
 
 static int aie4_classic_init(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev;
 	int ret;
 
 	ret = aie4m_pcidev_init(xdna);
 	if (ret)
 		return ret;
 
-	ret = aie4_alloc_work_buffer(xdna->dev_handle);
+	/* Running firmware, no message sent yet: see aie4_pf_init() */
+	ndev = xdna->dev_handle;
+	ret = aie4_mailbox_init(ndev);
 	if (ret)
 		goto fw_unload;
 
-	/* aie4_select_fw() left the firmware running, so skip aie4_fw_load() */
-	ret = aie4_classic_hw_restart(xdna->dev_handle);
+	/* Not fatal: without a work buffer firmware refuses hardware contexts */
+	ret = aie4_alloc_work_buffer(ndev);
 	if (ret)
-		goto fw_unload;
+		XDNA_WARN(xdna, "No work buffer, ret %d, hardware context creation will fail",
+			  ret);
+
+	ret = aie4_classic_hw_config(ndev);
+	if (ret)
+		goto mbox_fini;
 
 	aie4_xdna_init(xdna);
 	return 0;
 
+mbox_fini:
+	aie4_restart_unwind_suspend(ndev);
+	aie4_mailbox_fini(ndev);
 fw_unload:
-	aie4_fw_unload(xdna->dev_handle);
-	aie4_free_work_buffer(xdna->dev_handle);
+	aie4_fw_unload(ndev);
+	aie4_free_work_buffer(ndev);
 	return ret;
 }
 
