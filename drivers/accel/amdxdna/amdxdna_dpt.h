@@ -8,6 +8,7 @@
 #include <linux/mutex.h>
 #include <linux/refcount.h>
 #include <linux/sizes.h>
+#include <linux/spinlock.h>
 #include <linux/string.h>
 #include <linux/timer.h>
 #include <linux/types.h>
@@ -120,11 +121,18 @@ struct amdxdna_dpt {
 	struct mutex			 tail_lock;	/* tail updates */
 	u64				 tail;		/* kernel cache of FW write pointer */
 
-	/* MSI / IRQ wiring (irq == 0 means request_irq failed) */
+	/* aie2 MSI-X notification backend state (irq == 0 means none requested) */
 	void __iomem			*io_base;
 	int				 irq;
 	u32				 msi_idx;
 	u32				 msi_address;
+
+	/*
+	 * Notification gate: amdxdna_dpt_notify() queues the worker only while
+	 * notify_armed is set.
+	 */
+	spinlock_t			 notify_lock;	/* notify_armed */
+	bool				 notify_armed;
 
 	/* deferred work + on-demand polling timer */
 	struct work_struct		 work;
@@ -175,16 +183,20 @@ int amdxdna_dpt_reset_prepare(struct amdxdna_dev *xdna);
 int amdxdna_dpt_reset_done(struct amdxdna_dev *xdna);
 
 /*
- * Transport completion notification. The common DPT code calls
- * amdxdna_dpt_notification_init/fini; exactly one transport backend is linked.
- * The PCI backend (amdxdna_dpt_pci.c) wires an MSI-X interrupt, using
+ * Firmware write notification. A backend calls amdxdna_dpt_notify() when the
+ * firmware reports that it has written to a ring, or amdxdna_dpt_chan_notify()
+ * when it knows only the channel, and the worker then refreshes the tail. The
+ * optional dpt_notify_* hooks in struct aie_msg_ops set the notification up,
+ * tear it down and acknowledge it.
+ *
+ * aie2 wires the MSI-X vector that the firmware reports at ring setup, using
  * amdxdna_dpt_irq_name() to fetch the request_irq name from the channel desc
- * that is private to amdxdna_dpt.c. The platform backend (amdxdna_dpt_plat.c)
- * has no MSI-X and reports "no IRQ" so the common code polls on demand.
+ * that is private to amdxdna_dpt.c. aie4 and VE2 set none of these hooks and
+ * rely on on-demand polling.
  */
 const char *amdxdna_dpt_irq_name(const struct amdxdna_dpt *dpt);
-int amdxdna_dpt_notification_init(struct amdxdna_dpt *dpt);
-void amdxdna_dpt_notification_fini(struct amdxdna_dpt *dpt);
+void amdxdna_dpt_notify(struct amdxdna_dpt *dpt);
+void amdxdna_dpt_chan_notify(struct amdxdna_dpt_chan *chan);
 
 /* dmesg-dump consumer control (debugfs). */
 int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable);

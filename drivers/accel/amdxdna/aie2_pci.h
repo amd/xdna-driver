@@ -285,6 +285,10 @@ int aie2_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories);
 int aie2_fw_trace_config(struct amdxdna_dev *xdna, u32 categories);
 int aie2_fw_trace_fini(struct amdxdna_dev *xdna);
 
+int aie2_dpt_notify_init(struct amdxdna_dpt *dpt);
+void aie2_dpt_notify_fini(struct amdxdna_dpt *dpt);
+void aie2_dpt_notify_ack(struct amdxdna_dpt *dpt);
+
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_set_context_priority(struct amdxdna_hwctx *hwctx, u32 qos_priority);
