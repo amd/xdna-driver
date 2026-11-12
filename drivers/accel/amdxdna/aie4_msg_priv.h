@@ -910,7 +910,4 @@ struct aie4_msg_set_fw_trace_categories_resp {
 	enum aie4_msg_status status;
 } __packed;
 
-/* MSI address mask used for the AIE4 DPT (FW log / FW trace) IRQ. */
-#define AIE4_DPT_MSI_ADDR_MASK		GENMASK(23, 0)
-
 #endif /* _AIE4_MSG_PRIV_H_ */
