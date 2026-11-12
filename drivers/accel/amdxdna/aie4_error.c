@@ -21,6 +21,7 @@
 #include "aie4_msg_priv.h"
 #include "amdxdna_coredump.h"
 #include "amdxdna_ctx.h"
+#include "amdxdna_dpt.h"
 #include "amdxdna_error.h"
 #include "amdxdna_drv.h"
 
@@ -407,9 +408,11 @@ static void aie4_async_note_worker(struct work_struct *work)
 
 /*
  * Channel async callback for firmware-initiated messages. Runs in the mailbox
- * RX worker, so it must not block and defers the real work. Returns -ENOMSG for
- * any ID other than AIE4_ASYNC_MSG_ID, and 0 otherwise so a notification can
- * never wedge the channel.
+ * RX worker, so it must not block and defers the real work, except for a DPT
+ * watermark note: amdxdna_dpt_chan_notify() does not sleep, and forwarding it
+ * inline keeps it from waiting behind context-error recovery. Returns -ENOMSG
+ * for any ID other than AIE4_ASYNC_MSG_ID, and 0 otherwise so a notification
+ * can never wedge the channel.
  */
 int aie4_mgmt_async_event_handler(void *handle, u32 msg_id, u32 opcode,
 				  void __iomem *data, size_t size)
@@ -440,6 +443,14 @@ int aie4_mgmt_async_event_handler(void *handle, u32 msg_id, u32 opcode,
 
 	event_id = readl(&msg->event_id);
 	switch (event_id) {
+	case AIE4_ASYNC_NOTE_FW_LOG_WATERMARK:
+		XDNA_DBG(xdna, "async notification %s", aie4_async_note_str(event_id));
+		amdxdna_dpt_chan_notify(&xdna->fw_log);
+		return 0;
+	case AIE4_ASYNC_NOTE_FW_TRACE_WATERMARK:
+		XDNA_DBG(xdna, "async notification %s", aie4_async_note_str(event_id));
+		amdxdna_dpt_chan_notify(&xdna->fw_trace);
+		return 0;
 	case AIE4_ASYNC_NOTE_REPORT_DROPPED:
 		async_event_type = readl(&msg->report_dropped.async_event_type);
 		ctx_id = readl(&msg->report_dropped.ctx_id);
