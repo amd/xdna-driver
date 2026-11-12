@@ -342,19 +342,33 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 		 client && amdxdna_client_has_pending_jobs(client));
 
 	down_write(&xdna->notifier_lock);
-	if (client && list_empty(&abo->node))
-		list_add_tail(&abo->node, &client->bo_invalid_list);
-	abo->mem.map_invalid = true;
-	mapp->invalid = true;
-	mmu_interval_set_seq(&mapp->notifier, cur_seq);
-	if (range->event == MMU_NOTIFY_UNMAP && !mapp->unmapped) {
-		mapp->unmapped = true;
-		queue_work(xdna->notifier_wq, &abo->hmm_unreg_work);
+	if (range->event == MMU_NOTIFY_UNMAP) {
+		/*
+		 * The application tore down its own mapping (munmap, mremap,
+		 * MAP_FIXED). A command still using it is an application bug:
+		 * do not drain in-flight jobs and never fault the range back in.
+		 */
+		if (!mapp->unmapped) {
+			mapp->unmapped = true;
+			queue_work(xdna->notifier_wq, &abo->hmm_unreg_work);
+		}
+	} else {
+		if (client && list_empty(&abo->node))
+			list_add_tail(&abo->node, &client->bo_invalid_list);
+		abo->mem.map_invalid = true;
+		mapp->invalid = true;
 	}
+	mmu_interval_set_seq(&mapp->notifier, cur_seq);
 	up_write(&xdna->notifier_lock);
 
 	if (client) {
-		amdxdna_client_wait_idle(client);
+		/*
+		 * Pages change under a live mapping (reclaim, migration, CoW) or
+		 * the mm is going away (RELEASE at exit, before our file release
+		 * runs): stop device access before returning.
+		 */
+		if (range->event != MMU_NOTIFY_UNMAP)
+			amdxdna_client_wait_idle(client);
 		srcu_read_unlock(&client->hwctx_srcu, srcu_idx);
 	}
 
@@ -1810,7 +1824,9 @@ again:
 	 * keeps retrying until the notifier returns. New jobs therefore cannot
 	 * be pushed to the device while the mapping is being torn down, and
 	 * amdxdna_client_wait_idle() drains only the jobs already in flight at
-	 * the time of invalidation.
+	 * the time of invalidation. An MMU_NOTIFY_UNMAP invalidation does not
+	 * drain: the application unmapped the range itself, and such a range is
+	 * marked unmapped and never repopulated here.
 	 */
 	down_write(&xdna->notifier_lock);
 	if (mmu_interval_read_retry(&mapp->notifier, mapp->range.notifier_seq)) {
