@@ -331,11 +331,9 @@ int aie4_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg
 int aie4_set_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type,
 			 const void *data, size_t size);
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
-		      struct amdxdna_msg_buf_hdl *buf_hdl, u8 level,
-		      size_t size, u32 *msi_idx, u32 *msi_address);
+		      struct amdxdna_msg_buf_hdl *buf_hdl, u8 level, size_t size);
 int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
-			struct amdxdna_msg_buf_hdl *buf_hdl, size_t size,
-			u32 categories, u32 *msi_idx, u32 *msi_address);
+			struct amdxdna_msg_buf_hdl *buf_hdl, size_t size, u32 categories);
 
 /*
  * Partition geometry required by the npu12 platform firmware: a column count

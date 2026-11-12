@@ -2540,7 +2540,6 @@ int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_dpt *dpt;
-	u32 msi_idx = 0, msi_address = 0;
 	int ret;
 
 	if (level >= AIE4_FW_LOG_LEVEL_MAX) {
@@ -2555,16 +2554,12 @@ int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level)
 		return -ENXIO;
 	}
 
-	ret = aie4_start_fw_log(ndev, dpt->buf, level, size, &msi_idx, &msi_address);
+	ret = aie4_start_fw_log(ndev, dpt->buf, level, size);
 	if (ret) {
 		if (ret != -EOPNOTSUPP)
 			XDNA_ERR(xdna, "Failed to start FW log: %d", ret);
 		return ret;
 	}
-
-	dpt->io_base = ndev->mbox_base;
-	dpt->msi_address = msi_address & AIE4_DPT_MSI_ADDR_MASK;
-	dpt->msi_idx = msi_idx;
 
 	return 0;
 }
@@ -2624,7 +2619,6 @@ void aie4_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
 int aie4_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	u32 msi_idx = 0, msi_address = 0;
 	struct amdxdna_dpt *dpt;
 	int ret;
 
@@ -2635,17 +2629,12 @@ int aie4_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
 		return -ENXIO;
 	}
 
-	ret = aie4_start_fw_trace(ndev, dpt->buf, size, categories, &msi_idx,
-				  &msi_address);
+	ret = aie4_start_fw_trace(ndev, dpt->buf, size, categories);
 	if (ret) {
 		if (ret != -EOPNOTSUPP)
 			XDNA_ERR(xdna, "Failed to start FW trace: %d", ret);
 		return ret;
 	}
-
-	dpt->io_base = ndev->mbox_base;
-	dpt->msi_address = msi_address & AIE4_DPT_MSI_ADDR_MASK;
-	dpt->msi_idx = msi_idx;
 
 	return 0;
 }

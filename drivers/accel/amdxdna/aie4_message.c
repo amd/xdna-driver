@@ -1072,7 +1072,7 @@ int aie4_get_dpm_bw_params(struct amdxdna_dev_hdl *ndev,
 
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
 		      struct amdxdna_msg_buf_hdl *buf_hdl, u8 level,
-		      size_t size, u32 *msi_idx, u32 *msi_address)
+		      size_t size)
 {
 	DECLARE_AIE_MSG(aie4_msg_start_fw_log, AIE4_MSG_OP_START_FW_LOG);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
@@ -1096,22 +1096,12 @@ int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
 		return ret;
 	}
 
-	/*
-	 * Unlike AIE2, the AIE4 firmware does not yet return MSI info in the
-	 * response. Fall back to no-IRQ mode -- on-demand polling driven by
-	 * amdxdna_dpt_timer_get keeps the watcher/dmesg paths working.
-	 */
-	if (msi_address)
-		*msi_address = 0;
-	if (msi_idx)
-		*msi_idx = 0;
-
 	return 0;
 }
 
 int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
 			struct amdxdna_msg_buf_hdl *buf_hdl, size_t size,
-			u32 categories, u32 *msi_idx, u32 *msi_address)
+			u32 categories)
 {
 	DECLARE_AIE_MSG(aie4_msg_start_fw_trace, AIE4_MSG_OP_START_FW_TRACE);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
@@ -1136,16 +1126,6 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
 			 ret, resp.status);
 		return ret;
 	}
-
-	/*
-	 * AIE4 firmware does not yet return MSI info in the trace response.
-	 * Fall back to no-IRQ mode; on-demand polling driven by
-	 * amdxdna_dpt_timer_get keeps watcher / dmesg paths working.
-	 */
-	if (msi_address)
-		*msi_address = 0;
-	if (msi_idx)
-		*msi_idx = 0;
 
 	return 0;
 }
