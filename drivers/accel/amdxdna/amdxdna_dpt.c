@@ -573,7 +573,11 @@ void amdxdna_dpt_chan_notify(struct amdxdna_dpt_chan *chan)
  * requested fires once request_irq() unmasks it, before the init hook
  * returns, and must find the gate armed or its ack consumes it without
  * queuing the worker. The gate stays armed when the init hook is absent or
- * fails. Returns the init hook result, or 0 without one.
+ * fails: aie4 has no init hook, yet its watermark notes must still queue the
+ * worker. A note is not held pending the way that interrupt is, so one
+ * handled between the firmware attach and the arm is lost; the worker queued
+ * on arming refreshes the tail in its place. Returns the init hook result,
+ * or 0 without one.
  */
 static int amdxdna_dpt_notify_start(struct amdxdna_dpt *dpt)
 {
@@ -581,6 +585,7 @@ static int amdxdna_dpt_notify_start(struct amdxdna_dpt *dpt)
 
 	spin_lock_irq(&dpt->notify_lock);
 	dpt->notify_armed = true;
+	queue_work(system_percpu_wq, &dpt->work);
 	spin_unlock_irq(&dpt->notify_lock);
 
 	if (!aie->msg_ops.dpt_notify_init)

@@ -129,7 +129,10 @@ struct amdxdna_dpt {
 
 	/*
 	 * Notification gate: amdxdna_dpt_notify() queues the worker only while
-	 * notify_armed is set.
+	 * notify_armed is set. An aie4 watermark note has no free_irq() to
+	 * synchronize with, and a worker it queued after teardown's
+	 * cancel_work_sync() could read local_buffer after the dmesg-dump
+	 * kvfree(), or run after the handle itself is freed.
 	 */
 	spinlock_t			 notify_lock;	/* notify_armed */
 	bool				 notify_armed;
@@ -191,8 +194,10 @@ int amdxdna_dpt_reset_done(struct amdxdna_dev *xdna);
  *
  * aie2 wires the MSI-X vector that the firmware reports at ring setup, using
  * amdxdna_dpt_irq_name() to fetch the request_irq name from the channel desc
- * that is private to amdxdna_dpt.c. aie4 and VE2 set none of these hooks and
- * rely on on-demand polling.
+ * that is private to amdxdna_dpt.c. aie4 firmware sends a FW_LOG or FW_TRACE
+ * watermark mailbox note each time it has written a threshold of bytes that it
+ * picks itself, and none while that threshold is zero. VE2 has neither and
+ * relies on on-demand polling.
  */
 const char *amdxdna_dpt_irq_name(const struct amdxdna_dpt *dpt);
 void amdxdna_dpt_notify(struct amdxdna_dpt *dpt);
