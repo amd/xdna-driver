@@ -91,7 +91,6 @@ amdxdna-y += \
 	aie4_debugfs.o \
 	aie4_dpt.o \
 	aie4_plat.o \
-	amdxdna_dpt_plat.o \
 	amdxdna_mailbox_plat.o \
 	amdxdna_plat_drv.o \
 	npu12_regs.o
@@ -102,7 +101,6 @@ amdxdna-y += \
 	aie4_debugfs.o \
 	aie4_dpt.o \
 	ve2.o \
-	amdxdna_dpt_plat.o \
 	amdxdna_mailbox_ve2.o \
 	ve2_aie.o \
 	amdxdna_ve2_drv.o \
@@ -110,7 +108,6 @@ amdxdna-y += \
 else
 amdxdna-y += \
 	aie4_pci.o \
-	amdxdna_dpt_pci.o \
 	amdxdna_mailbox.o \
 	amdxdna_pci_drv.o \
 	npu3_regs.o
