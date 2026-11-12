@@ -20,8 +20,8 @@
  * the generic category / module to driver-error mapping and stringify are
  * shared with aie4 and live in amdxdna_error.c. This file provides the aie2
  * specific pieces: the mailbox register call and the aie2 event_id to category
- * tables. The async status sentinel value (MAX_AIE2_STATUS_CODE) is wired into
- * dev_info.async_max_status_code by the npu*_regs.c device tables.
+ * tables. The async status sentinel value (MAX_AIE2_STATUS_CODE) is carried by
+ * aie2_async_error_desc, which the npu*_regs.c device tables point at.
  *
  * Map an AIE tile error event id to an error category for the aie2
  * generation. These are the enabled fatal error events per module;
@@ -91,11 +91,14 @@ static const struct aie_error_event aie2_shim_tile_error_events[] = {
 	{ }
 };
 
-const struct aie_error_lut_set aie2_error_luts = {
-	.shim		= aie2_shim_tile_error_events,
-	.core		= aie2_core_error_events,
-	.mem_tile	= aie2_mem_tile_error_events,
-	.mem		= aie2_mem_error_events,
+const struct aie_async_error_desc aie2_async_error_desc = {
+	.luts			= {
+		.shim		= aie2_shim_tile_error_events,
+		.core		= aie2_core_error_events,
+		.mem_tile	= aie2_mem_tile_error_events,
+		.mem		= aie2_mem_error_events,
+	},
+	.max_status_code	= MAX_AIE2_STATUS_CODE,
 };
 
 int aie2_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,

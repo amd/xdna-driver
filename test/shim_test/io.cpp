@@ -8,8 +8,10 @@
 #include "xrt/detail/xrt_error_code.h"
 #include "core/common/query_requests.h"
 
+#include <algorithm>
 #include <chrono>
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
@@ -70,14 +72,44 @@ verify_aie_async_error(const device* dev, uint64_t expect_err_code,
 // ert_uc_health_info::misc_status bit 1, see xrt/detail/ert.h.
 const uint32_t uc_misc_status_ctrl_code_hang = 0x2;
 
-void
-dump_aie4_ctx_health(const ert_ctx_health_data_v1* cdata)
+// Size of the uc_info array the driver fills, AMDXDNA_CTX_HEALTH_MAX_UC.
+const uint32_t aie4_ctx_health_max_uc = 6;
+
+// Validate the aie4 report at the start of a command payload of @payload_size
+// bytes and return a uC count that is safe to index uc_info with.
+uint32_t
+aie4_ctx_health_num_uc(const ert_ctx_health_data_v1* cdata, size_t payload_size)
 {
+  const size_t hdr_size = offsetof(ert_ctx_health_data_v1, aie4.uc_info);
+
+  if (payload_size < hdr_size) {
+    throw std::runtime_error(std::string("Command payload of ") + std::to_string(payload_size) +
+      " bytes is too small for a context health report");
+  }
+  if (cdata->version != ERT_CTX_HEALTH_DATA_V1 || cdata->npu_gen != NPU_GEN_AIE4) {
+    throw std::runtime_error(std::string("Not an aie4 context health report: version=") +
+      std::to_string(cdata->version) + ", npu_gen=" + std::to_string(cdata->npu_gen));
+  }
+
+  const size_t max_uc = std::min<size_t>(aie4_ctx_health_max_uc,
+    (payload_size - hdr_size) / sizeof(ert_uc_health_info));
+  if (cdata->aie4.num_uc > max_uc) {
+    throw std::runtime_error(std::string("Context health report uC count=") +
+      std::to_string(cdata->aie4.num_uc) + ", max=" + std::to_string(max_uc));
+  }
+  return cdata->aie4.num_uc;
+}
+
+void
+dump_aie4_ctx_health(const ert_ctx_health_data_v1* cdata, size_t payload_size)
+{
+  const uint32_t num_uc = aie4_ctx_health_num_uc(cdata, payload_size);
+
   std::cerr << "aie4 context health report:\n";
   std::cerr << "\tContext state: " << cdata->aie4.ctx_state << "\n";
-  std::cerr << "\tActive uC count: " << cdata->aie4.num_uc << "\n";
+  std::cerr << "\tActive uC count: " << num_uc << "\n";
   std::cerr << "\tContext error type: " << cdata->aie4.ctx_error_type << "\n";
-  for (uint32_t i = 0; i < cdata->aie4.num_uc; i++) {
+  for (uint32_t i = 0; i < num_uc; i++) {
     const auto& uc = cdata->aie4.uc_info[i];
     std::cerr << "\tuC[" << i << "]: idx: " << uc.uc_idx
               << " fw_state: " << uc.fw_state
@@ -89,10 +121,13 @@ dump_aie4_ctx_health(const ert_ctx_health_data_v1* cdata)
 // Unlike an AIE failure, a CERT context timeout carries an app health report,
 // so both the context error type and the uC hang flag are worth asserting.
 void
-verify_aie4_timeout_ctx_health(const ert_ctx_health_data_v1* cdata, uint32_t expect_err_type)
+verify_aie4_timeout_ctx_health(const ert_ctx_health_data_v1* cdata, size_t payload_size,
+                               uint32_t expect_err_type)
 {
+  const uint32_t num_uc = aie4_ctx_health_num_uc(cdata, payload_size);
+
   if (cdata->aie4.ctx_error_type != expect_err_type) {
-    dump_aie4_ctx_health(cdata);
+    dump_aie4_ctx_health(cdata, payload_size);
     throw std::runtime_error(std::string("Context error type=") +
       std::to_string(cdata->aie4.ctx_error_type) +
       ", expect=" + std::to_string(expect_err_type));
@@ -100,12 +135,12 @@ verify_aie4_timeout_ctx_health(const ert_ctx_health_data_v1* cdata, uint32_t exp
 
   // Firmware reports the hang against the uC that was running the control
   // code, so scan rather than assuming a fixed index or uC count.
-  for (uint32_t i = 0; i < cdata->aie4.num_uc; i++) {
+  for (uint32_t i = 0; i < num_uc; i++) {
     if (cdata->aie4.uc_info[i].misc_status & uc_misc_status_ctrl_code_hang)
       return;
   }
 
-  dump_aie4_ctx_health(cdata);
+  dump_aie4_ctx_health(cdata, payload_size);
   throw std::runtime_error("No uC reported a control code hang in the app health report");
 }
 
@@ -717,6 +752,7 @@ elf_io_negative_test_bo_set(device* dev, const std::string& tag)
   }
 
   m_is_aie4 = dev_filter_is_aie4(0, dev);
+  m_is_vf = dev_filter_is_npu3vf(0, dev);
   m_is_full_elf = (info.flow == FULL_ELF);
 
   // Expected code for the driver-synthesized AIE async error on an aie4 fault.
@@ -1196,10 +1232,13 @@ verify_result()
     // cached context error and the async error is all there is to assert.
     verify_aie_async_error(m_dev, m_expect_err_code, m_last_err_timestamp);
 
-    // A CERT context timeout does come with a report.
-    if (m_expect_ctx_error_type != no_ctx_error_type) {
+    // A CERT context timeout does come with a report, except on a VF: a VF
+    // registers no async report buffers by design, so a context error
+    // reaches it without a health report.
+    if (m_expect_ctx_error_type != no_ctx_error_type && !m_is_vf) {
       auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
-      verify_aie4_timeout_ctx_health(cdata, m_expect_ctx_error_type);
+      verify_aie4_timeout_ctx_health(cdata, cbo->size() - sizeof(cpkt->header),
+                                     m_expect_ctx_error_type);
     }
     return;
   }

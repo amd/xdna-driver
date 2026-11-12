@@ -378,11 +378,19 @@ static void aie4_async_note_worker(struct work_struct *work)
 			  aie4_async_note_str(ev->event_id), ev->ctx_id);
 		break;
 	case AIE4_ASYNC_NOTE_REPORT_DROPPED:
-		/* Nothing to recover, but make the lost report visible. */
 		XDNA_ERR(xdna,
 			 "async notification %s: no async buffer for event type %u, ctx_id=%u",
 			 aie4_async_note_str(ev->event_id), ev->async_event_type,
 			 ev->ctx_id);
+		/*
+		 * Firmware reports a context timeout or uC critical error in a
+		 * report buffer. With none free it sends only this note, so
+		 * recover the context here as the report path would. A VF
+		 * registers no buffers, so on a VF these errors always arrive
+		 * this way.
+		 */
+		if (ev->async_event_type == AIE4_ASYNC_EVENT_TYPE_CTX_ERROR)
+			aie4_async_note_ctx_error_recover(aie, ev->ctx_id);
 		break;
 	case AIE4_ASYNC_NOTE_POWER_ERROR:
 		XDNA_ERR(xdna, "async notification %s: unrecoverable power sequencing error",
@@ -520,11 +528,14 @@ static const struct aie_error_event aie4_mem_tile_error_events[] = {
  * core and mem both point at the combined table because AIE4 merges the
  * core-tile core and mem module error broadcast switch.
  */
-const struct aie_error_lut_set aie4_error_luts = {
-	.shim		= aie4_shim_tile_error_events,
-	.core		= aie4_core_mem_error_events,
-	.mem_tile	= aie4_mem_tile_error_events,
-	.mem		= aie4_core_mem_error_events,
+const struct aie_async_error_desc aie4_async_error_desc = {
+	.luts			= {
+		.shim		= aie4_shim_tile_error_events,
+		.core		= aie4_core_mem_error_events,
+		.mem_tile	= aie4_mem_tile_error_events,
+		.mem		= aie4_core_mem_error_events,
+	},
+	.max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 int aie4_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,
