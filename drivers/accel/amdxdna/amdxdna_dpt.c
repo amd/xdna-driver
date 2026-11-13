@@ -287,7 +287,7 @@ exit:
 	return 0;
 }
 
-static bool amdxdna_dpt_update_tail(struct amdxdna_dpt *dpt)
+static void amdxdna_dpt_update_tail(struct amdxdna_dpt *dpt)
 {
 	struct amdxdna_dpt_footer *footer;
 	u32 offset;
@@ -317,9 +317,7 @@ static bool amdxdna_dpt_update_tail(struct amdxdna_dpt *dpt)
 		WRITE_ONCE(dpt->tail, tail);
 		XDNA_DPT_DBG(dpt, "Tail updated: 0x%llx", tail);
 		wake_up(&dpt->wait);
-		return true;
 	}
-	return false;
 }
 
 static void amdxdna_dpt_read_metadata(struct amdxdna_dpt *dpt)
@@ -376,16 +374,19 @@ static void amdxdna_dpt_timer_put(struct amdxdna_dpt *dpt)
 
 static void amdxdna_dpt_fetch_and_dump_to_dmesg(struct amdxdna_dpt *dpt)
 {
+	u64 tail = READ_ONCE(dpt->tail);
+
 	/*
-	 * A single fetch is capped at the local_buffer size and the poll
-	 * worker only re-fetches when the tail advances, so drain the whole
-	 * backlog up to the current tail here. Otherwise a batch larger than
-	 * local_buffer would leave head behind tail and stall until the next
-	 * tail advance. Only amdxdna_dpt_update_tail() moves the tail, so it
-	 * is a fixed snapshot for the duration of this loop and the loop is
-	 * bounded.
+	 * A single fetch is capped at the local_buffer size, so drain the
+	 * whole backlog up to the tail sampled on entry. Otherwise a batch
+	 * larger than local_buffer would leave head behind tail until the
+	 * next worker run, and no worker runs between suspend and resume.
+	 * Stop at the sample: during the initial drain the worker can still
+	 * move the tail, and chasing it would hold dev_lock for as long as
+	 * the firmware keeps writing. Each fetch reads the live tail, so head
+	 * can end up past the sample.
 	 */
-	while (dpt->head != READ_ONCE(dpt->tail)) {
+	while (dpt->head < tail) {
 		u32 size = dpt->size;
 		int ret;
 
@@ -425,13 +426,16 @@ static void amdxdna_dpt_worker(struct work_struct *w)
 {
 	struct amdxdna_dpt *dpt = container_of(w, struct amdxdna_dpt, work);
 
+	amdxdna_dpt_update_tail(dpt);
+
 	/*
-	 * The worker is the sole consumer of local_buffer / head once
-	 * dumping is enabled. Pair the acquire load with the store-release
-	 * in amdxdna_dpt_dump_to_dmesg() so that observing dump_to_dmesg
-	 * true guarantees local_buffer has been published.
+	 * Once dumping is enabled, the worker consumes local_buffer / head,
+	 * and suspend does so only after cancelling the worker. Pair the
+	 * acquire load with the store-release in amdxdna_dpt_dump_to_dmesg()
+	 * so that observing dump_to_dmesg true guarantees local_buffer has
+	 * been published.
 	 */
-	if (amdxdna_dpt_update_tail(dpt) && smp_load_acquire(&dpt->dump_to_dmesg))
+	if (smp_load_acquire(&dpt->dump_to_dmesg))
 		amdxdna_dpt_fetch_and_dump_to_dmesg(dpt);
 }
 
@@ -481,8 +485,8 @@ int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable)
 		 * context while dump_to_dmesg is still false, so the worker
 		 * skips fetch_and_dump and cannot touch local_buffer / head
 		 * concurrently. Only after the initial drain do we publish the
-		 * buffer and hand ownership of local_buffer / head to the
-		 * worker, which then becomes the sole consumer.
+		 * buffer and hand local_buffer / head to the worker, and to
+		 * suspend once it has cancelled the worker.
 		 */
 		amdxdna_dpt_drain_pending_data(dpt);
 
@@ -901,6 +905,9 @@ static int amdxdna_dpt_suspend_chan(struct amdxdna_dev *xdna,
 	 * cannot release.
 	 */
 	amdxdna_dpt_update_tail(dpt);
+	/* The worker is cancelled and dev_lock excludes dump enable/disable. */
+	if (dpt->dump_to_dmesg)
+		amdxdna_dpt_fetch_and_dump_to_dmesg(dpt);
 	wake_up_all(&dpt->wait);
 
 	synchronize_srcu(&chan->srcu);
