@@ -293,6 +293,13 @@ static bool amdxdna_dpt_update_tail(struct amdxdna_dpt *dpt)
 	u32 offset;
 	u64 tail;
 
+	/*
+	 * The worker and the dmesg-dump initial drain can run this
+	 * concurrently. Sample the footer under the lock, or an older sample
+	 * can move the tail back or be taken for a 32-bit wrap.
+	 */
+	guard(mutex)(&dpt->tail_lock);
+
 	offset = to_buf_size(dpt->buf) - AMDXDNA_DPT_FOOTER_SIZE;
 	footer = to_cpu_addr(dpt->buf, offset);
 
@@ -538,6 +545,7 @@ static void amdxdna_dpt_unpublish(struct amdxdna_dpt *dpt)
 	rcu_assign_pointer(chan->data, NULL);
 	synchronize_srcu(&chan->srcu);
 
+	mutex_destroy(&dpt->tail_lock);
 	mutex_destroy(&dpt->timer_lock);
 	amdxdna_free_msg_buff(dpt->buf);
 	kfree(dpt);
@@ -587,6 +595,7 @@ amdxdna_dpt_publish(struct aie_device *aie, struct amdxdna_dpt_chan *chan,
 	memset(to_cpu_addr(hdl, 0), 0, to_buf_size(hdl));
 	amdxdna_cache_flush(to_cpu_addr(hdl, 0), to_buf_size(hdl));
 
+	mutex_init(&dpt->tail_lock);
 	mutex_init(&dpt->timer_lock);
 	refcount_set(&dpt->timer_refs, 0);
 	init_waitqueue_head(&dpt->wait);
@@ -836,6 +845,7 @@ static int amdxdna_dpt_fini_chan(struct aie_device *aie,
 	 */
 	synchronize_srcu(&chan->srcu);
 
+	mutex_destroy(&dpt->tail_lock);
 	mutex_destroy(&dpt->timer_lock);
 	amdxdna_free_msg_buff(dpt->buf);
 	XDNA_DPT_DBG(dpt, "Disabled");
