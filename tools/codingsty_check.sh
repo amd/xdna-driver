@@ -96,8 +96,12 @@ IGNORE_DEFAULT="FILE_PATH_CHANGES,LINUX_VERSION_CODE,SPLIT_STRING"
 IGNORE_CMD="--ignore ${IGNORE_DEFAULT}"
 
 # Expand the given paths into a flat list of C source and header files. A
-# non-existent path is a caller error (misconfigured CI job or hook), not a
-# reason to silently skip checks, so it fails the run rather than warning.
+# path that is gone from the working tree but has git history was deleted
+# (`git diff --name-only` lists deletions too), so it is skipped; the lookup
+# uses literal pathspecs so that an unexpanded glob cannot match history.
+# Any other non-existent path is a caller error (misconfigured CI job or
+# hook), not a reason to silently skip checks, so it fails the run rather
+# than warning.
 files=()
 missing=0
 for path in "$@"; do
@@ -110,6 +114,8 @@ for path in "$@"; do
             *.c|*.h) files+=("${path}") ;;
             *) echo "warning: skipping '${path}' (not a .c or .h file)" >&2 ;;
         esac
+    elif [ -n "$(git --literal-pathspecs rev-list -1 HEAD -- "${path}" 2>/dev/null)" ]; then
+        echo "note: skipping '${path}' (deleted: in git history but not in the working tree)" >&2
     else
         echo "error: path does not exist: '${path}'" >&2
         missing=1
