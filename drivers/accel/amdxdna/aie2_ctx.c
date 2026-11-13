@@ -1213,8 +1213,17 @@ int aie2_hwctx_sync_debug_bo(struct amdxdna_hwctx *hwctx, u32 debug_bo_hdl)
 	kref_init(&cmd->refcnt);
 
 	cmd->opcode = SYNC_DEBUG_BO;
+
+	/*
+	 * dev_lock is dropped so down_interruptible() on job_sem can block
+	 * without preventing TDR from acquiring dev_lock to recover stalled
+	 * jobs. client_lock is still held by the ioctl caller, so the hwctx
+	 * cannot be destroyed during this window.
+	 */
+	mutex_unlock(&xdna->dev_lock);
 	ret = amdxdna_cmd_submit(client, cmd, AMDXDNA_INVALID_BO_HANDLE,
 				 &debug_bo_hdl, 1, hwctx->id, &seq);
+	mutex_lock(&xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Submit command failed");
 		goto put_cmd;
