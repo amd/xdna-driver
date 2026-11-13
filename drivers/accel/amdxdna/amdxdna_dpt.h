@@ -117,6 +117,7 @@ struct amdxdna_dpt {
 
 	/* DMA ring buffer (FW writes, host reads) */
 	struct amdxdna_msg_buf_hdl	*buf;
+	struct mutex			 tail_lock;	/* tail updates */
 	u64				 tail;		/* kernel cache of FW write pointer */
 
 	/* MSI / IRQ wiring (irq == 0 means request_irq failed) */
