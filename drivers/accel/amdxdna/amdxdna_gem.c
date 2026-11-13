@@ -13,6 +13,7 @@
 #include <drm/gpu_scheduler.h>
 #include <linux/dma-buf.h>
 #include <linux/dma-direct.h>
+#include <linux/dma-map-ops.h>
 #include <linux/iosys-map.h>
 #include <linux/hmm.h>
 #include <linux/pagemap.h>
@@ -1604,8 +1605,43 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	return ret;
 }
 
-static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
+/*
+ * Sync the whole streaming DMA mapping. dma_map_sgtable() may merge physically
+ * discontiguous pages into one DMA segment, so a dma_sync_single_* of that
+ * segment is not a subrange of the BO. Callers that pass a subrange still get
+ * a whole-BO sync: TO_DEVICE only writebacks extra lines, FROM_DEVICE also
+ * invalidates dirty CPU data outside the requested range.
+ */
+static int amdxdna_sync_user_bo(struct amdxdna_gem_obj *abo, u32 direction)
 {
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct sg_table *sgt;
+	int ret = 0;
+
+	if (direction != SYNC_DIRECT_TO_DEVICE && direction != SYNC_DIRECT_FROM_DEVICE)
+		return -EINVAL;
+
+	mutex_lock(&abo->lock);
+	sgt = amdxdna_gem_get_sgt(abo);
+	if (IS_ERR(sgt)) {
+		ret = PTR_ERR(sgt);
+		goto unlock;
+	}
+
+	if (direction == SYNC_DIRECT_TO_DEVICE)
+		dma_sync_sgtable_for_device(xdna->ddev.dev, sgt, DMA_BIDIRECTIONAL);
+	else
+		dma_sync_sgtable_for_cpu(xdna->ddev.dev, sgt, DMA_BIDIRECTIONAL);
+
+unlock:
+	mutex_unlock(&abo->lock);
+	return ret;
+}
+
+static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size,
+			    u32 direction)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	unsigned long first, nr_pages;
 	void *kva;
 	u64 end;
@@ -1623,6 +1659,10 @@ static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
 	size = min(abo->mem.size, end) - offset;
 	if (!size)
 		return 0;
+
+	/* Userptr BOs are not cache coherent, so explicit sync is required. */
+	if (abo->mem.mm && !dev_is_dma_coherent(xdna->ddev.dev))
+		return amdxdna_sync_user_bo(abo, direction);
 
 	first = offset >> PAGE_SHIFT;
 	nr_pages = (PAGE_ALIGN(offset + size) >> PAGE_SHIFT) - first;
@@ -1681,7 +1721,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 			if (start >= end)
 				continue;
 
-			ret = amdxdna_flush_bo(heap, start - heap_start, end - start);
+			ret = amdxdna_flush_bo(heap, start - heap_start, end - start,
+					       args->direction);
 			if (ret) {
 				XDNA_ERR(xdna, "Failed to flush heap %ld ret %d",
 					 heap_id, ret);
@@ -1695,7 +1736,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 			goto put_obj;
 		}
 
-		ret = amdxdna_flush_bo(abo, args->offset, args->size);
+		ret = amdxdna_flush_bo(abo, args->offset, args->size, args->direction);
 		amdxdna_gem_unpin(abo);
 
 		if (ret) {
