@@ -2,6 +2,7 @@
 // Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "pcidev.h"
+#include "../buffer.h"
 #include "../shim_debug.h"
 #include "core/common/message.h"
 #include <algorithm>
@@ -11,6 +12,15 @@
 #include <memory>
 
 namespace shim_xdna {
+
+void
+pdev_umq_nc::
+sync_bo(buffer& bo, xrt_core::buffer_handle::direction dir,
+        size_t size, size_t offset) const
+{
+  if (bo.is_userptr())
+    driver_sync_bo(bo, dir, size, offset);
+}
 
 void
 pdev_umq_nc::
