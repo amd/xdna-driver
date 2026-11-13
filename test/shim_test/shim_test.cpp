@@ -2109,7 +2109,7 @@ main(int argc, char **argv)
     }
   }
 
-  cur_path = dirname(argv[0]);
+  cur_path = fs::canonical(dirname(argv[0])).string();
   set_xrt_path();
 
   run_all_test(tests);
