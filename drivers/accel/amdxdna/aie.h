@@ -48,6 +48,16 @@ struct aie_msg_ops {
 	int  (*fw_trace_init)(struct amdxdna_dev *xdna, size_t size, u32 categories);
 	int  (*fw_trace_config)(struct amdxdna_dev *xdna, u32 categories);
 	int  (*fw_trace_fini)(struct amdxdna_dev *xdna);
+
+	/*
+	 * Optional DPT notification hooks; leave NULL when unused. init and
+	 * fini run under dev_lock, and fini also runs after a failed init and
+	 * may run twice in a row. ack runs from amdxdna_dpt_notify(), possibly
+	 * in hard IRQ context.
+	 */
+	int  (*dpt_notify_init)(struct amdxdna_dpt *dpt);
+	void (*dpt_notify_fini)(struct amdxdna_dpt *dpt);
+	void (*dpt_notify_ack)(struct amdxdna_dpt *dpt);
 };
 
 struct aie_device {

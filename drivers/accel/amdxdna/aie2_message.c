@@ -1057,6 +1057,13 @@ void aie2_msg_init(struct amdxdna_dev_hdl *ndev)
 		ndev->aie.msg_ops.fw_trace_config = aie2_fw_trace_config;
 		ndev->aie.msg_ops.fw_trace_fini   = aie2_fw_trace_fini;
 	}
+
+	if (AIE_FEATURE_ON(&ndev->aie, AIE2_FW_LOG) ||
+	    AIE_FEATURE_ON(&ndev->aie, AIE2_FW_TRACE)) {
+		ndev->aie.msg_ops.dpt_notify_init = aie2_dpt_notify_init;
+		ndev->aie.msg_ops.dpt_notify_fini = aie2_dpt_notify_fini;
+		ndev->aie.msg_ops.dpt_notify_ack  = aie2_dpt_notify_ack;
+	}
 }
 
 static inline struct amdxdna_gem_obj *

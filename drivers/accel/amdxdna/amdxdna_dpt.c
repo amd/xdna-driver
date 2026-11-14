@@ -9,9 +9,12 @@
 #include <drm/drm_print.h>
 #include <linux/errno.h>
 #include <linux/jiffies.h>
+#include <linux/pid.h>
 #include <linux/rcupdate.h>
+#include <linux/sched.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
+#include <linux/spinlock.h>
 #include <linux/srcu.h>
 #include <linux/timer.h>
 #include <linux/uaccess.h>
@@ -105,8 +108,8 @@ const char *amdxdna_dpt_name(const struct amdxdna_dpt *dpt)
 	return dpt->chan->desc->name;
 }
 
-/* Name for the transport's completion notification (e.g. request_irq). The
- * desc is private to this file, so expose the string to the transport backends.
+/* Name for a notification backend's request_irq. The desc is private to this
+ * file, so expose the string to the notification backends.
  */
 const char *amdxdna_dpt_irq_name(const struct amdxdna_dpt *dpt)
 {
@@ -223,11 +226,13 @@ static int amdxdna_dpt_fetch_payload(struct amdxdna_dpt *dpt, u8 *buf,
 	 * lost its place, so a gap can be recorded rather than a fresh ring
 	 * being indistinguishable from missed data. Rate-limit the message: a
 	 * consumer that ignores the resync and retries in a loop would
-	 * otherwise flood the kernel log.
+	 * otherwise flood the kernel log, and naming the reader identifies
+	 * that consumer.
 	 */
 	if (tail < *offset) {
-		XDNA_DPT_ERR_RATELIMITED(dpt, "Stale fetch offset: 0x%llx",
-					 *offset);
+		XDNA_DPT_ERR_RATELIMITED(dpt,
+					 "Stale fetch offset: 0x%llx (tail 0x%llx, reader %s[%d])",
+					 *offset, tail, current->comm, task_pid_nr(current));
 		return -ESTALE;
 	}
 
@@ -287,11 +292,18 @@ exit:
 	return 0;
 }
 
-static bool amdxdna_dpt_update_tail(struct amdxdna_dpt *dpt)
+static void amdxdna_dpt_update_tail(struct amdxdna_dpt *dpt)
 {
 	struct amdxdna_dpt_footer *footer;
 	u32 offset;
 	u64 tail;
+
+	/*
+	 * The worker and the dmesg-dump initial drain can run this
+	 * concurrently. Sample the footer under the lock, or an older sample
+	 * can move the tail back or be taken for a 32-bit wrap.
+	 */
+	guard(mutex)(&dpt->tail_lock);
 
 	offset = to_buf_size(dpt->buf) - AMDXDNA_DPT_FOOTER_SIZE;
 	footer = to_cpu_addr(dpt->buf, offset);
@@ -304,15 +316,13 @@ static bool amdxdna_dpt_update_tail(struct amdxdna_dpt *dpt)
 		tail += BIT_ULL(32);
 
 	drm_WARN_ONCE(&dpt->xdna->ddev, tail - dpt->tail > BIT_ULL(31),
-		      "Unexpected jump in tail pointer. Missed IRQ or bug");
+		      "Unexpected jump in tail pointer. Missed notification or bug");
 
 	if (dpt->tail != tail) {
 		WRITE_ONCE(dpt->tail, tail);
 		XDNA_DPT_DBG(dpt, "Tail updated: 0x%llx", tail);
 		wake_up(&dpt->wait);
-		return true;
 	}
-	return false;
 }
 
 static void amdxdna_dpt_read_metadata(struct amdxdna_dpt *dpt)
@@ -369,16 +379,19 @@ static void amdxdna_dpt_timer_put(struct amdxdna_dpt *dpt)
 
 static void amdxdna_dpt_fetch_and_dump_to_dmesg(struct amdxdna_dpt *dpt)
 {
+	u64 tail = READ_ONCE(dpt->tail);
+
 	/*
-	 * A single fetch is capped at the local_buffer size and the poll
-	 * worker only re-fetches when the tail advances, so drain the whole
-	 * backlog up to the current tail here. Otherwise a batch larger than
-	 * local_buffer would leave head behind tail and stall until the next
-	 * tail advance. Only amdxdna_dpt_update_tail() moves the tail, so it
-	 * is a fixed snapshot for the duration of this loop and the loop is
-	 * bounded.
+	 * A single fetch is capped at the local_buffer size, so drain the
+	 * whole backlog up to the tail sampled on entry. Otherwise a batch
+	 * larger than local_buffer would leave head behind tail until the
+	 * next worker run, and no worker runs between suspend and resume.
+	 * Stop at the sample: during the initial drain the worker can still
+	 * move the tail, and chasing it would hold dev_lock for as long as
+	 * the firmware keeps writing. Each fetch reads the live tail, so head
+	 * can end up past the sample.
 	 */
-	while (dpt->head != READ_ONCE(dpt->tail)) {
+	while (dpt->head < tail) {
 		u32 size = dpt->size;
 		int ret;
 
@@ -405,10 +418,10 @@ static void amdxdna_dpt_drain_pending_data(struct amdxdna_dpt *dpt)
 {
 	/*
 	 * Refresh the tail from the firmware footer before draining. At enable
-	 * time (for example right after resume, before the IRQ or poll worker
-	 * has run) the cached tail may lag the ring, so snapshot the latest
-	 * first to avoid leaving already-buffered entries until a later worker
-	 * run.
+	 * time (for example right after resume, before a notification or the
+	 * poll worker has run) the cached tail may lag the ring, so snapshot
+	 * the latest first to avoid leaving already-buffered entries until a
+	 * later worker run.
 	 */
 	amdxdna_dpt_update_tail(dpt);
 	amdxdna_dpt_fetch_and_dump_to_dmesg(dpt);
@@ -418,13 +431,16 @@ static void amdxdna_dpt_worker(struct work_struct *w)
 {
 	struct amdxdna_dpt *dpt = container_of(w, struct amdxdna_dpt, work);
 
+	amdxdna_dpt_update_tail(dpt);
+
 	/*
-	 * The worker is the sole consumer of local_buffer / head once
-	 * dumping is enabled. Pair the acquire load with the store-release
-	 * in amdxdna_dpt_dump_to_dmesg() so that observing dump_to_dmesg
-	 * true guarantees local_buffer has been published.
+	 * Once dumping is enabled, the worker consumes local_buffer / head,
+	 * and suspend does so only after cancelling the worker. Pair the
+	 * acquire load with the store-release in amdxdna_dpt_dump_to_dmesg()
+	 * so that observing dump_to_dmesg true guarantees local_buffer has
+	 * been published.
 	 */
-	if (amdxdna_dpt_update_tail(dpt) && smp_load_acquire(&dpt->dump_to_dmesg))
+	if (smp_load_acquire(&dpt->dump_to_dmesg))
 		amdxdna_dpt_fetch_and_dump_to_dmesg(dpt);
 }
 
@@ -474,8 +490,8 @@ int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable)
 		 * context while dump_to_dmesg is still false, so the worker
 		 * skips fetch_and_dump and cannot touch local_buffer / head
 		 * concurrently. Only after the initial drain do we publish the
-		 * buffer and hand ownership of local_buffer / head to the
-		 * worker, which then becomes the sole consumer.
+		 * buffer and hand local_buffer / head to the worker, and to
+		 * suspend once it has cancelled the worker.
 		 */
 		amdxdna_dpt_drain_pending_data(dpt);
 
@@ -488,7 +504,7 @@ int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable)
 	} else {
 		/*
 		 * Stop dumping, then quiesce the host pipeline before freeing:
-		 * a worker queued by the IRQ handler or poll timer reads
+		 * a worker queued by a notification or the poll timer reads
 		 * local_buffer, so it must not run past the kvfree. timer_put
 		 * may stop the poll timer, and cancel_work_sync waits for any
 		 * in-flight worker; a worker requeued afterwards observes
@@ -516,6 +532,85 @@ static void amdxdna_dpt_timer(struct timer_list *t)
 }
 
 /*
+ * Called by a notification backend when the firmware reports a write to the
+ * @dpt ring. Callable from any context, including hard IRQ. The backend ack
+ * runs whether or not the gate is armed.
+ */
+void amdxdna_dpt_notify(struct amdxdna_dpt *dpt)
+{
+	unsigned long flags;
+
+	if (dpt->aie->msg_ops.dpt_notify_ack)
+		dpt->aie->msg_ops.dpt_notify_ack(dpt);
+
+	spin_lock_irqsave(&dpt->notify_lock, flags);
+	if (dpt->notify_armed)
+		queue_work(system_percpu_wq, &dpt->work);
+	spin_unlock_irqrestore(&dpt->notify_lock, flags);
+}
+
+/*
+ * Variant of amdxdna_dpt_notify() for a backend that knows only the channel,
+ * such as a firmware note that carries no handle. It does not sleep. Holding
+ * the channel SRCU makes teardown's synchronize_srcu() wait for the
+ * notification before the handle is freed.
+ */
+void amdxdna_dpt_chan_notify(struct amdxdna_dpt_chan *chan)
+{
+	struct amdxdna_dpt *dpt;
+	int idx;
+
+	idx = srcu_read_lock(&chan->srcu);
+	dpt = srcu_dereference(chan->data, &chan->srcu);
+	if (dpt)
+		amdxdna_dpt_notify(dpt);
+	srcu_read_unlock(&chan->srcu, idx);
+}
+
+/*
+ * Arm the gate, then start the backend notification, the reverse of
+ * amdxdna_dpt_notify_stop(). An interrupt pending before the vector was
+ * requested fires once request_irq() unmasks it, before the init hook
+ * returns, and must find the gate armed or its ack consumes it without
+ * queuing the worker. The gate stays armed when the init hook is absent or
+ * fails: aie4 has no init hook, yet its watermark notes must still queue the
+ * worker. A note is not held pending the way that interrupt is, so one
+ * handled between the firmware attach and the arm is lost; the worker queued
+ * on arming refreshes the tail in its place. Returns the init hook result,
+ * or 0 without one.
+ */
+static int amdxdna_dpt_notify_start(struct amdxdna_dpt *dpt)
+{
+	struct aie_device *aie = dpt->aie;
+
+	spin_lock_irq(&dpt->notify_lock);
+	dpt->notify_armed = true;
+	queue_work(system_percpu_wq, &dpt->work);
+	spin_unlock_irq(&dpt->notify_lock);
+
+	if (!aie->msg_ops.dpt_notify_init)
+		return 0;
+	return aie->msg_ops.dpt_notify_init(dpt);
+}
+
+/*
+ * Disarm the gate, then stop the backend notification. Once this returns, no
+ * notification can queue the worker until amdxdna_dpt_notify_start() arms the
+ * gate again.
+ */
+static void amdxdna_dpt_notify_stop(struct amdxdna_dpt *dpt)
+{
+	struct aie_device *aie = dpt->aie;
+
+	spin_lock_irq(&dpt->notify_lock);
+	dpt->notify_armed = false;
+	spin_unlock_irq(&dpt->notify_lock);
+
+	if (aie->msg_ops.dpt_notify_fini)
+		aie->msg_ops.dpt_notify_fini(dpt);
+}
+
+/*
  * Tell the firmware to start emitting entries into the @dpt buffer.
  * Returns -EOPNOTSUPP when the backend does not implement this channel
  * so the caller can decide whether that is fatal.
@@ -538,6 +633,7 @@ static void amdxdna_dpt_unpublish(struct amdxdna_dpt *dpt)
 	rcu_assign_pointer(chan->data, NULL);
 	synchronize_srcu(&chan->srcu);
 
+	mutex_destroy(&dpt->tail_lock);
 	mutex_destroy(&dpt->timer_lock);
 	amdxdna_free_msg_buff(dpt->buf);
 	kfree(dpt);
@@ -546,10 +642,10 @@ static void amdxdna_dpt_unpublish(struct amdxdna_dpt *dpt)
 /*
  * Allocate a fresh dpt handle, plant it in @chan in INACTIVE state,
  * DMA-alloc its ring buffer, then ask the backend to start emitting
- * via amdxdna_dpt_msg_init. On success the handle is fully active: IRQ has
- * been wired (best-effort), metadata has been read, and status is ACTIVE.
- * On failure the handle has already been unpublished and an ERR_PTR is
- * returned.
+ * via amdxdna_dpt_msg_init. On success the handle is fully active:
+ * notification has been started (best-effort), metadata has been read,
+ * and status is ACTIVE. On failure the handle has already been
+ * unpublished and an ERR_PTR is returned.
  */
 static struct amdxdna_dpt *
 amdxdna_dpt_publish(struct aie_device *aie, struct amdxdna_dpt_chan *chan,
@@ -587,15 +683,18 @@ amdxdna_dpt_publish(struct aie_device *aie, struct amdxdna_dpt_chan *chan,
 	memset(to_cpu_addr(hdl, 0), 0, to_buf_size(hdl));
 	amdxdna_cache_flush(to_cpu_addr(hdl, 0), to_buf_size(hdl));
 
+	mutex_init(&dpt->tail_lock);
 	mutex_init(&dpt->timer_lock);
 	refcount_set(&dpt->timer_refs, 0);
 	init_waitqueue_head(&dpt->wait);
 	INIT_WORK(&dpt->work, amdxdna_dpt_worker);
 	timer_setup(&dpt->timer, amdxdna_dpt_timer, 0);
+	spin_lock_init(&dpt->notify_lock);
 
 	/* Plant the handle in INACTIVE state so the backend's msg_ops init
-	 * can reach the DMA buffer + msi-info slots through xdna->fw_*.
-	 * Readers see status != ACTIVE in amdxdna_dpt_enter and bail out.
+	 * can reach the DMA buffer and the aie2 MSI-X state through
+	 * xdna->fw_*. Readers see status != ACTIVE in amdxdna_dpt_enter and
+	 * bail out, and a notification finds the gate still disarmed.
 	 */
 	rcu_assign_pointer(chan->data, dpt);
 
@@ -606,11 +705,11 @@ amdxdna_dpt_publish(struct aie_device *aie, struct amdxdna_dpt_chan *chan,
 	}
 
 	/*
-	 * IRQ is best-effort. On failure, on-demand polling driven by
+	 * Notification is best-effort. On failure, on-demand polling driven by
 	 * amdxdna_dpt_timer_get in the watcher and dmesg paths still works.
 	 */
-	if (amdxdna_dpt_notification_init(dpt))
-		XDNA_DPT_WARN(dpt, "IRQ unavailable; tail updates on demand only");
+	if (amdxdna_dpt_notify_start(dpt))
+		XDNA_DPT_WARN(dpt, "Notification unavailable; tail updates on demand only");
 
 	amdxdna_dpt_read_metadata(dpt);
 
@@ -795,11 +894,11 @@ static int amdxdna_dpt_fini_chan(struct aie_device *aie,
 	WRITE_ONCE(dpt->status, AMDXDNA_DPT_SHUTTING_DOWN);
 
 	/*
-	 * Drain the host-side pipeline (IRQ -> timer -> worker). After
-	 * cancel_work_sync no path is left that could call
+	 * Drain the host-side pipeline (notification -> timer -> worker).
+	 * After cancel_work_sync no path is left that could call
 	 * amdxdna_dpt_update_tail on the detached firmware.
 	 */
-	amdxdna_dpt_notification_fini(dpt);
+	amdxdna_dpt_notify_stop(dpt);
 	timer_shutdown_sync(&dpt->timer);
 	cancel_work_sync(&dpt->work);
 
@@ -836,6 +935,7 @@ static int amdxdna_dpt_fini_chan(struct aie_device *aie,
 	 */
 	synchronize_srcu(&chan->srcu);
 
+	mutex_destroy(&dpt->tail_lock);
 	mutex_destroy(&dpt->timer_lock);
 	amdxdna_free_msg_buff(dpt->buf);
 	XDNA_DPT_DBG(dpt, "Disabled");
@@ -875,7 +975,7 @@ static int amdxdna_dpt_suspend_chan(struct amdxdna_dev *xdna,
 	 */
 	WRITE_ONCE(dpt->status, AMDXDNA_DPT_SUSPENDING);
 
-	amdxdna_dpt_notification_fini(dpt);
+	amdxdna_dpt_notify_stop(dpt);
 
 	/* timer_delete_sync (not _shutdown_sync) so resume can re-arm. */
 	timer_delete_sync(&dpt->timer);
@@ -891,6 +991,9 @@ static int amdxdna_dpt_suspend_chan(struct amdxdna_dev *xdna,
 	 * cannot release.
 	 */
 	amdxdna_dpt_update_tail(dpt);
+	/* The worker is cancelled and dev_lock excludes dump enable/disable. */
+	if (dpt->dump_to_dmesg)
+		amdxdna_dpt_fetch_and_dump_to_dmesg(dpt);
 	wake_up_all(&dpt->wait);
 
 	synchronize_srcu(&chan->srcu);
@@ -926,7 +1029,7 @@ static int amdxdna_dpt_resume_chan(struct amdxdna_dev *xdna,
 	 * timer_setup re-init must happen under timer_lock so it cannot
 	 * race with a parallel amdxdna_dpt_timer_get observing the
 	 * pre-suspend timer state. Status flips to ACTIVE only after
-	 * the backend re-arm + IRQ wiring succeeds.
+	 * the backend re-arm succeeds and notification has restarted.
 	 */
 	mutex_lock(&dpt->timer_lock);
 	timer_setup(&dpt->timer, amdxdna_dpt_timer, 0);
@@ -957,8 +1060,8 @@ static int amdxdna_dpt_resume_chan(struct amdxdna_dev *xdna,
 
 	/*
 	 * Resubmit the same buffer. The handle is already reachable through
-	 * xdna->fw_*, so the backend's init hook can reach it for msi/io_base
-	 * storage.
+	 * xdna->fw_*, so the backend's init hook can reach it, and on aie2
+	 * store the MSI-X state in it.
 	 */
 	ret = amdxdna_dpt_msg_init(dpt);
 	if (ret) {
@@ -967,8 +1070,8 @@ static int amdxdna_dpt_resume_chan(struct amdxdna_dev *xdna,
 		return ret;
 	}
 
-	if (amdxdna_dpt_notification_init(dpt))
-		XDNA_DPT_WARN(dpt, "IRQ unavailable post-resume; polling on demand");
+	if (amdxdna_dpt_notify_start(dpt))
+		XDNA_DPT_WARN(dpt, "Notification unavailable post-resume; polling on demand");
 
 	WRITE_ONCE(dpt->status, AMDXDNA_DPT_ACTIVE);
 
@@ -978,7 +1081,7 @@ static int amdxdna_dpt_resume_chan(struct amdxdna_dev *xdna,
 	 * suspend (e.g. dmesg dump) can no longer trigger the 0->1 arm in
 	 * amdxdna_dpt_timer_get. Re-arm it here under timer_lock now that
 	 * the device is ACTIVE again, otherwise polling stays dead and, if
-	 * the IRQ is also unavailable, FW-log consumption silently stalls.
+	 * notification is also unavailable, FW-log consumption silently stalls.
 	 */
 	mutex_lock(&dpt->timer_lock);
 	if (refcount_read(&dpt->timer_refs))

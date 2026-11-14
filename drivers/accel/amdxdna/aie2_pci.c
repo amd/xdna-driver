@@ -15,6 +15,8 @@
 #include <linux/cleanup.h>
 #include <linux/errno.h>
 #include <linux/firmware.h>
+#include <linux/interrupt.h>
+#include <linux/io.h>
 #include <linux/iommu.h>
 #include <linux/iopoll.h>
 #include <linux/pci.h>
@@ -1504,6 +1506,54 @@ int aie2_fw_trace_fini(struct amdxdna_dev *xdna)
 			 "Stop FW trace failed, ret %d status 0x%x",
 			 ret, resp.status);
 	return ret;
+}
+
+static irqreturn_t aie2_dpt_irq_handler(int irq, void *data)
+{
+	amdxdna_dpt_notify(data);
+	return IRQ_HANDLED;
+}
+
+/*
+ * MSI-X delivery depends on the firmware, which reports the vector at ring
+ * setup along with the address of its MSI write, acked on each interrupt.
+ * With no vector reported, the DPT layer polls instead.
+ */
+int aie2_dpt_notify_init(struct amdxdna_dpt *dpt)
+{
+	struct amdxdna_dev *xdna = dpt->xdna;
+	int irq, ret;
+
+	if (!dpt->msi_idx || !dpt->msi_address)
+		return -EINVAL;
+
+	irq = pci_irq_vector(to_pci_dev(xdna->ddev.dev), dpt->msi_idx);
+	if (irq < 0)
+		return irq;
+
+	ret = request_irq(irq, aie2_dpt_irq_handler, 0,
+			  amdxdna_dpt_irq_name(dpt), dpt);
+	if (ret)
+		return ret;
+
+	dpt->irq = irq;
+	return 0;
+}
+
+void aie2_dpt_notify_fini(struct amdxdna_dpt *dpt)
+{
+	if (dpt->irq) {
+		free_irq(dpt->irq, dpt);
+		dpt->irq = 0;
+	}
+	dpt->msi_address = 0;
+	dpt->msi_idx = 0;
+}
+
+void aie2_dpt_notify_ack(struct amdxdna_dpt *dpt)
+{
+	if (dpt->io_base)
+		writel(0, dpt->io_base + dpt->msi_address);
 }
 
 const struct amdxdna_dev_ops aie2_ops = {
