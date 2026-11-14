@@ -425,19 +425,39 @@ int aie4_msg_get_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
 	return ret;
 }
 
+/*
+ * Returns -EEXIST when firmware rejects the pool with ERROR. Firmware that did
+ * not go through a suspend still holds its own pool and refuses another one;
+ * that happens on every VF suspend that the PF does not follow, so it is not
+ * logged as a failure.
+ */
 int aie4_msg_set_ctx_restore_pool(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size)
 {
 	DECLARE_AIE_MSG(aie4_msg_set_ctx_restore_pool, AIE4_MSG_OP_SET_CTX_RESTORE_POOL);
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct aie_device *aie = &ndev->aie;
+	struct amdxdna_dev *xdna = aie->xdna;
 	int ret;
+
+	if (!aie4_opcode_allowed(aie, msg.opcode))
+		return -EOPNOTSUPP;
+
+	if (!aie->mgmt_chann)
+		return -ENODEV;
 
 	req.buff_addr = addr;
 	req.buff_size = size;
 	req.pasid = 0;
 
-	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	ret = xdna_send_msg_wait(xdna, aie->mgmt_chann, &msg);
+	if (ret == -ETIME)
+		aie_destroy_chann(aie, &aie->mgmt_chann);
+	if (!ret && resp.status == AIE4_MSG_STATUS_ERROR)
+		return -EEXIST;
+	if (!ret && resp.status)
+		ret = -EINVAL;
 	if (ret)
-		XDNA_ERR(xdna, "Failed to load ctx restore pool, ret %d", ret);
+		XDNA_ERR(xdna, "Failed to load ctx restore pool, ret %d, status 0x%x",
+			 ret, resp.status);
 
 	return ret;
 }
