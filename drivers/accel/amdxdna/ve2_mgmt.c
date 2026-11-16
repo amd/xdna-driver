@@ -259,11 +259,6 @@ static int ve2_xrs_col_list(struct amdxdna_hwctx *hwctx, u32 total_col)
 	}
 
 	if (user_col != USER_START_COL_NOT_REQUESTED) {
-		if (user_col % VE2_MIN_COL_SUPPORT != 0) {
-			XDNA_ERR(xdna, "user_start_col %u not aligned to %u", user_col,
-				 VE2_MIN_COL_SUPPORT);
-			return -EINVAL;
-		}
 		if (user_col + num_col > total_col) {
 			XDNA_ERR(xdna, "user_start_col %u + num_col %u exceeds total_col %u",
 				 user_col, num_col, total_col);
@@ -300,7 +295,7 @@ static int ve2_xrs_col_list(struct amdxdna_hwctx *hwctx, u32 total_col)
 		first_col = (u32)start_col;
 	}
 
-	for (s = first_col; s + num_col <= total_col; s += VE2_MIN_COL_SUPPORT)
+	for (s = first_col; s + num_col <= total_col; s++)
 		entries++;
 
 	if (!entries) {
@@ -314,7 +309,7 @@ static int ve2_xrs_col_list(struct amdxdna_hwctx *hwctx, u32 total_col)
 		return -ENOMEM;
 
 	hwctx->col_list_len = entries;
-	for (i = 0, s = first_col; i < entries; i++, s += VE2_MIN_COL_SUPPORT)
+	for (i = 0, s = first_col; i < entries; i++, s++)
 		hwctx->col_list[i] = s;
 
 	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4, hwctx->col_list,
