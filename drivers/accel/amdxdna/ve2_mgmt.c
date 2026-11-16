@@ -11,6 +11,7 @@
 #include <linux/errno.h>
 #include <linux/ktime.h>
 #include <linux/moduleparam.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
@@ -482,6 +483,9 @@ static void ve2_clear_context_switch_req(struct amdxdna_mgmtctx *mgmtctx)
  * DRM-Inspired Scheduler Implementation
  * ================================================================*/
 
+/* Max jobs drained per ve2_sched_work_drm() invocation before yielding. */
+#define VE2_SCHED_WORK_BUDGET 64
+
 /* CERT Status - comprehensive read */
 struct cert_status {
 	u32 cert_idle_status;  /* Bits: CERT_IS_IDLE(4), HSA_QUEUE_NOT_EMPTY(1) */
@@ -675,6 +679,7 @@ static void ve2_sched_work_drm(struct work_struct *work)
 	struct ve2_scheduler *sched = container_of(work, struct ve2_scheduler, sched_work);
 	struct amdxdna_mgmtctx *mgmtctx = sched->mgmtctx;
 	struct amdxdna_dev *xdna = mgmtctx->xdna;
+	unsigned int budget = VE2_SCHED_WORK_BUDGET;
 	unsigned long flags;
 
 	/*
@@ -689,6 +694,10 @@ static void ve2_sched_work_drm(struct work_struct *work)
 	 * switch-related IRQ happened to retrigger this work. Loop until the
 	 * queue is empty or the head job can only make progress by waiting on
 	 * CERT; the next IRQ or submission re-arms us for that case.
+	 *
+	 * A sustained stream of same-context jobs never hits either exit
+	 * condition, so cap how many jobs one invocation drains and re-arm
+	 * instead of running unbounded on this workqueue's kernel thread.
 	 */
 	for (;;) {
 		struct ve2_job *job;
@@ -699,6 +708,13 @@ static void ve2_sched_work_drm(struct work_struct *work)
 			ve2_sched_timeout_pending_jobs(mgmtctx);
 			return;
 		}
+
+		if (!budget--) {
+			queue_work(sched->wq, &sched->sched_work);
+			return;
+		}
+
+		cond_resched();
 
 		ve2_read_cert_status(mgmtctx, &cert_status);
 
