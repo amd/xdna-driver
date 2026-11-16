@@ -612,6 +612,64 @@ static bool ve2_sched_switch_context(struct ve2_scheduler *sched, struct ve2_job
 	return true;
 }
 
+static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
+{
+	u32 off = CERT_HANDSHAKE_OFF(0) + offsetof(struct handshake, misc_status);
+	u32 misc_status = 0;
+	struct amdxdna_ctx_priv *vp;
+	int ret;
+
+	ret = ve2_aie_priv_read(mgmtctx->aie_dev, off, sizeof(misc_status), &misc_status);
+	if (ret < 0 || !misc_status)
+		return false;
+
+	if (!mgmtctx->active_ctx)
+		return true;
+
+	vp = ve2_hw_priv(mgmtctx->active_ctx);
+	if (!vp || vp->misc_intrpt_flag)
+		return true;
+
+	vp->misc_status_latched = misc_status;
+	vp->misc_intrpt_flag = true;
+	XDNA_ERR(mgmtctx->xdna,
+		 "misc_status 0x%x on col %u: marking hwctx %u (pid %d) unusable",
+		 misc_status, mgmtctx->start_col, mgmtctx->active_ctx->id,
+		 mgmtctx->active_ctx->client->pid);
+
+	return true;
+}
+
+static void ve2_sched_timeout_pending_jobs(struct amdxdna_mgmtctx *mgmtctx)
+{
+	struct amdxdna_hwctx *hwctx = mgmtctx->active_ctx;
+	struct amdxdna_ctx_priv *vp;
+	int i;
+
+	if (!hwctx)
+		return;
+
+	vp = ve2_hw_priv(hwctx);
+	if (!vp)
+		return;
+
+	XDNA_ERR(mgmtctx->xdna,
+		 "MISC interrupt from firmware, hwctx %u (pid %d) on col %u is unusable (misc_status 0x%x)",
+		 hwctx->id, hwctx->client->pid, mgmtctx->start_col, vp->misc_status_latched);
+
+	mutex_lock(&vp->privctx_lock);
+	for (i = 0; i < HWCTX_MAX_CMDS; i++) {
+		struct amdxdna_sched_job *job = vp->pending[i];
+
+		if (!job)
+			continue;
+		XDNA_ERR(mgmtctx->xdna, "MISC interrupt: marking pending job seq=%llu TIMEOUT",
+			 job->seq);
+		amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
+	}
+	mutex_unlock(&vp->privctx_lock);
+}
+
 static void ve2_sched_work_drm(struct work_struct *work)
 {
 	struct ve2_scheduler *sched = container_of(work, struct ve2_scheduler, sched_work);
@@ -636,6 +694,11 @@ static void ve2_sched_work_drm(struct work_struct *work)
 		struct ve2_job *job;
 		struct amdxdna_hwctx *next_ctx;
 		struct cert_status cert_status;
+
+		if (ve2_check_misc_interrupt(mgmtctx)) {
+			ve2_sched_timeout_pending_jobs(mgmtctx);
+			return;
+		}
 
 		ve2_read_cert_status(mgmtctx, &cert_status);
 
@@ -919,7 +982,11 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	 * Either status value means "safe to switch now" when a switch is
 	 * pending, so both must re-arm the scheduler here.
 	 */
-	if (sched->ctx_switch_requested && (cert_status.is_idle || cert_status.queue_not_empty)) {
+	if (ve2_check_misc_interrupt(mgmtctx)) {
+		XDNA_DBG(mgmtctx->xdna, "IRQ: MISC interrupt detected (col=%u)",
+			 mgmtctx->start_col);
+		queue_work(sched->wq, &sched->sched_work);
+	} else if (sched->ctx_switch_requested && (cert_status.is_idle || cert_status.queue_not_empty)) {
 		/* CERT responded to our context switch request */
 		XDNA_DBG(mgmtctx->xdna, "IRQ: Context switch ready (col=%u)",
 			 mgmtctx->start_col);
