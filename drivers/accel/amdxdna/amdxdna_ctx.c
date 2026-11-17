@@ -42,9 +42,24 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 
-	synchronize_srcu(ss);
+	/*
+	 * Caller holds dev_lock and has erased the hwctx, so TDR and the AIE4
+	 * context reset can no longer find it. Fail all its jobs before waiting
+	 * for SRCU readers, which may be waiting on one of them. dev_lock is
+	 * dropped while waiting so recovery of other hwctxs, which a reader may
+	 * wait on as well, can still run.
+	 */
+	if (xdna->dev_info->ops->hwctx_abort)
+		xdna->dev_info->ops->hwctx_abort(hwctx);
 
-	/* At this point, user is not able to submit new commands */
+	mutex_unlock(&xdna->dev_lock);
+	synchronize_srcu(ss);
+	mutex_lock(&xdna->dev_lock);
+
+	/*
+	 * At this point, no new command can be submitted and no submitted one
+	 * is still pending.
+	 */
 	if (xdna->dev_info->ops->hwctx_fini)
 		xdna->dev_info->ops->hwctx_fini(hwctx);
 
@@ -393,8 +408,8 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	}
 
 	/*
-	 * The pushed jobs are handled by DRM scheduler during destroy.
-	 * SRCU to synchronize with exec command ioctls.
+	 * amdxdna_hwctx_destroy_rcu() fails the remaining jobs and waits for
+	 * SRCU readers, such as exec command ioctls, before freeing the hwctx.
 	 */
 	amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
 	ida_free(&xdna->hwctx_ida, args->handle);

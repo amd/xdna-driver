@@ -675,6 +675,8 @@ static int aie2_alloc_resource(struct amdxdna_hwctx *hwctx)
 	ret = xrs_allocate_resource(xdna->xrs_hdl, xrs_req, hwctx);
 	if (ret)
 		XDNA_ERR(xdna, "Allocate AIE resource failed, ret %d", ret);
+	else
+		hwctx->priv->xrs_reserved = true;
 
 	kfree(xrs_req);
 	return ret;
@@ -685,9 +687,29 @@ static void aie2_release_resource(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int ret;
 
+	/* Already released, e.g. by aie2_hwctx_abort() before fini. */
+	if (!hwctx->priv->xrs_reserved)
+		return;
+
 	ret = xrs_release_resource(xdna->xrs_hdl, (uintptr_t)hwctx);
+	/* The solver has freed the columns, even if unload failed. */
+	hwctx->priv->xrs_reserved = false;
 	if (ret)
 		XDNA_ERR(xdna, "Release AIE resource failed, ret %d", ret);
+}
+
+void aie2_hwctx_abort(struct amdxdna_hwctx *hwctx)
+{
+	/* Give outstanding jobs up to 2s to finish before failing them. */
+	aie2_hwctx_wait_for_idle(hwctx);
+	/*
+	 * Free the columns now rather than in fini, after dev_lock is dropped,
+	 * so a racing create can use them. Unload pauses the hwctx and destroys
+	 * the fw context, which aborts every in-flight job.
+	 */
+	aie2_release_resource(hwctx);
+	/* Paused and later jobs find no mailbox channel and abort too. */
+	aie2_hwctx_job_unpause(hwctx);
 }
 
 static int aie2_ctx_syncobj_create(struct amdxdna_hwctx *hwctx)
@@ -873,18 +895,12 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	xdna = hwctx->client->xdna;
 
 	XDNA_DBG(xdna, "%s sequence number %lld", hwctx->name, hwctx->priv->seq);
-	aie2_hwctx_job_unpause(hwctx);
-	aie2_hwctx_wait_for_idle(hwctx);
+	/* No job is left: aborted by aie2_hwctx_abort(), or never submitted. */
+	drm_WARN_ON(&xdna->ddev, atomic64_read(&hwctx->job_submit_cnt) !=
+		    atomic64_read(&hwctx->job_free_cnt));
 
-	/* Request fw to destroy hwctx and cancel the rest pending requests */
+	/* Request fw to destroy hwctx, unless aie2_hwctx_abort() already did */
 	aie2_release_resource(hwctx);
-
-	mutex_unlock(&xdna->dev_lock);
-	/* Wait for all submitted jobs to be completed or canceled */
-	wait_event(hwctx->job_free_wq,
-		   atomic64_read(&hwctx->job_submit_cnt) ==
-		   atomic64_read(&hwctx->job_free_cnt));
-	mutex_lock(&xdna->dev_lock);
 
 	aie2_ctx_syncobj_destroy(hwctx);
 

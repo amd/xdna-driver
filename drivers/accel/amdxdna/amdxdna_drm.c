@@ -164,8 +164,12 @@ static void amdxdna_client_cleanup(struct amdxdna_client *client)
 	struct amdxdna_dev *xdna = client->xdna;
 	unsigned long heap_id;
 
-	list_del(&client->node);
+	/*
+	 * Stay on client_list until every hwctx is destroyed: destroying one
+	 * drops dev_lock, and reset, suspend and TDR must still find the others.
+	 */
 	amdxdna_hwctx_remove_all(client);
+	list_del(&client->node);
 	xa_destroy(&client->hwctx_xa);
 	cleanup_srcu_struct(&client->hwctx_srcu);
 

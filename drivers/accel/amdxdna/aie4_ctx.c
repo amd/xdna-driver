@@ -940,24 +940,35 @@ destroy_lock:
 void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+
+	/* No job is left: aborted by aie4_hwctx_abort(), or never submitted. */
+	drm_WARN_ON(&xdna->ddev, atomic64_read(&hwctx->job_submit_cnt) !=
+		    atomic64_read(&hwctx->job_free_cnt));
 
 	/*
-	 * ERROR sets has_reset (like a TDR reset) so the worker drains the running
-	 * list - the ctx is gone, so in-flight jobs are reaped - and stays live
-	 * for aie4_hwctx_wait_for_running() to wait on. Submitters are already gone
-	 * (amdxdna_hwctx_destroy_rcu() synchronize_srcu'd them out), then the
-	 * queue is torn down.
+	 * Destroy the fw context and partition unless aie4_hwctx_abort() already
+	 * did, which also releases the debug buffers. destroy_workqueue() waits
+	 * out a job worker pass that may still be running.
 	 */
 	aie4_hwctx_destroy(hwctx, AIE4_HWCTX_ERROR);
-	if (priv->kernel_submit) {
-		aie4_hwctx_wait_for_running(hwctx);
+	if (priv->kernel_submit)
 		destroy_workqueue(priv->job_work_q);
-	}
-	/* The context is destroyed, so release its debug buffers. */
-	aie4_hwctx_put_fw_bufs(hwctx);
 	aie4_hwctx_umq_fini(hwctx);
 	mutex_destroy(&priv->io_lock);
 	kfree(priv);
+}
+
+void aie4_hwctx_abort(struct amdxdna_hwctx *hwctx)
+{
+	/*
+	 * The ctx is never recreated, so fail submitters waiting for it to
+	 * reconnect. Set before aie4_hwctx_destroy() wakes them up.
+	 */
+	WRITE_ONCE(hwctx->priv->dead, true);
+	/* Like a TDR reset: disconnect, then let the worker reap running jobs. */
+	aie4_hwctx_destroy(hwctx, AIE4_HWCTX_ERROR);
+	aie4_hwctx_wait_for_running(hwctx);
 }
 
 static inline bool valid_queue_index(u64 read, u64 write, u32 capacity)
@@ -1169,15 +1180,19 @@ static int wait_till_connected_hsa_not_full(struct amdxdna_hwctx *hwctx,
 		 * that aie4_hwctx_wait_for_running() does not block on it.
 		 * aie4_hwctx_destroy() wakes job_list_wq after setting has_reset so a
 		 * parked submitter re-checks. Never spins; cert_comp is published after
-		 * the doorbell on create.
+		 * the doorbell on create. A ctx aborted by aie4_hwctx_abort() never
+		 * reconnects, so every submitter unwinds with -ENODEV instead.
 		 */
 		ret = wait_event_freezable(priv->job_list_wq,
 					   aie4_hwctx_connected(hwctx) ||
+					   READ_ONCE(priv->dead) ||
 					   (!wait_through_reset &&
 					    aie4_hwctx_has_reset(hwctx)));
 		mutex_lock(&priv->io_lock);
 		if (ret)
 			return ret;
+		if (READ_ONCE(priv->dead))
+			return -ENODEV;
 		if (!wait_through_reset && aie4_hwctx_has_reset(hwctx)) {
 			XDNA_DBG(xdna, "ctx %s reset while submitting; unwinding -ECONNRESET",
 				 hwctx->name);
@@ -1425,8 +1440,10 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 
 	/*
 	 * Block until a queue slot is free and the ctx is connected (io_lock is
-	 * dropped across the sleeps inside and re-acquired). The only failure is a
-	 * signal interrupting the wait (-ERESTARTSYS), e.g. the app being killed.
+	 * dropped across the sleeps inside and re-acquired). It fails with
+	 * -ERESTARTSYS on a signal (e.g. the app being killed), -ECONNRESET on a
+	 * reset after part of a chain was published, or -ENODEV once the ctx is
+	 * aborted for destroy.
 	 */
 	ret = wait_till_connected_hsa_not_full(hwctx, first_cmd);
 	if (ret) {
