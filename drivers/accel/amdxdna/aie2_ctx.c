@@ -1334,6 +1334,15 @@ int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx,
 	if (ret)
 		return ret;
 
+	/*
+	 * dev_lock was dropped above. A hwctx aborted for destroy meanwhile, or
+	 * left stopped by a failed TDR or resume restart, has no fw context.
+	 * Skip it: a later restart adds every heap up to last_attached_heap,
+	 * this one included.
+	 */
+	if (hwctx->fw_ctx_id == (u32)-1)
+		goto put_pm;
+
 	addr = amdxdna_obj_dma_addr(heap);
 	ret = aie2_add_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
 				addr, heap->mem.size);
@@ -1342,6 +1351,7 @@ int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx,
 			 hwctx->name, heap->mem.size, ret);
 	}
 
+put_pm:
 	amdxdna_pm_suspend_put(xdna);
 
 	return ret;

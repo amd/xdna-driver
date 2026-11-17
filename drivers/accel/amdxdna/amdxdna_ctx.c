@@ -591,20 +591,26 @@ out:
 int amdxdna_update_heap(struct amdxdna_client *client, struct amdxdna_hwctx *hwctx)
 {
 	unsigned long hwctx_id;
-	int ret;
+	int ret = 0, idx;
 
 	guard(mutex)(&client->mm_lock);
 
 	if (hwctx)
 		return amdxdna_hwctx_expand_heap(hwctx);
 
+	/*
+	 * Expanding a heap drops mm_lock and dev_lock, so a concurrent destroy
+	 * could free a hwctx under the walk. hwctx_srcu makes destroy wait.
+	 */
+	idx = srcu_read_lock(&client->hwctx_srcu);
 	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 		ret = amdxdna_hwctx_expand_heap(hwctx);
 		if (ret)
-			return ret;
+			break;
 	}
+	srcu_read_unlock(&client->hwctx_srcu, idx);
 
-	return 0;
+	return ret;
 }
 
 static void
