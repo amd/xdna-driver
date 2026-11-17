@@ -285,7 +285,8 @@ static int aie2_xrs_unload(void *cb_arg)
 
 	xdna = hwctx->client->xdna;
 
-	ret = aie2_destroy_context(xdna->dev_handle, hwctx);
+	/* Pause first: submitters may still be running, see aie2_hwctx_abort(). */
+	ret = aie2_hwctx_stop(hwctx);
 	if (ret)
 		XDNA_ERR(xdna, "destroy context failed, ret %d", ret);
 
@@ -1567,6 +1568,7 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.set_aie_state = aie2_set_state,
 	.hwctx_init = aie2_hwctx_init,
 	.hwctx_fini = aie2_hwctx_fini,
+	.hwctx_abort = aie2_hwctx_abort,
 	.hwctx_config = aie2_hwctx_config,
 	.hwctx_sync_debug_bo = aie2_hwctx_sync_debug_bo,
 	.cmd_submit = aie2_cmd_submit,

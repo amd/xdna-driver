@@ -100,6 +100,7 @@ struct amdxdna_hwctx_priv {
 	bool                            cached_ctx_error_valid;
 	struct aie4_async_ctx_error     cached_ctx_error;
 	bool				has_reset; /* if hwctx disconnection due to reset */
+	bool				dead; /* aborted for destroy, never reconnects */
 
 	/*
 	 * Kernel-mode submission: the driver fills the HSA queue and rings
@@ -201,6 +202,7 @@ enum aie4_hwctx_flags {
 
 int aie4_hwctx_init(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx);
+void aie4_hwctx_abort(struct amdxdna_hwctx *hwctx);
 int aie4_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value,
 		      void *buf, u32 size);
 int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);

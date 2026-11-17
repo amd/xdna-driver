@@ -105,6 +105,9 @@ struct amdxdna_hwctx_priv {
 	u64				starvation_last_submit_cnt;
 	u64				starvation_last_free_cnt;
 	bool				starvation_priority_boosted;
+
+	/* Solver holds columns for this hwctx. Accessed under dev_lock. */
+	bool				xrs_reserved;
 };
 
 enum aie2_dev_status {
@@ -321,6 +324,7 @@ int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev, u32 us);
 /* aie2_hwctx.c */
 int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);
 void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx);
+void aie2_hwctx_abort(struct amdxdna_hwctx *hwctx);
 int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 int aie2_hwctx_sync_debug_bo(struct amdxdna_hwctx *hwctx, u32 debug_bo_hdl);
 int aie2_hwctx_stop(struct amdxdna_hwctx *hwctx);

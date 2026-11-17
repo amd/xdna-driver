@@ -311,6 +311,7 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.debugfs_init		= aie4_debugfs_init,
 	.hwctx_init		= ve2_hwctx_init,
 	.hwctx_fini		= ve2_hwctx_fini,
+	.hwctx_abort		= aie4_hwctx_abort,
 	.hwctx_config		= aie4_hwctx_config,
 	.cmd_submit		= aie4_cmd_submit,
 	.cmd_wait		= aie4_cmd_wait,
