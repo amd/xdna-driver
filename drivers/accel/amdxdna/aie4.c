@@ -162,14 +162,20 @@ void aie4_partition_destroy(struct amdxdna_dev_hdl *ndev, u32 part_id)
 
 	req.partition_id = part_id;
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (!ret)
+		return;
+
 	/*
 	 * Firmware also refuses this while another context still shares the
 	 * partition, which is the common case once partitions are handed out
 	 * per context. It reports that with the same status as a real failure,
-	 * and there is nothing to unwind either way, so this only traces.
+	 * which aie_send_mgmt_msg_wait() has already logged, and there is
+	 * nothing to unwind either way, so only trace it here.
 	 */
-	if (ret)
+	if (AIE4_PART_PER_HWCTX(xdna))
 		XDNA_DBG(xdna, "destroy partition %u failed: %d", part_id, ret);
+	else
+		XDNA_ERR(xdna, "destroy partition %u failed: %d", part_id, ret);
 }
 
 /*
@@ -275,8 +281,19 @@ int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+/*
+ * Column count the device exposes: the fixed count of parts that cap their
+ * columns, else what firmware reports. The SR-IOV PF never runs
+ * aie4_setup_aie(), so only a capped part has a count there.
+ */
+static u32 aie4_dev_cols(struct amdxdna_dev_hdl *ndev)
+{
+	return ndev->aie.xdna->dev_info->max_cols ?: ndev->total_col;
+}
+
 int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 {
+	u32 max_cols = ndev->aie.xdna->dev_info->max_cols;
 	int ret;
 
 	ret = aie4_query_aie_version(ndev, &ndev->aie.version);
@@ -289,9 +306,12 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 
 	/*
 	 * Do not reset ndev->pw_mode here: this runs on every resume, and
-	 * clobbering the cache would drop the user's power override.
+	 * clobbering the cache would drop the user's power override. The
+	 * cached override is re-applied to firmware by aie4_restore_power_mode().
 	 */
 	ndev->total_col = ndev->aie.metadata.cols;
+	if (max_cols)
+		ndev->total_col = min(ndev->total_col, max_cols);
 	ndev->aie.frame_boundary_preempt_enabled = 1;
 
 	ret = aie4_init_dpm_freq_table(ndev);
@@ -299,11 +319,14 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 		/* if query dpm from fw failed, using default value */
 		(void)aie4_set_dpm(ndev, 0);
 
-	/*
-	 * No device-wide partition here: on this transport each hardware
-	 * context creates the partition it runs in (aie4_hwctx_create), so
-	 * there is nothing to set up until one is asked for.
-	 */
+	/* Parts that partition per hwctx make their own; see aie4_hwctx_create(). */
+	if (!AIE4_PART_PER_HWCTX(ndev->aie.xdna)) {
+		ret = aie4_partition_create(ndev, 0, aie4_dev_cols(ndev),
+					    &ndev->partition_id);
+		if (ret)
+			return ret;
+	}
+
 	/*
 	 * VE2 leaves register_async_event unset: its mailbox has no
 	 * ASYNC_EVENT_REPORT opcode, so it has no pool and reports no tile
@@ -315,7 +338,7 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 		ret = amdxdna_async_events_init(&ndev->aie);
 		if (ret) {
 			XDNA_ERR(ndev->aie.xdna, "Register async events failed, ret %d", ret);
-			return ret;
+			goto partition_fini;
 		}
 	}
 
@@ -327,6 +350,11 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 	aie4_restore_power_mode(ndev);
 
 	return 0;
+
+partition_fini:
+	if (!AIE4_PART_PER_HWCTX(ndev->aie.xdna))
+		aie4_partition_destroy(ndev, ndev->partition_id);
+	return ret;
 }
 
 static int aie4_get_power_mode(struct amdxdna_client *client,
@@ -616,7 +644,7 @@ int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *ar
 		ret = aie4_query_clock_metadata(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
-		ret = amdxdna_query_sensors(args, ndev->total_col);
+		ret = amdxdna_query_sensors(args, aie4_dev_cols(ndev));
 		break;
 	case DRM_AMDXDNA_QUERY_FIRMWARE_VERSION:
 		ret = amdxdna_get_firmware_version(client, args, &xdna->fw_ver);
