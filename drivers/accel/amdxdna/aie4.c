@@ -229,17 +229,23 @@ int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
 }
 
 /*
- * Platform copy of the DPM freq table query.  Unlike the PCI transport there is
- * no host-side default table (ndev->priv is NULL and its layout is PCI-only), so
- * the table is seeded purely from the firmware response; levels the firmware does
- * not report stay zero.
+ * Seed ndev->dpm_clk_tbl from the transport's host-side default table, if it
+ * has one, then overlay the levels the firmware reports. Without a default
+ * table, levels the firmware does not report stay zero.
  */
 int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE_MSG(aie4_msg_get_dpm_freq_table, AIE4_MSG_OP_GET_DPM_FREQ_TABLE);
+	const struct dpm_clk_freq *def_tbl = aie4_default_dpm_clk_tbl(ndev);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	u32 i;
 	int ret;
+
+	if (def_tbl) {
+		for (i = 0; i < AIE4_MAX_DPM_LEVEL_COUNT && def_tbl[i].hclk; i++)
+			ndev->dpm_clk_tbl[i] = def_tbl[i];
+		ndev->max_dpm_level = i ? i - 1 : 0;
+	}
 
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
@@ -341,6 +347,24 @@ static int aie4_get_power_mode(struct amdxdna_client *client,
 	return 0;
 }
 
+void aie4_max_clks_at_curr_dpm(struct amdxdna_dev_hdl *ndev,
+			       u32 *npuclk, u32 *hclk)
+{
+	u32 aieclk_level, npuhclk_level;
+	int ret;
+
+	ret = aie4_query_dpm_level(ndev, &aieclk_level, &npuhclk_level);
+	if (ret) {
+		/* Firmware query failed; DPM 0 is the safest known clock to report. */
+		XDNA_WARN_RATELIMITED(ndev->aie.xdna, "cannot get dpm level from fw, using DPM 0");
+		aieclk_level = 0;
+		npuhclk_level = 0;
+	}
+
+	*npuclk = ndev->dpm_clk_tbl[aieclk_level].npuclk;
+	*hclk = ndev->dpm_clk_tbl[npuhclk_level].hclk;
+}
+
 static int aie4_query_clock_metadata(struct amdxdna_client *client,
 				     struct amdxdna_drm_get_info *args)
 {
@@ -376,15 +400,23 @@ static int aie4_query_resource_info(struct amdxdna_client *client,
 	struct amdxdna_drm_get_resource_info res_info = {};
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
+	u32 npuclk, hclk;
 	u32 buf_sz;
 
 	xdna = client->xdna;
 	ndev = xdna->dev_handle;
 
-	aie4_update_counters(ndev);
 	res_info.npu_clk_max = ndev->dpm_clk_tbl[ndev->max_dpm_level].hclk;
-	res_info.npu_tops_max = ndev->aie.max_tops;
-	res_info.npu_tops_curr = ndev->aie.curr_tops;
+	if (AIE_FEATURE_ON(&ndev->aie, AIE4_QUERY_DPM_LEVEL)) {
+		aie4_max_clks_at_curr_dpm(ndev, &npuclk, &hclk);
+		res_info.npu_tops_max = AIE_DPM_TOPS(ndev, res_info.npu_clk_max);
+		res_info.npu_tops_curr = AIE_DPM_TOPS(ndev, hclk);
+		res_info.npu_curr_clk_max = hclk;
+	} else {
+		aie4_update_counters(ndev);
+		res_info.npu_tops_max = ndev->aie.max_tops;
+		res_info.npu_tops_curr = ndev->aie.curr_tops;
+	}
 
 	buf_sz = min(args->buffer_size, sizeof(res_info));
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &res_info, buf_sz))
