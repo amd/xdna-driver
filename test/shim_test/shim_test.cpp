@@ -68,6 +68,7 @@ void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&
 void TEST_export_bo_then_close_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_destroy_ctx_with_blocked_submit(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_gemm(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_gemm_after_idle(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
@@ -1864,6 +1865,10 @@ std::vector<test_case> test_list {
   },
   test_case{ "debug bo sync after suspend", {},
     TEST_POSITIVE, {npu1, npu4}, {amdxdna}, TEST_debug_bo_after_suspend, { 0x1000 }
+  },
+  // Needs the native driver; not supported on the virtio-gpu guest.
+  test_case{ "io test destroy hw context while a submit is blocked on it", {},
+    TEST_POSITIVE, {npu4, npu3, npu3vf, npu12}, {amdxdna}, TEST_io_destroy_ctx_with_blocked_submit, {}
   },
 };
 

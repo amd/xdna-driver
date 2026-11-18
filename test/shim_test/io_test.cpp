@@ -9,6 +9,7 @@
 #include "dev_info.h"
 #include "dev_filter.h"
 #include "io_param.h"
+#include "thr_log.h"
 
 #include "core/common/device.h"
 #include "core/common/system.h"
@@ -22,12 +23,17 @@
 #include <regex>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <cerrno>
 #include <system_error>
 #include <thread>
 #include <vector>
+#include <atomic>
+#include <mutex>
+#include <csignal>
 #include <dirent.h>
+#include <pthread.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
@@ -955,6 +961,280 @@ TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
 {
   elf_io_negative_test_bo_set boset{sdev.get(), "bad_timeout"};
   boset.run();
+}
+
+namespace {
+
+/*
+ * Shared state of TEST_io_destroy_ctx_with_blocked_submit(). owner_thr owns the
+ * hwctx and every command and starts submitter_thr, submitter_thr submits the
+ * commands, main is the watchdog.
+ */
+enum class blocked_destroy_state {
+  init,
+  resources_ready,  // hwctx and commands ready, submitter_thr started
+  destroying_ctx,   // submitter_thr is blocked, owner_thr is destroying the hwctx
+  done_no_repro,    // submitter_thr never blocked, nothing to destroy under it
+  done,             // hwctx destroyed and all resources freed
+  failed,           // owner_thr failed to set up, error holds the reason
+};
+
+struct blocked_destroy_shared {
+  std::atomic<blocked_destroy_state> state{blocked_destroy_state::init};
+  std::atomic<bool> destroying{false};
+  std::atomic<int> submitted{0};
+  std::atomic<bool> submitter_done{false};
+  // Published by owner_thr before it starts submitter_thr.
+  hwqueue_handle *hwq = nullptr;
+  std::vector<bo*> cmds;    // longrun cmd first, then the good ones
+  const char *longrun_tag = nullptr;
+  // submitter_thr's handle for main to signal; valid while submitter_alive.
+  std::mutex submitter_lock;
+  pthread_t submitter_handle{};
+  bool submitter_alive = false;
+  std::string error;        // set by owner_thr before state becomes failed
+};
+
+/* Interrupts submitter_thr's blocked submit without killing the process. */
+void
+blocked_destroy_noop_handler(int)
+{
+}
+
+bool
+blocked_destroy_is_final(blocked_destroy_state s)
+{
+  return s == blocked_destroy_state::done ||
+         s == blocked_destroy_state::done_no_repro ||
+         s == blocked_destroy_state::failed;
+}
+
+/*
+ * submitter_thr: submit the longrun cmd, which keeps the hwctx from draining,
+ * then good commands until one blocks because the queue is full. Stop once the
+ * hwctx is being destroyed or a submit fails.
+ */
+void
+blocked_destroy_submitter_thr(blocked_destroy_shared& s)
+{
+  const char *thr = "submitter_thr";
+
+  thr_log(thr, "submitting " + std::to_string(s.cmds.size()) +
+    " cmds, " + s.longrun_tag + " first");
+  try {
+    for (auto *cmd : s.cmds) {
+      s.hwq->submit_command(cmd->get());
+      s.submitted++;
+      if (s.destroying) {
+        thr_log(thr, "quitting, ctx is being destroyed, " +
+          std::to_string(s.submitted) + " cmds submitted");
+        break;
+      }
+    }
+    if (!s.destroying)
+      thr_log(thr, "all " + std::to_string(s.submitted) + " cmds submitted");
+  } catch (const std::exception& e) {
+    thr_log(thr, "quitting on submission error after " +
+      std::to_string(s.submitted) + " cmds: " + e.what());
+  }
+  s.submitter_done = true;
+}
+
+/*
+ * owner_thr: create the hwctx and all commands, start submitter_thr, wait for
+ * it to block in a submit, then destroy the hwctx by resetting its pointer.
+ * Commands are freed only after submitter_thr has exited.
+ */
+void
+blocked_destroy_owner_thr(device* dev, blocked_destroy_shared& s)
+{
+  const char *thr = "owner_thr";
+  const char *good_tag = "good";
+  // More than any queue can hold, so submitter_thr always ends up blocked.
+  constexpr int num_good = 64;
+  /*
+   * Heuristic: a submit count that does not move for this long means
+   * submitter_thr is blocked in the driver. It only makes destroying the
+   * hwctx between two submits unlikely, while staying well below the 2s
+   * job timeout that would recover the hang first.
+   */
+  constexpr auto stall_time = std::chrono::milliseconds(500);
+
+  std::unique_ptr<io_test_bo_set_base> longrun;
+  std::vector<std::unique_ptr<io_test_bo_set_base>> goods;
+  std::unique_ptr<hw_ctx> hwctx;
+
+  try {
+    // Prefer partial-ELF when the catalog has it; else FULL_ELF.
+    static const flow_type flow_partial = PARTIAL_ELF;
+    static const flow_type flow_full = FULL_ELF;
+    const binary_info& good_info = [&]() -> const binary_info& {
+      try {
+        return get_binary_info(dev, good_tag, &flow_partial);
+      } catch (const std::runtime_error&) {
+        return get_binary_info(dev, good_tag, &flow_full);
+      }
+    }();
+    flow_type good_flow = good_info.flow;
+
+    hwctx = std::make_unique<hw_ctx>(dev, good_tag, &good_flow);
+
+    /*
+     * The longrun cmd keeps the hwctx from draining while the queue fills:
+     * bad_timeout on npu4, long_run on AIE4, where CERT times bad_timeout.elf
+     * out after 200ms, too soon.
+     */
+    if (dev_filter_is_aie4(0, dev)) {
+      s.longrun_tag = "long_run";
+      longrun = create_bo_set_for_device(dev, false, s.longrun_tag);
+    } else {
+      s.longrun_tag = "bad_timeout";
+      longrun = std::make_unique<elf_io_negative_test_bo_set>(dev, s.longrun_tag);
+    }
+    longrun->init_cmd(*hwctx, false);
+    longrun->sync_before_run();
+    s.cmds.push_back(longrun->get_bos()[IO_TEST_BO_CMD].tbo.get());
+
+    // Built up front so submitter_thr fills the queue before the hang is recovered.
+    for (int i = 0; i < num_good; i++) {
+      auto g = create_bo_set_for_device(dev, false, good_tag, &good_flow);
+      g->init_cmd(*hwctx, false);
+      g->sync_before_run();
+      s.cmds.push_back(g->get_bos()[IO_TEST_BO_CMD].tbo.get());
+      goods.push_back(std::move(g));
+    }
+
+    s.hwq = hwctx->get()->get_hw_queue();
+  } catch (const std::exception& e) {
+    thr_log(thr, std::string("setup failed: ") + e.what());
+    s.error = e.what();
+    s.state = blocked_destroy_state::failed;
+    return;
+  }
+
+  std::thread submitter_thr(blocked_destroy_submitter_thr, std::ref(s));
+  {
+    std::lock_guard<std::mutex> lg(s.submitter_lock);
+    s.submitter_handle = submitter_thr.native_handle();
+    s.submitter_alive = true;
+  }
+  thr_log(thr, "submitter_thr started");
+  s.state = blocked_destroy_state::resources_ready;
+
+  // submitter_thr is blocked once its submit count stops moving.
+  int last = -1;
+  auto since = std::chrono::steady_clock::now();
+  while (!s.submitter_done) {
+    int cur = s.submitted;
+    auto now = std::chrono::steady_clock::now();
+    if (cur != last) {
+      last = cur;
+      since = now;
+    } else if (cur > 0 && now - since >= stall_time) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  auto final_state = blocked_destroy_state::done;
+  if (s.submitter_done) {
+    // The hang was recovered before submitter_thr blocked.
+    thr_log(thr, "submitter_thr never blocked, destroying ctx anyway");
+    final_state = blocked_destroy_state::done_no_repro;
+  } else {
+    thr_log(thr, "submitter_thr blocked after " + std::to_string(last) +
+      " submits, start destroying ctx");
+    s.destroying = true;
+    s.state = blocked_destroy_state::destroying_ctx;
+  }
+  // Hangs here if destroy deadlocks with submitter_thr's blocked submit.
+  hwctx.reset();
+  thr_log(thr, "ctx destroyed");
+
+  {
+    std::lock_guard<std::mutex> lg(s.submitter_lock);
+    s.submitter_alive = false;
+  }
+  submitter_thr.join();
+  thr_log(thr, "submitter_thr exited, freeing cmds");
+  goods.clear();
+  longrun.reset();
+  s.state = final_state;
+}
+
+}
+
+/*
+ * Destroy a hwctx while a submit is blocked on it. A longrun cmd that runs
+ * until it times out (bad_timeout on npu4, long_run on AIE4) keeps the hwctx
+ * from draining, so the queue fills and the next submit blocks in the driver.
+ * Destroy must fail the longrun job so the blocked submit returns. Otherwise
+ * destroy waits for the submitter while holding the lock that job recovery
+ * needs, and never returns. In that case main interrupts the blocked submit
+ * with a signal so the test fails instead of hanging.
+ */
+void
+TEST_io_destroy_ctx_with_blocked_submit(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  const char *thr = "main";
+  constexpr auto setup_timeout = std::chrono::seconds(120);
+  // A fixed destroy waits at most for one fw message timeout (5s).
+  constexpr auto destroy_timeout = std::chrono::seconds(10);
+  blocked_destroy_shared s;
+
+  // No SA_RESTART: the signal must fail submitter_thr's blocked submit with EINTR.
+  struct sigaction sa = {};
+  struct sigaction old_sa = {};
+  sa.sa_handler = blocked_destroy_noop_handler;
+  sigemptyset(&sa.sa_mask);
+  if (sigaction(SIGUSR1, &sa, &old_sa))
+    throw std::runtime_error(std::string("sigaction failed: ") + std::strerror(errno));
+
+  std::thread owner_thr(blocked_destroy_owner_thr, sdev.get(), std::ref(s));
+  thr_log(thr, "owner_thr started");
+
+  auto wait_state = [&s](auto pred, auto timeout) {
+    auto end = std::chrono::steady_clock::now() + timeout;
+    while (!pred(s.state.load())) {
+      if (std::chrono::steady_clock::now() >= end)
+        return false;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return true;
+  };
+  auto past_setup = [](blocked_destroy_state st) {
+    return st != blocked_destroy_state::init && st != blocked_destroy_state::resources_ready;
+  };
+
+  bool hang = !wait_state(past_setup, setup_timeout) ||
+              !wait_state(blocked_destroy_is_final, destroy_timeout);
+  if (hang) {
+    thr_log(thr, "hang detected, interrupting submitter_thr");
+    {
+      std::lock_guard<std::mutex> lg(s.submitter_lock);
+      if (s.submitter_alive)
+        pthread_kill(s.submitter_handle, SIGUSR1);
+    }
+    if (!wait_state(blocked_destroy_is_final, destroy_timeout)) {
+      thr_log(thr, "still hung after interrupting submitter_thr, exiting");
+      _exit(EXIT_FAILURE);
+    }
+  }
+
+  owner_thr.join();
+  sigaction(SIGUSR1, &old_sa, nullptr);
+  thr_log(thr, "done");
+
+  switch (s.state.load()) {
+  case blocked_destroy_state::failed:
+    throw std::runtime_error("setup failed: " + s.error);
+  case blocked_destroy_state::done_no_repro:
+    throw std::runtime_error("submitter never blocked, the hang was recovered too early");
+  default:
+    break;
+  }
+  if (hang)
+    throw std::runtime_error("hwctx destroy deadlocked with a blocked submit");
 }
 
 /*
