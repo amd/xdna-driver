@@ -28,6 +28,110 @@
 #include "amdxdna_sensors.h"
 #include "amdxdna_tile_read_write.h"
 
+#define AIE4_MAX_CTX_RESTORE_POOL_SIZE	(PAGE_SIZE << MAX_PAGE_ORDER)
+
+void aie4_free_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+{
+	if (!ndev->restore_pool_hdl)
+		return;
+
+	amdxdna_free_msg_buff(ndev->restore_pool_hdl);
+	ndev->restore_pool_hdl = NULL;
+}
+
+/*
+ * Drop the ids handed out by the graceful destroys. Firmware cannot honour an
+ * id with no pool behind it, so let the next create build a context from
+ * scratch. The parked jobs stay put and are re-driven against it.
+ */
+static void aie4_clear_ctx_restore_ids(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct amdxdna_client *client;
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id;
+	int idx;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	amdxdna_for_each_client(xdna, client) {
+		idx = srcu_read_lock(&client->hwctx_srcu);
+		amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
+			hwctx->priv->restore_id = 0;
+		srcu_read_unlock(&client->hwctx_srcu, idx);
+	}
+}
+
+/*
+ * Firmware drops its context restore pool on suspend. Copy it out while
+ * firmware is still up and every context is already gracefully destroyed,
+ * otherwise the pool is incomplete. Returns 0 only if a pool was saved.
+ */
+static int aie4_save_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct amdxdna_msg_buf_hdl *buf_hdl;
+	u32 size;
+	int ret;
+
+	aie4_free_ctx_restore_pool(ndev);
+
+	ret = aie4_msg_get_ctx_restore_pool_size(ndev, &size);
+	if (ret)
+		return ret;
+
+	if (!size)
+		return -ENODATA;
+
+	if (size > AIE4_MAX_CTX_RESTORE_POOL_SIZE) {
+		XDNA_ERR(xdna, "Ctx restore pool size 0x%x exceeds 0x%lx", size,
+			 AIE4_MAX_CTX_RESTORE_POOL_SIZE);
+		return -EFBIG;
+	}
+
+	buf_hdl = amdxdna_alloc_msg_buff(xdna, size);
+	if (IS_ERR(buf_hdl)) {
+		ret = PTR_ERR(buf_hdl);
+		XDNA_ERR(xdna, "Failed to alloc ctx restore pool, size 0x%x, ret %d",
+			 size, ret);
+		return ret;
+	}
+
+	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+
+	ret = aie4_msg_get_ctx_restore_pool(ndev, to_dma_addr(buf_hdl, 0),
+					    to_buf_size(buf_hdl));
+	if (ret) {
+		amdxdna_free_msg_buff(buf_hdl);
+		return ret;
+	}
+
+	ndev->restore_pool_hdl = buf_hdl;
+	XDNA_DBG(xdna, "Saved ctx restore pool, size 0x%x", to_buf_size(buf_hdl));
+
+	return 0;
+}
+
+/*
+ * Push the pool back before any context is recreated: a restore id means
+ * nothing to firmware until its pool is in place. A push that fails takes
+ * every entry with it, so drop the ids too.
+ */
+void aie4_restore_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_msg_buf_hdl *buf_hdl = ndev->restore_pool_hdl;
+
+	if (!buf_hdl)
+		return;
+
+	if (aie4_msg_set_ctx_restore_pool(ndev, to_dma_addr(buf_hdl, 0),
+					  to_buf_size(buf_hdl)))
+		aie4_clear_ctx_restore_ids(ndev);
+
+	aie4_free_ctx_restore_pool(ndev);
+}
+
 int aie4_partition_create(struct amdxdna_dev_hdl *ndev, u32 col_start,
 			  u32 col_count, u32 *part_id)
 {
@@ -709,6 +813,7 @@ static int aie4_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 
 void aie4_hwctx_suspend_all(struct amdxdna_dev_hdl *ndev, int clean_jobs)
 {
+	bool restore = AIE_FEATURE_ON(&ndev->aie, AIE4_CTX_RESTORE);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	struct amdxdna_client *client;
 	struct amdxdna_hwctx *hwctx;
@@ -724,12 +829,23 @@ void aie4_hwctx_suspend_all(struct amdxdna_dev_hdl *ndev, int clean_jobs)
 			if (clean_jobs) {
 				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_ERROR);
 				aie4_hwctx_wait_for_running(hwctx);
+			} else if (restore) {
+				/*
+				 * Park the ctx in firmware, then drop its jobs
+				 * if firmware preserved nothing.
+				 */
+				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_GRACEFUL);
+				if (hwctx->priv->restore_state == AIE4_CTX_RESTORE_LOST)
+					aie4_hwctx_abort_jobs(hwctx);
 			} else {
 				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_NORMAL);
 			}
 		}
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}
+
+	if (!clean_jobs && restore && aie4_save_ctx_restore_pool(ndev))
+		aie4_clear_ctx_restore_ids(ndev);
 
 	XDNA_DBG(xdna, "Finished hwctx suspend");
 }
@@ -781,6 +897,8 @@ void aie4_hwctx_disconnect_all(struct amdxdna_dev_hdl *ndev)
 		}
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}
+
+	aie4_free_ctx_restore_pool(ndev);
 }
 
 int aie4_hwctx_reconnect_all(struct amdxdna_dev_hdl *ndev)

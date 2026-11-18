@@ -406,7 +406,7 @@ static int aie4_fw_load(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
-static void aie4_free_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+void aie4_free_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
 {
 	if (!ndev->restore_pool_hdl)
 		return;
@@ -494,7 +494,7 @@ static int aie4_save_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
  * nothing to firmware until its pool is in place. A push that fails takes
  * every entry with it, so drop the ids too.
  */
-static void aie4_restore_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+void aie4_restore_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_msg_buf_hdl *buf_hdl = ndev->restore_pool_hdl;
 

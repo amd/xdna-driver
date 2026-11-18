@@ -378,6 +378,9 @@ void aie4_hwctx_disconnect_all(struct amdxdna_dev_hdl *ndev);
 int aie4_hwctx_reconnect_all(struct amdxdna_dev_hdl *ndev);
 int aie4_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args,
 		   u32 *settle_ms);
+void aie4_free_ctx_restore_pool(struct amdxdna_dev_hdl *ndev);
+void aie4_restore_ctx_restore_pool(struct amdxdna_dev_hdl *ndev);
+void aie4_max_clks_at_curr_dpm(struct amdxdna_dev_hdl *ndev, u32 *npuclk, u32 *hclk);
 
 /* aie4_dpt.c firmware log/trace over the debug/trace path. */
 int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level);
