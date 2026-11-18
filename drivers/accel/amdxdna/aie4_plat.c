@@ -105,6 +105,12 @@ void aie4_update_counters(struct amdxdna_dev_hdl *ndev)
 {
 }
 
+/* No host-side DPM table: levels come from firmware only. */
+const struct dpm_clk_freq *aie4_default_dpm_clk_tbl(struct amdxdna_dev_hdl *ndev)
+{
+	return NULL;
+}
+
 /* Device lifecycle (platform variants of the aie4_classic_* lifecycle). */
 
 /*

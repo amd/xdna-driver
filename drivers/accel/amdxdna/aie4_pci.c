@@ -2967,6 +2967,21 @@ void aie4_debugfs_init(struct amdxdna_dev *xdna)
 				    &aie4_dpm_config_fops);
 }
 
+int aie4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
+{
+	return ndev->priv->hw_ops->set_dpm(&ndev->aie, dpm_level);
+}
+
+void aie4_update_counters(struct amdxdna_dev_hdl *ndev)
+{
+	aie_update_counters(ndev);
+}
+
+const struct dpm_clk_freq *aie4_default_dpm_clk_tbl(struct amdxdna_dev_hdl *ndev)
+{
+	return ndev->priv->dpm_clk_tbl;
+}
+
 const struct amdxdna_dev_ops aie4_pf_ops = {
 	.init			= aie4_pf_init,
 	.fini			= aie4_pf_fini,

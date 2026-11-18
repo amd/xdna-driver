@@ -392,12 +392,14 @@ int aie4_fw_trace_fini(struct amdxdna_dev *xdna);
 void aie4_debugfs_init(struct amdxdna_dev *xdna);
 
 /*
- * Transport hooks: the platform transport (aie4_plat.c) provides these so the
- * shared aie4.c can reach the device's DPM and performance counters without the
- * PCI hw_ops. The PCI path (aie4_pci.c) inlines the equivalent directly and does
- * not use these.
+ * Transport hooks: each transport (aie4_pci.c, aie4_plat.c, ve2.c) provides
+ * these so the shared aie4.c can reach the device's DPM and performance
+ * counters without depending on the transport.
+ * aie4_default_dpm_clk_tbl() returns the host-side default DPM table that seeds
+ * ndev->dpm_clk_tbl before the firmware levels are overlaid, or NULL if none.
  */
 int aie4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 void aie4_update_counters(struct amdxdna_dev_hdl *ndev);
+const struct dpm_clk_freq *aie4_default_dpm_clk_tbl(struct amdxdna_dev_hdl *ndev);
 
 #endif /* _AIE4_H_ */
