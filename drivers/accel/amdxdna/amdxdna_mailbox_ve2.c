@@ -780,7 +780,20 @@ static bool ve2_part_cert_yielded(struct ve2_part *part)
  */
 static int ve2_part_dispatch_locked(struct ve2_part *part, struct ve2_ctx *ctx)
 {
+	struct ve2_ctx *prev = part->active;
 	int ret;
+
+	/*
+	 * Switching to @ctx reinstalls its queue and CERT stops running the
+	 * previous context. If that context still has published commands and its
+	 * doorbell already went to CERT, nothing would ever run them again, so
+	 * put it back in the run queue.
+	 */
+	if (prev && prev != ctx && !prev->queued && prev->read_index &&
+	    prev->write_index && !ve2_ctx_queue_drained(prev)) {
+		list_add_tail(&prev->run_node, &part->runq);
+		prev->queued = true;
+	}
 
 	ret = ve2_part_activate_locked(part, ctx);
 	if (ret)
