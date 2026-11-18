@@ -893,6 +893,39 @@ static void ve2_sched_remove_ctx_jobs(struct ve2_scheduler *sched, struct amdxdn
 	spin_unlock_irqrestore(&sched->job_lock, flags);
 }
 
+struct ve2_sched_remove_ctx_jobs_work {
+	struct work_struct	work;
+	struct ve2_scheduler	*sched;
+	struct amdxdna_hwctx	*hwctx;
+};
+
+static void ve2_sched_remove_ctx_jobs_fn(struct work_struct *work)
+{
+	struct ve2_sched_remove_ctx_jobs_work *rw =
+		container_of(work, struct ve2_sched_remove_ctx_jobs_work, work);
+
+	ve2_sched_remove_ctx_jobs(rw->sched, rw->hwctx);
+}
+
+/* Run on sched->wq so this can't race ve2_sched_work_drm()'s use of job_queue. */
+static void ve2_sched_remove_ctx_jobs_sync(struct ve2_scheduler *sched,
+					   struct amdxdna_hwctx *hwctx)
+{
+	struct ve2_sched_remove_ctx_jobs_work rw;
+
+	if (!sched->wq) {
+		ve2_sched_remove_ctx_jobs(sched, hwctx);
+		return;
+	}
+
+	INIT_WORK_ONSTACK(&rw.work, ve2_sched_remove_ctx_jobs_fn);
+	rw.sched = sched;
+	rw.hwctx = hwctx;
+	queue_work(sched->wq, &rw.work);
+	flush_work(&rw.work);
+	destroy_work_on_stack(&rw.work);
+}
+
 int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 			  u64 command_index)
 {
@@ -1491,7 +1524,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 		mgmtctx->scheduler.ctx_switch_requested = false;
 	}
 	mutex_unlock(&mgmtctx->ctx_lock);
-	ve2_sched_remove_ctx_jobs(&mgmtctx->scheduler, hwctx);
+	ve2_sched_remove_ctx_jobs_sync(&mgmtctx->scheduler, hwctx);
 
 	/* Release the XRS reservation; learn whether we were the last sharer. */
 	if (xrs) {
