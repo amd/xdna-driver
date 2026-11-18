@@ -1944,6 +1944,7 @@ static int aie4_vf_suspend(struct amdxdna_dev *xdna)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	aie4_hwctx_suspend_all(ndev, false);
+	amdxdna_dpt_fw_detach(&ndev->aie);
 	/* when PF and VF both present, PF suspend will do cleanup for all VFs */
 	aie4_mailbox_fini(ndev);
 	/* Drain the pool after the mailbox is torn down, as hw stop does. */
@@ -1959,6 +1960,7 @@ static int aie4_vf_runtime_suspend(struct amdxdna_dev *xdna)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	aie4_hwctx_suspend_all(ndev, false);
+	amdxdna_dpt_fw_detach(&ndev->aie);
 	aie4_vf_hw_stop(ndev);
 
 	XDNA_DBG(xdna, "vf runtime suspend done");
