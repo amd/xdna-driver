@@ -1089,6 +1089,8 @@ int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 	else if (ret > 0 && get_read_index(hwctx) <= seq)
 		/* Woke on disconnect/reset, not on real completion. */
 		ret = -EAGAIN;
+	else if (ret > 0 && hwctx->client->xdna->dev_info->ops->cmd_done)
+		hwctx->client->xdna->dev_info->ops->cmd_done(hwctx, seq);
 
 	aie4_put_cert_comp(cert_comp);
 
@@ -1467,6 +1469,8 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 	pkt->pkt_header.common_header.reserved = 0x0;
 	pkt->pkt_header.completion_signal = amdxdna_gem_dev_addr(cmd_abo) +
 					    offsetof(struct amdxdna_cmd, header);
+	if (xdna->dev_info->ops->cmd_pkt_prepare)
+		xdna->dev_info->ops->cmd_pkt_prepare(hwctx, slot_idx, pkt);
 	ri = get_read_index(hwctx);
 	*seq = publish_cmd(hwctx);
 	aie4_doorbell_ring(hwctx);
@@ -1643,6 +1647,10 @@ static void job_worker(struct work_struct *work)
 			trace_xdna_job_queue(hwctx->name, job->seq,
 					     READ_ONCE(hwctx->priv->write_index) - ri,
 					     "job complete");
+			/* Let the device finalise the command state before dequeue. */
+			if (job->aie4_job_state == AIE4_JOB_STATE_SUBMITTED &&
+			    hwctx->client->xdna->dev_info->ops->cmd_done)
+				hwctx->client->xdna->dev_info->ops->cmd_done(hwctx, job->seq);
 			dequeue_running_job(hwctx, job);
 			/*
 			 * read_index advanced past this job. A fully published

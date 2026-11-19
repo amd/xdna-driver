@@ -71,6 +71,7 @@ struct amdxdna_gem_obj;
 struct amdxdna_hwctx;
 struct amdxdna_rev_vbnv;
 struct amdxdna_sched_job;
+struct host_queue_packet;
 struct amdxdna_msg_buf_hdl;
 struct aie_device;
 struct aie_async_error_desc;
@@ -99,6 +100,19 @@ struct amdxdna_dev_ops {
 	int (*hwctx_heap_expand)(struct amdxdna_hwctx *hwctx, struct amdxdna_gem_obj *heap);
 	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 	int (*cmd_wait)(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
+	/*
+	 * Optional kernel-submit hooks for the aie4 command path; NULL when the
+	 * device needs nothing extra.
+	 *
+	 * cmd_pkt_prepare: called with the packet payload complete, before the
+	 * write index is published. May change the packet's completion address
+	 * or mark the slot valid.
+	 * cmd_done: called once the read index has passed @seq, before the
+	 * waiter or job worker reports the command finished.
+	 */
+	void (*cmd_pkt_prepare)(struct amdxdna_hwctx *hwctx, u32 slot,
+				struct host_queue_packet *pkt);
+	void (*cmd_done)(struct amdxdna_hwctx *hwctx, u64 seq);
 	int (*get_aie_info)(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args,
 			     u32 *settle_ms);

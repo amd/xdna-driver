@@ -19,6 +19,7 @@
 #include <drm/drm_drv.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_managed.h>
+#include <linux/delay.h>
 #include <linux/moduleparam.h>
 #include <linux/xarray.h>
 
@@ -76,6 +77,215 @@ static void ve2_hsa_queue_free(struct amdxdna_hwctx *hwctx)
 		drm_gem_handle_delete(hwctx->client->filp, hwctx->umq_bo_hdl);
 }
 
+/*
+ * Host-queue completion (HQC) slots. CERT writes each command's final state
+ * into its slot, in a driver-owned coherent buffer, because its store to the
+ * ERT command BO can be dropped (observed after a partition reset). Once the
+ * read index passes a command the driver copies the slot onto the command BO.
+ * Only VE2 uses this, through the cmd_pkt_prepare and cmd_done hooks.
+ */
+struct ve2_hqc {
+	struct amdxdna_msg_buf_hdl	*buf;
+	u64				*slots;	/* CTX_MAX_CMDS entries */
+	dma_addr_t			dma;
+};
+
+/* Per-context HQC state, keyed by the hwctx pointer. */
+static DEFINE_XARRAY(ve2_hqc_xa);
+
+static struct ve2_hqc *ve2_hqc_get(struct amdxdna_hwctx *hwctx)
+{
+	return xa_load(&ve2_hqc_xa, (unsigned long)hwctx);
+}
+
+/*
+ * The first byte of a packet header is its HSA-style type. CERT consumes a
+ * slot only while it is VENDOR_SPECIFIC, so VE2 keeps unpublished slots
+ * INVALID. The aie4 header calls this byte "reserved"; other devices leave
+ * it 0, which is VENDOR_SPECIFIC.
+ */
+#define VE2_PKT_TYPE_VENDOR_SPECIFIC	0
+#define VE2_PKT_TYPE_INVALID		1
+
+static void ve2_pkt_set_type(struct host_queue_packet *pkt, u8 type)
+{
+	WRITE_ONCE(*(u8 *)&pkt->pkt_header.common_header, type);
+}
+
+static bool ve2_hqc_state_terminal(enum ert_cmd_state state)
+{
+	return state == ERT_CMD_STATE_COMPLETED ||
+	       state == ERT_CMD_STATE_ERROR ||
+	       state == ERT_CMD_STATE_ABORT ||
+	       state == ERT_CMD_STATE_TIMEOUT ||
+	       state == ERT_CMD_STATE_NORESPONSE;
+}
+
+static u32 ve2_hqc_raw(struct ve2_hqc *hqc, u64 seq)
+{
+	/* Order the slot load after the caller's read_index check. */
+	smp_rmb();
+	return (u32)READ_ONCE(hqc->slots[seq & (CTX_MAX_CMDS - 1)]);
+}
+
+static bool ve2_hqc_seq_terminal(struct ve2_hqc *hqc, u64 seq)
+{
+	return ve2_hqc_state_terminal((enum ert_cmd_state)(ve2_hqc_raw(hqc, seq) & 0xF));
+}
+
+static void ve2_hqc_chain_error(struct amdxdna_hwctx *hwctx,
+				struct amdxdna_sched_job *job,
+				struct ve2_hqc *hqc, u64 seq)
+{
+	struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+	u32 fail_idx = 0;
+	u32 count, i;
+
+	if (!cc)
+		return;
+
+	count = cc->command_count;
+	if (!count || count > seq + 1)
+		return;
+
+	for (i = count; i > 0; i--) {
+		u64 sub_seq = seq - (count - i);
+		enum ert_cmd_state st;
+
+		st = (enum ert_cmd_state)(ve2_hqc_raw(hqc, sub_seq) & 0xF);
+		if (ve2_hqc_state_terminal(st) && st != ERT_CMD_STATE_ABORT) {
+			fail_idx = i - 1;
+			break;
+		}
+	}
+
+	cc->error_index = fail_idx;
+	XDNA_ERR(hwctx->client->xdna, "%s chain failed at index %u", hwctx->name, fail_idx);
+}
+
+static void ve2_cmd_pkt_prepare(struct amdxdna_hwctx *hwctx, u32 slot,
+				struct host_queue_packet *pkt)
+{
+	struct ve2_hqc *hqc = ve2_hqc_get(hwctx);
+
+	if (!hqc)
+		return;
+
+	WRITE_ONCE(hqc->slots[slot], 0);
+	pkt->pkt_header.completion_signal = hqc->dma + slot * sizeof(u64);
+	/* The payload is complete: make the slot valid for CERT. */
+	ve2_pkt_set_type(pkt, VE2_PKT_TYPE_VENDOR_SPECIFIC);
+}
+
+/*
+ * read_index can move before CERT has stored the HQC slot, so wait briefly for
+ * a terminal slot, then copy it onto the command BO. An empty slot is never
+ * reported as COMPLETED: that would hide a command whose output never landed.
+ */
+static void ve2_cmd_done(struct amdxdna_hwctx *hwctx, u64 seq)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct ve2_hqc *hqc = ve2_hqc_get(hwctx);
+	struct amdxdna_sched_job *job;
+	enum ert_cmd_state state;
+	ktime_t deadline;
+	u32 raw;
+
+	if (!hqc)
+		return;
+
+	if (!ve2_hqc_seq_terminal(hqc, seq)) {
+		deadline = ktime_add_us(ktime_get(), 10000);
+		while (!ve2_hqc_seq_terminal(hqc, seq) &&
+		       ktime_before(ktime_get(), deadline))
+			usleep_range(1, 20);
+	}
+
+	raw = ve2_hqc_raw(hqc, seq);
+	state = (enum ert_cmd_state)(raw & 0xF);
+	if (!ve2_hqc_state_terminal(state)) {
+		static atomic_t reports = ATOMIC_INIT(0);
+
+		if (atomic_inc_return(&reports) <= 32)
+			XDNA_WARN(hwctx->client->xdna,
+				  "%s seq %llu: HQC slot not terminal after 10 ms (raw 0x%x)",
+				  hwctx->name, seq, raw);
+		return;
+	}
+
+	mutex_lock(&priv->io_lock);
+	list_for_each_entry(job, &priv->running_job_list, aie4_job_list) {
+		if (job->seq != seq || job->aie4_job_state != AIE4_JOB_STATE_SUBMITTED)
+			continue;
+
+		if (state != ERT_CMD_STATE_COMPLETED) {
+			static atomic_t reports = ATOMIC_INIT(0);
+
+			if (atomic_inc_return(&reports) <= 32)
+				XDNA_WARN(hwctx->client->xdna,
+					  "%s seq %llu: CERT completed with state %u (raw 0x%x)",
+					  hwctx->name, seq, state, raw);
+		}
+		/*
+		 * A runlist is published as one packet per sub-command and
+		 * job->seq is the last one. A failed chain reports its last
+		 * slot, which does not say where it failed: CERT aborts the
+		 * commands after the failing one, so the first non-ABORT slot
+		 * scanning backwards is the failing index.
+		 */
+		if ((state == ERT_CMD_STATE_ERROR || state == ERT_CMD_STATE_ABORT) &&
+		    amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN)
+			ve2_hqc_chain_error(hwctx, job, hqc, seq);
+
+		amdxdna_cmd_set_state(job->cmd_bo, state);
+		/* Make the state visible before the job is completed. */
+		smp_wmb();
+		break;
+	}
+	mutex_unlock(&priv->io_lock);
+}
+
+static void ve2_hqc_free(struct ve2_hqc *hqc)
+{
+	if (!hqc)
+		return;
+	amdxdna_free_msg_buff(hqc->buf);
+	kfree(hqc);
+}
+
+static int ve2_hqc_init(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct ve2_hqc *hqc;
+	int i, ret;
+
+	hqc = kzalloc_obj(*hqc);
+	if (!hqc)
+		return -ENOMEM;
+
+	hqc->buf = amdxdna_alloc_msg_buff(hwctx->client->xdna,
+					  CTX_MAX_CMDS * sizeof(u64));
+	if (IS_ERR(hqc->buf)) {
+		ret = PTR_ERR(hqc->buf);
+		kfree(hqc);
+		return ret;
+	}
+	hqc->slots = hqc->buf->vaddr;
+	hqc->dma = hqc->buf->dma_addr;
+	memset(hqc->slots, 0, CTX_MAX_CMDS * sizeof(u64));
+
+	/* CERT consumes a slot only once it is made valid at publish. */
+	for (i = 0; i < CTX_MAX_CMDS; i++)
+		ve2_pkt_set_type(&priv->umq_pkts[i], VE2_PKT_TYPE_INVALID);
+
+	ret = xa_err(xa_store(&ve2_hqc_xa, (unsigned long)hwctx, hqc, GFP_KERNEL));
+	if (ret) {
+		ve2_hqc_free(hqc);
+		return ret;
+	}
+	return 0;
+}
+
 static int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 {
 	int ret;
@@ -86,13 +296,26 @@ static int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	ret = aie4_hwctx_init(hwctx);
 	if (ret)
-		ve2_hsa_queue_free(hwctx);
+		goto free_queue;
+
+	ret = ve2_hqc_init(hwctx);
+	if (ret)
+		goto fini_ctx;
+
+	return 0;
+
+fini_ctx:
+	aie4_hwctx_fini(hwctx);
+free_queue:
+	ve2_hsa_queue_free(hwctx);
 	return ret;
 }
 
 static void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 {
+	/* Keep the entry until aie4 has drained its jobs; cmd_done needs it. */
 	aie4_hwctx_fini(hwctx);
+	ve2_hqc_free(xa_erase(&ve2_hqc_xa, (unsigned long)hwctx));
 	ve2_hsa_queue_free(hwctx);
 }
 
@@ -315,6 +538,8 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.hwctx_config		= aie4_hwctx_config,
 	.cmd_submit		= aie4_cmd_submit,
 	.cmd_wait		= aie4_cmd_wait,
+	.cmd_pkt_prepare	= ve2_cmd_pkt_prepare,
+	.cmd_done		= ve2_cmd_done,
 	.get_aie_info		= aie4_get_info,
 	.set_aie_state		= aie4_set_state,
 	.get_array		= aie4_get_array,

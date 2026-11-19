@@ -1604,15 +1604,11 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	return ret;
 }
 
-static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
+static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size, u32 direction)
 {
 	unsigned long first, nr_pages;
 	void *kva;
 	u64 end;
-
-	/* CMA create-BOs are coherent (dma_alloc_coherent); no cache maintenance. */
-	if (amdxdna_is_cma_bo(abo))
-		return 0;
 
 	if (offset >= abo->mem.size)
 		return -EINVAL;
@@ -1623,6 +1619,25 @@ static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
 	size = min(abo->mem.size, end) - offset;
 	if (!size)
 		return 0;
+
+	/*
+	 * CMA create-BOs come from dma_alloc_coherent() on a non-coherent
+	 * device: the user mapping is non-cacheable, but the kernel's cacheable
+	 * linear alias of the same pages can still hold lines (prefetch). The
+	 * device writes DDR without snooping, so a stale alias line can be
+	 * returned for output the device did write. Do what the product driver
+	 * does: invalidate before the CPU reads, clean before the device reads.
+	 */
+	if (amdxdna_is_cma_bo(abo)) {
+		struct device *dev = to_xdna_dev(to_gobj(abo)->dev)->ddev.dev;
+		dma_addr_t addr = abo->cma_dma_addr + offset;
+
+		if (direction == SYNC_DIRECT_FROM_DEVICE)
+			dma_sync_single_for_cpu(dev, addr, size, DMA_FROM_DEVICE);
+		else
+			dma_sync_single_for_device(dev, addr, size, DMA_TO_DEVICE);
+		return 0;
+	}
 
 	first = offset >> PAGE_SHIFT;
 	nr_pages = (PAGE_ALIGN(offset + size) >> PAGE_SHIFT) - first;
@@ -1681,7 +1696,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 			if (start >= end)
 				continue;
 
-			ret = amdxdna_flush_bo(heap, start - heap_start, end - start);
+			ret = amdxdna_flush_bo(heap, start - heap_start, end - start,
+					       args->direction);
 			if (ret) {
 				XDNA_ERR(xdna, "Failed to flush heap %ld ret %d",
 					 heap_id, ret);
@@ -1695,7 +1711,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 			goto put_obj;
 		}
 
-		ret = amdxdna_flush_bo(abo, args->offset, args->size);
+		ret = amdxdna_flush_bo(abo, args->offset, args->size, args->direction);
 		amdxdna_gem_unpin(abo);
 
 		if (ret) {
