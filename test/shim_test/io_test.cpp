@@ -1437,15 +1437,16 @@ TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_
 }
 
 /*
- * TDR reap semantics across several separate in-flight jobs. Submit a faulting
- * job (long_run, a single ERT_START_DPU that keeps CERT busy until the firmware
- * job timeout) followed by two good jobs, all without waiting, so the good jobs
- * sit behind the faulting head on the kernel-mode running_job_list when the
- * firmware context error fires. The reset must report the faulting head as
- * ERT_CMD_STATE_TIMEOUT (it ran and timed out), and the two jobs queued behind
- * it - which never executed - as ERT_CMD_STATE_ABORT. Kernel-mode submit
- * publishes synchronously (microseconds) while the firmware job timeout takes
- * seconds, so the two good jobs are reliably queued before the reset.
+ * TDR reap semantics across several separate in-flight jobs. Submit a longrun
+ * job (long_run, a single ERT_START_DPU that keeps CERT running until the
+ * firmware job timeout) followed by two good jobs, all without waiting, so the
+ * good jobs sit behind the longrun head on the kernel-mode running_job_list
+ * when the firmware context error fires. The reset must report the longrun
+ * head as ERT_CMD_STATE_TIMEOUT (it ran and timed out), and the two jobs
+ * queued behind it - which never executed - as ERT_CMD_STATE_ABORT.
+ * Kernel-mode submit publishes synchronously (microseconds) while the
+ * firmware job timeout takes seconds, so the two good jobs are reliably
+ * queued before the reset.
  */
 void
 TEST_tdr_timeout_and_abort(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
@@ -1453,37 +1454,37 @@ TEST_tdr_timeout_and_abort(device::id_type id, std::shared_ptr<device>& sdev, ar
   auto dev = sdev.get();
   hw_ctx hwctx{dev, "good"};
 
-  auto bad = create_bo_set_for_device(dev, false, "long_run");
+  auto longrun = create_bo_set_for_device(dev, false, "long_run");
   auto good1 = create_bo_set_for_device(dev, false, "good");
   auto good2 = create_bo_set_for_device(dev, false, "good");
 
-  bad->init_cmd(hwctx, false);
-  bad->sync_before_run();
+  longrun->init_cmd(hwctx, false);
+  longrun->sync_before_run();
   good1->init_cmd(hwctx, false);
   good1->sync_before_run();
   good2->init_cmd(hwctx, false);
   good2->sync_before_run();
 
-  auto *bad_bo = bad->get_bos()[IO_TEST_BO_CMD].tbo.get();
+  auto *longrun_bo = longrun->get_bos()[IO_TEST_BO_CMD].tbo.get();
   auto *good1_bo = good1->get_bos()[IO_TEST_BO_CMD].tbo.get();
   auto *good2_bo = good2->get_bos()[IO_TEST_BO_CMD].tbo.get();
 
   auto hwq = hwctx.get()->get_hw_queue();
 
-  // Submit all three without waiting so good1/good2 queue behind the faulting head.
-  hwq->submit_command(bad_bo->get());
+  // Submit all three without waiting so good1/good2 queue behind the longrun head.
+  hwq->submit_command(longrun_bo->get());
   hwq->submit_command(good1_bo->get());
   hwq->submit_command(good2_bo->get());
 
-  hwq->wait_command(bad_bo->get(), 0);
+  hwq->wait_command(longrun_bo->get(), 0);
   hwq->wait_command(good1_bo->get(), 0);
   hwq->wait_command(good2_bo->get(), 0);
 
   auto state = [](bo *b) { return reinterpret_cast<ert_packet *>(b->map())->state; };
 
-  if (state(bad_bo) != ERT_CMD_STATE_TIMEOUT) {
-    throw std::runtime_error(std::string("faulting head state=") +
-      std::to_string(state(bad_bo)) + ", expected TIMEOUT=" +
+  if (state(longrun_bo) != ERT_CMD_STATE_TIMEOUT) {
+    throw std::runtime_error(std::string("longrun head state=") +
+      std::to_string(state(longrun_bo)) + ", expected TIMEOUT=" +
       std::to_string(ERT_CMD_STATE_TIMEOUT));
   }
   if (state(good1_bo) != ERT_CMD_STATE_ABORT || state(good2_bo) != ERT_CMD_STATE_ABORT) {
@@ -1494,7 +1495,7 @@ TEST_tdr_timeout_and_abort(device::id_type id, std::shared_ptr<device>& sdev, ar
 }
 
 /*
- * Partial-chain TDR reap. long_run keeps CERT busy until the firmware job
+ * Partial-chain TDR reap. long_run keeps CERT running until the firmware job
  * timeout, so the HSA queue cannot drain; a runlist longer than the queue
  * (CTX_MAX_CMDS) then publishes a prefix that fills the queue and blocks
  * mid-chain - a partial chain. When the firmware context error fires, the
@@ -1508,22 +1509,22 @@ TEST_tdr_partial_chain_abort(device::id_type id, std::shared_ptr<device>& sdev, 
   auto dev = sdev.get();
   hw_ctx hwctx{dev, "good"};
 
-  auto bad = create_bo_set_for_device(dev, false, "long_run");
+  auto longrun = create_bo_set_for_device(dev, false, "long_run");
   auto good = create_bo_set_for_device(dev, false, "good");
-  bad->init_cmd(hwctx, false);
-  bad->sync_before_run();
+  longrun->init_cmd(hwctx, false);
+  longrun->sync_before_run();
   good->init_cmd(hwctx, false);
   good->sync_before_run();
 
-  auto *bad_bo = bad->get_bos()[IO_TEST_BO_CMD].tbo.get();
+  auto *longrun_bo = longrun->get_bos()[IO_TEST_BO_CMD].tbo.get();
   auto *good_bo = good->get_bos()[IO_TEST_BO_CMD].tbo.get();
   auto hwq = hwctx.get()->get_hw_queue();
 
-  // long_run keeps CERT busy so nothing drains from the HSA queue.
-  hwq->submit_command(bad_bo->get());
+  // long_run keeps CERT running so nothing drains from the HSA queue.
+  hwq->submit_command(longrun_bo->get());
 
   // Runlist sized to the queue (CTX_MAX_CMDS). long_run already holds one slot
-  // and keeps CERT busy, so this chain publishes CTX_MAX_CMDS-1 sub-commands,
+  // and keeps CERT running, so this chain publishes CTX_MAX_CMDS-1 sub-commands,
   // fills the queue, and blocks on its last sub-command until the reset - a
   // partial chain.
   // A chain longer than the queue is rejected by the driver (it could never free
@@ -1535,12 +1536,12 @@ TEST_tdr_partial_chain_abort(device::id_type id, std::shared_ptr<device>& sdev, 
 
   hwq->submit_command(cbo->get());   // blocks mid-chain; unblocks on the reset
   hwq->wait_command(cbo->get(), 0);
-  hwq->wait_command(bad_bo->get(), 0);
+  hwq->wait_command(longrun_bo->get(), 0);
 
   auto state = [](bo *b) { return reinterpret_cast<ert_packet *>(b->map())->state; };
-  if (state(bad_bo) != ERT_CMD_STATE_TIMEOUT) {
-    throw std::runtime_error(std::string("faulting head state=") +
-      std::to_string(state(bad_bo)) + ", expected TIMEOUT");
+  if (state(longrun_bo) != ERT_CMD_STATE_TIMEOUT) {
+    throw std::runtime_error(std::string("longrun head state=") +
+      std::to_string(state(longrun_bo)) + ", expected TIMEOUT");
   }
   if (state(cbo.get()) != ERT_CMD_STATE_ABORT) {
     throw std::runtime_error(std::string("partial chain state=") +
@@ -1551,13 +1552,13 @@ TEST_tdr_partial_chain_abort(device::id_type id, std::shared_ptr<device>& sdev, 
 
 /*
  * A not-yet-published submit is transparently retried across a TDR reset.
- * long_run keeps CERT busy until the firmware job timeout and further single
- * commands fill the HSA queue; once full the next submit blocks before it
- * publishes anything (nothing reaches CERT). When the reset fires, the driver
- * waits it out inside the submit and
- * republishes onto the recreated context, so NO -EAGAIN reaches the shim and
- * userspace never has to resubmit. Verify no submit throws, and that a command
- * published after the reset completes - proving the ctx recovered.
+ * long_run keeps CERT running until the firmware job timeout and further
+ * single commands fill the HSA queue; once full the next submit blocks before
+ * it publishes anything (nothing reaches CERT). When the reset fires, the
+ * driver waits it out inside the submit and republishes onto the recreated
+ * context, so NO -EAGAIN reaches the shim and userspace never has to
+ * resubmit. Verify no submit throws, and that a command published after the
+ * reset completes - proving the ctx recovered.
  * Deterministic - the blocked submit is unblocked only by the reset.
  */
 void
@@ -1566,15 +1567,16 @@ TEST_tdr_not_yet_published_retried(device::id_type id, std::shared_ptr<device>& 
   auto dev = sdev.get();
   hw_ctx hwctx{dev, "good"};
 
-  auto bad = create_bo_set_for_device(dev, false, "long_run");
-  bad->init_cmd(hwctx, false);
-  bad->sync_before_run();
+  auto longrun = create_bo_set_for_device(dev, false, "long_run");
+  longrun->init_cmd(hwctx, false);
+  longrun->sync_before_run();
   auto hwq = hwctx.get()->get_hw_queue();
 
-  // Pre-build all good commands up front (before hanging CERT). The submit loop
-  // below must be tight: it has to fill the queue and block a submit before the
-  // firmware watchdog resets the ctx. If we allocated per iteration the reset
-  // would recover CERT before the queue ever fills and nothing would block.
+  // Pre-build all good commands up front (before starting the longrun cmd).
+  // The submit loop below must be tight: it has to fill the queue and block a
+  // submit before the firmware watchdog resets the ctx. If we allocated per
+  // iteration the reset would recover CERT before the queue ever fills and
+  // nothing would block.
   constexpr int max_submit = 64;  // > CTX_MAX_CMDS (32)
   std::vector<std::unique_ptr<io_test_bo_set_base>> goods;
   for (int i = 0; i < max_submit; i++) {
@@ -1584,8 +1586,8 @@ TEST_tdr_not_yet_published_retried(device::id_type id, std::shared_ptr<device>& 
     goods.push_back(std::move(g));
   }
 
-  // long_run keeps CERT busy so the queue can't drain.
-  hwq->submit_command(bad->get_bos()[IO_TEST_BO_CMD].tbo.get()->get());
+  // long_run keeps CERT running so the queue can't drain.
+  hwq->submit_command(longrun->get_bos()[IO_TEST_BO_CMD].tbo.get()->get());
 
   // Fill the queue; once full a submit blocks before publishing. The TDR reset
   // (triggered when long_run times out) recreates the ctx and the driver
