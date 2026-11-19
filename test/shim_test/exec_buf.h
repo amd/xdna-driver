@@ -17,6 +17,16 @@
 
 class exec_buf {
 public:
+  /*
+   * Slots for BOs that are not kernel arguments, above any argument index.
+   * bind_at() replaces whatever is already bound at a slot, so each must be
+   * unique within a command.
+   */
+  static constexpr size_t ctrl_bo_slot = 1000;
+  static constexpr size_t save_bo_slot = 1001;
+  static constexpr size_t restore_bo_slot = 1002;
+  static constexpr size_t dtrace_bo_slot = 1003;
+
   exec_buf(bo& bo_execbuf, uint32_t op) :
     m_exec_buf_bo(bo_execbuf)
     , m_cmd_pkt(reinterpret_cast<ert_start_kernel_cmd *>(bo_execbuf.map()))
@@ -66,10 +76,9 @@ public:
     dpu_data->restore_buffer_size = bo_restore.size();
     inc_pkt_count(sizeof(*dpu_data));
 
-    // Make sure position does not clash with real args.
-    m_exec_buf_bo.get()->bind_at(1000, bo_ctrl.get(), 0, bo_ctrl.size());
-    m_exec_buf_bo.get()->bind_at(1001, bo_save.get(), 0, bo_save.size());
-    m_exec_buf_bo.get()->bind_at(1002, bo_restore.get(), 0, bo_restore.size());
+    m_exec_buf_bo.get()->bind_at(ctrl_bo_slot, bo_ctrl.get(), 0, bo_ctrl.size());
+    m_exec_buf_bo.get()->bind_at(save_bo_slot, bo_save.get(), 0, bo_save.size());
+    m_exec_buf_bo.get()->bind_at(restore_bo_slot, bo_restore.get(), 0, bo_restore.size());
   }
 
   void
@@ -100,8 +109,22 @@ public:
       throw std::runtime_error("Bad exec buf op code: " + std::to_string(m_op));
     }
 
-    // Make sure position does not clash with real args.
-    m_exec_buf_bo.get()->bind_at(1000, bo_ctrl.get(), 0, bo_ctrl.size());
+    m_exec_buf_bo.get()->bind_at(ctrl_bo_slot, bo_ctrl.get(), 0, bo_ctrl.size());
+  }
+
+  /*
+   * Attach a CERT dtrace control block to an ERT_START_DPU command. Call after
+   * add_ctrl_bo(), which sets up the ert_dpu_data it goes into.
+   */
+  void
+  add_dtrace_bo(bo& bo_dtrace)
+  {
+    if (m_op != ERT_START_DPU)
+      throw std::runtime_error("Expecting ERT_START_DPU op for dtrace, got: " + std::to_string(m_op));
+
+    auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(m_exec_buf_bo.map());
+    get_ert_dpu_data(cmd_packet)->dtrace_buffer = bo_dtrace.paddr();
+    m_exec_buf_bo.get()->bind_at(dtrace_bo_slot, bo_dtrace.get(), 0, bo_dtrace.size());
   }
 
   void

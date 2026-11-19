@@ -117,6 +117,17 @@ binary_info binary_infos[] = {
     .flow = FULL_ELF,
   },
   {
+    .tag = "long_run",
+    .device = npu3_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    // nop.elf plus long_run.dtrace, which keeps it running past the fw timeout.
+    .path = "local_shim_test_data/npu3/bad/long_run/long_run.elf",
+    .flow = FULL_ELF,
+  },
+  {
     .tag = "gemm",
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
@@ -200,6 +211,17 @@ binary_info binary_infos[] = {
     .flow = FULL_ELF,
   },
   {
+    .tag = "long_run",
+    .device = npu3a_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    // nop.elf plus long_run.dtrace, which keeps it running past the fw timeout.
+    .path = "local_shim_test_data/npu3a/bad/long_run/long_run.elf",
+    .flow = FULL_ELF,
+  },
+  {
     .tag = "gemm",
     .device = npu3a_device_id,
     .revision_id = npu_any_revision_id,
@@ -262,6 +284,17 @@ binary_info binary_infos[] = {
       { "DPU:dpu", {0xffffffff} },
     },
     .path = "local_shim_test_data/npu12/nop/nop.elf",
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "long_run",
+    .platform = true,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    // nop.elf plus long_run.dtrace, which keeps it running past the fw timeout.
+    .path = "local_shim_test_data/npu12/bad/long_run/long_run.elf",
     .flow = FULL_ELF,
   },
   {
