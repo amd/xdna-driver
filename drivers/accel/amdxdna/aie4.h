@@ -343,7 +343,7 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
  * Partition geometry required by the npu12 platform firmware: a column count
  * must be a multiple of AIE4_PART_COL_ALIGN, which is also the smallest
  * partition it will create. These do not describe the PCI parts, which size
- * their device-wide partition with their own AIE4_TOTAL_COLUMN.
+ * their device-wide partition to ndev->total_col.
  *
  * AIE4_PART_AUTO_COL as the start column asks firmware to place the partition
  * itself.
