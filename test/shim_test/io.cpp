@@ -158,6 +158,7 @@ std::array io_test_bo_type_names {
   "IO_TEST_BO_RESTORE_INSTRUCTION",
   "IO_TEST_BO_2ND_PARAMETERS",
   "IO_TEST_BO_PDI",
+  "IO_TEST_BO_DTRACE",
 };
 
 char *
@@ -641,6 +642,19 @@ elf_full_io_test_bo_set(device* dev, const std::string& tag, const flow_type* fl
     case IO_TEST_BO_OUTPUT:
       create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL | m_FLAG_OPT | ubuf_flag);
       break;
+    case IO_TEST_BO_DTRACE: {
+      // A <name>.dtrace next to <name>.elf is a CERT dtrace control block to
+      // run with the control code, e.g. one that keeps the command running.
+      std::filesystem::path dtrace(elf_path);
+      dtrace.replace_extension(".dtrace");
+      auto size = get_bin_size(dtrace.string());
+      if (size) {
+        std::cout << "  using dtrace " << dtrace.string() << std::endl;
+        alloc_ctrl_bo(ibo, m_dev, size);
+        init_bo(ibo, dtrace.string());
+      }
+      break;
+    }
     default:
       break;
     }
@@ -877,6 +891,7 @@ sync_before_run()
     case IO_TEST_BO_SCRATCH_PAD:
     case IO_TEST_BO_2ND_PARAMETERS:
     case IO_TEST_BO_PDI:
+    case IO_TEST_BO_DTRACE:
       ibo->tbo->get()->sync(buffer_handle::direction::host2device, ibo->tbo->size(), 0);
       break;
     default:
@@ -982,6 +997,8 @@ init_cmd(hw_ctx& hwctx, bool dump)
     ebuf.dump();
 
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  if (m_bo_array[IO_TEST_BO_DTRACE].tbo.get())
+    ebuf.add_dtrace_bo(*m_bo_array[IO_TEST_BO_DTRACE].tbo.get());
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
     elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
 
@@ -1649,7 +1666,7 @@ async_error_aie4_io_test_bo_set(device* dev, const std::string& tag)
   }
 
   // bad_timeout.elf triggers AIE4 context error (UC firmware exception)
-  // error_type = UC_COMPLETION_TIMEOUT (4) or UC_CRITICAL_ERROR (5)
+  // error_type = UC_CRITICAL_ERROR (5) or UC_COMPLETION_TIMEOUT (6)
   // Both map to KDS_EXEC error number
   uint64_t err_num = XRT_ERROR_NUM_KDS_EXEC;
   uint64_t err_drv = XRT_ERROR_DRIVER_AIE;
