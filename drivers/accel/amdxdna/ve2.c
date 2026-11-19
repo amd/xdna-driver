@@ -161,6 +161,19 @@ const struct dpm_clk_freq *aie4_default_dpm_clk_tbl(struct amdxdna_dev_hdl *ndev
 	return NULL;
 }
 
+/*
+ * Only kernel-mode submission is supported: user-mode submission needs a
+ * user-mappable doorbell, which this transport does not provide. There is no
+ * SR-IOV PF/VF split, so hw contexts always run and the hysteresis is always
+ * programmed.
+ */
+void aie4_transport_debugfs_init(struct amdxdna_dev *xdna)
+{
+	aie4_debugfs_add_kernel_submit(xdna, false);
+	aie4_debugfs_add_ctx_hysteresis(xdna);
+	aie4_debugfs_add_cert_timeout(xdna);
+}
+
 static int ve2_mailbox_init(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
