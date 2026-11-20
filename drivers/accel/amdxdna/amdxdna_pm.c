@@ -145,10 +145,20 @@ void amdxdna_pm_init(struct amdxdna_dev *xdna)
 	pm_runtime_put_autosuspend(dev);
 }
 
+/*
+ * Called from ops->fini() with dev_lock held. pm_runtime_forbid() resumes
+ * a suspended device, and the resume callback also takes dev_lock: drop
+ * it around the forbid.
+ */
 void amdxdna_pm_fini(struct amdxdna_dev *xdna)
 {
 	struct device *dev = xdna->ddev.dev;
 
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
 	pm_runtime_get_noresume(dev);
+
+	mutex_unlock(&xdna->dev_lock);
 	pm_runtime_forbid(dev);
+	mutex_lock(&xdna->dev_lock);
 }
