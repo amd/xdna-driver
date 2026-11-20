@@ -29,6 +29,9 @@
 #define NPU3_PSP_BAR_BASE       MMNPU_APERTURE3_BASE
 #define NPU3_SMU_BAR_BASE       MMNPU_APERTURE4_BASE
 
+/* Columns the driver uses, whatever the firmware reports. */
+#define NPU3_MAX_COLS		3
+
 #define MPASP_C2PMSG_123_ALT_1  0x3810AEC
 #define MPASP_C2PMSG_156_ALT_1  0x3810B70
 #define MPASP_C2PMSG_157_ALT_1  0x3810B74
@@ -47,6 +50,8 @@ static const struct amdxdna_fw_feature_tbl npu3_fw_feature_table[] = {
 	{ .features = BIT_U64(AIE4_CALIBRATE_CLOCK), .major = 6, .min_minor = 0 },
 	{ .features = BIT_U64(AIE4_APP_HEALTH), .major = 6, .min_minor = 0 },
 	{ .features = BIT_U64(AIE4_GET_NPUFW_TIME), .major = 6, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_CTX_RESTORE), .major = 6, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_QUERY_DPM_LEVEL), .major = 6, .min_minor = 0 },
 	{ .features = BIT_U64(AIE4_POWER_HINT), .major = 6, .min_minor = 15 },
 	{ .features = BIT_U64(AIE4_DPM_CAP_TABLE), .major = 6, .min_minor = 15 },
 	{ .features = BIT_U64(AIE4_CTX_DPM_QOS), .major = 6, .min_minor = 15 },
@@ -181,6 +186,7 @@ const struct amdxdna_dev_info dev_npu3_pf_info = {
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_pf_ops,
 	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
@@ -195,6 +201,7 @@ const struct amdxdna_dev_info dev_npu3_vf_info = {
 	.dev_priv		= &npu3_dev_vf_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_vf_ops,
 	.async_error		= &aie4_async_error_desc,
 };
@@ -210,6 +217,7 @@ const struct amdxdna_dev_info dev_npu3_classic_info = {
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_classic_ops,
 	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
@@ -225,6 +233,7 @@ const struct amdxdna_dev_info dev_npu9_pf_info = {
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_pf_ops,
 	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
@@ -239,6 +248,7 @@ const struct amdxdna_dev_info dev_npu9_vf_info = {
 	.dev_priv		= &npu3_dev_vf_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_vf_ops,
 	.async_error		= &aie4_async_error_desc,
 };
@@ -254,6 +264,7 @@ const struct amdxdna_dev_info dev_npu9_classic_info = {
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_classic_ops,
 	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
@@ -269,6 +280,7 @@ const struct amdxdna_dev_info dev_npu10_pf_info = {
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_pf_ops,
 	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
@@ -283,6 +295,7 @@ const struct amdxdna_dev_info dev_npu10_vf_info = {
 	.dev_priv		= &npu3_dev_vf_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_vf_ops,
 	.async_error		= &aie4_async_error_desc,
 };
@@ -298,6 +311,7 @@ const struct amdxdna_dev_info dev_npu10_classic_info = {
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_classic_ops,
 	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
@@ -313,6 +327,7 @@ const struct amdxdna_dev_info dev_npu11_pf_info = {
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_pf_ops,
 	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,
@@ -327,6 +342,7 @@ const struct amdxdna_dev_info dev_npu11_vf_info = {
 	.dev_priv		= &npu3_dev_vf_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_vf_ops,
 	.async_error		= &aie4_async_error_desc,
 };
@@ -342,6 +358,7 @@ const struct amdxdna_dev_info dev_npu11_classic_info = {
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
+	.max_cols		= NPU3_MAX_COLS,
 	.ops			= &aie4_classic_ops,
 	.async_error		= &aie4_async_error_desc,
 	.aie_activity		= &npu3_aie_activity,

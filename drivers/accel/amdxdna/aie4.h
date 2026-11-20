@@ -314,6 +314,8 @@ enum aie4_fw_feature {
 	AIE4_DPM_BW_BUSYNESS,
 	AIE4_DPM_PWR_OVR_TABLE,
 	AIE4_GET_NPUFW_TIME,
+	AIE4_CTX_RESTORE,
+	AIE4_QUERY_DPM_LEVEL,
 	AIE4_FEATURE_MAX
 };
 
@@ -341,7 +343,7 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
  * Partition geometry required by the npu12 platform firmware: a column count
  * must be a multiple of AIE4_PART_COL_ALIGN, which is also the smallest
  * partition it will create. These do not describe the PCI parts, which size
- * their device-wide partition with their own AIE4_TOTAL_COLUMN.
+ * their device-wide partition to ndev->total_col.
  *
  * AIE4_PART_AUTO_COL as the start column asks firmware to place the partition
  * itself.
@@ -364,6 +366,11 @@ void aie4_restore_power_mode(struct amdxdna_dev_hdl *ndev);
 void aie4_restore_force_preemption(struct amdxdna_dev_hdl *ndev);
 void aie4_restore_hws_debug_mode(struct amdxdna_dev_hdl *ndev);
 int aie4_query_fw(struct amdxdna_dev_hdl *ndev);
+int aie4_config_fw(struct amdxdna_dev_hdl *ndev);
+struct amdxdna_dev_hdl *aie4_dev_hdl_alloc(struct amdxdna_dev *xdna);
+void aie4_dev_hdl_fini(struct amdxdna_dev_hdl *ndev);
+void aie4_xdna_init(struct amdxdna_dev *xdna);
+void aie4_xdna_fini(struct amdxdna_dev *xdna);
 int aie4_setup_aie(struct amdxdna_dev_hdl *ndev);
 int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 void aie4_zero_work_buffer(struct amdxdna_dev_hdl *ndev);
@@ -376,6 +383,9 @@ void aie4_hwctx_disconnect_all(struct amdxdna_dev_hdl *ndev);
 int aie4_hwctx_reconnect_all(struct amdxdna_dev_hdl *ndev);
 int aie4_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args,
 		   u32 *settle_ms);
+void aie4_free_ctx_restore_pool(struct amdxdna_dev_hdl *ndev);
+void aie4_restore_ctx_restore_pool(struct amdxdna_dev_hdl *ndev);
+void aie4_max_clks_at_curr_dpm(struct amdxdna_dev_hdl *ndev, u32 *npuclk, u32 *hclk);
 
 /* aie4_dpt.c firmware log/trace over the debug/trace path. */
 int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level);
@@ -388,14 +398,21 @@ int aie4_fw_trace_fini(struct amdxdna_dev *xdna);
 
 /* aie4_debugfs.c */
 void aie4_debugfs_init(struct amdxdna_dev *xdna);
+void aie4_debugfs_add_kernel_submit(struct amdxdna_dev *xdna, bool writable);
+void aie4_debugfs_add_ctx_hysteresis(struct amdxdna_dev *xdna);
+void aie4_debugfs_add_cert_timeout(struct amdxdna_dev *xdna);
+void aie4_debugfs_add_dpm_config(struct amdxdna_dev *xdna);
 
 /*
- * Transport hooks: the platform transport (aie4_plat.c) provides these so the
- * shared aie4.c can reach the device's DPM and performance counters without the
- * PCI hw_ops. The PCI path (aie4_pci.c) inlines the equivalent directly and does
- * not use these.
+ * Transport hooks: each transport (aie4_pci.c, aie4_plat.c, ve2.c) provides
+ * these so the shared aie4.c can reach the device's DPM, performance counters
+ * and transport-specific debugfs knobs without depending on the transport.
+ * aie4_default_dpm_clk_tbl() returns the host-side default DPM table that seeds
+ * ndev->dpm_clk_tbl before the firmware levels are overlaid, or NULL if none.
  */
 int aie4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 void aie4_update_counters(struct amdxdna_dev_hdl *ndev);
+const struct dpm_clk_freq *aie4_default_dpm_clk_tbl(struct amdxdna_dev_hdl *ndev);
+void aie4_transport_debugfs_init(struct amdxdna_dev *xdna);
 
 #endif /* _AIE4_H_ */

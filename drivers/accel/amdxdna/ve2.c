@@ -155,6 +155,25 @@ void aie4_update_counters(struct amdxdna_dev_hdl *ndev)
 {
 }
 
+/* No host-side DPM table: levels come from firmware only. */
+const struct dpm_clk_freq *aie4_default_dpm_clk_tbl(struct amdxdna_dev_hdl *ndev)
+{
+	return NULL;
+}
+
+/*
+ * Only kernel-mode submission is supported: user-mode submission needs a
+ * user-mappable doorbell, which this transport does not provide. There is no
+ * SR-IOV PF/VF split, so hw contexts always run and the hysteresis is always
+ * programmed.
+ */
+void aie4_transport_debugfs_init(struct amdxdna_dev *xdna)
+{
+	aie4_debugfs_add_kernel_submit(xdna, false);
+	aie4_debugfs_add_ctx_hysteresis(xdna);
+	aie4_debugfs_add_cert_timeout(xdna);
+}
+
 static int ve2_mailbox_init(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
@@ -200,16 +219,9 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev;
 	int ret;
 
-	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
+	ndev = aie4_dev_hdl_alloc(xdna);
 	if (!ndev)
 		return -ENOMEM;
-
-	ndev->aie.xdna = xdna;
-	xdna->dev_handle = ndev;
-	ndev->kernel_submit = true;
-
-	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
-	mutex_init(&ndev->cert_comp_lock);
 
 	ret = ve2_mailbox_init(ndev);
 	if (ret)
@@ -253,17 +265,14 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		XDNA_INFO(xdna, "VE2 allocator limited to %u columns", ndev->total_col);
 	}
 
-	aie4_msg_init(ndev);
-	amdxdna_dpt_init(&ndev->aie);
-	amdxdna_pm_init(xdna);
+	aie4_xdna_init(xdna);
 	amdxdna_vbnv_init(xdna);
 	return 0;
 
 mbox_fini:
 	ve2_mailbox_fini(ndev);
 xa_fini:
-	mutex_destroy(&ndev->cert_comp_lock);
-	xa_destroy(&ndev->cert_comp_xa);
+	aie4_dev_hdl_fini(ndev);
 	return ret;
 }
 
@@ -274,13 +283,11 @@ static void ve2_fini(struct amdxdna_dev *xdna)
 	if (!ndev)
 		return;
 
-	amdxdna_pm_fini(xdna);
-	amdxdna_dpt_fini(&ndev->aie);
+	aie4_xdna_fini(xdna);
 	ve2_mailbox_fini(ndev);
 	ve2_mbox_release(ndev->mbox);
 	amdxdna_async_events_free(&ndev->aie);
-	mutex_destroy(&ndev->cert_comp_lock);
-	xa_destroy(&ndev->cert_comp_xa);
+	aie4_dev_hdl_fini(ndev);
 }
 
 static int ve2_suspend(struct amdxdna_dev *xdna)

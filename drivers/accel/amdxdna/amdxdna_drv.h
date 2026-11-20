@@ -168,6 +168,13 @@ struct amdxdna_dev_info {
 	 */
 	bool				partition_per_hwctx;
 
+	/*
+	 * Fixed column count of parts with a fixed layout. It caps the count
+	 * firmware reports and sizes the device-wide partition and the
+	 * per-column sensors. 0 means use what firmware reports.
+	 */
+	u32				max_cols;
+
 	/* Use two-level HSA indirect packets for distributed commands. */
 	bool				hsa_level2_indirect;
 

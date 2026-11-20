@@ -105,6 +105,25 @@ void aie4_update_counters(struct amdxdna_dev_hdl *ndev)
 {
 }
 
+/* No host-side DPM table: levels come from firmware only. */
+const struct dpm_clk_freq *aie4_default_dpm_clk_tbl(struct amdxdna_dev_hdl *ndev)
+{
+	return NULL;
+}
+
+/*
+ * Only kernel-mode submission is supported: user-mode submission needs a
+ * user-mappable doorbell, which this transport does not provide. There is no
+ * SR-IOV PF/VF split, so hw contexts always run and the hysteresis is always
+ * programmed.
+ */
+void aie4_transport_debugfs_init(struct amdxdna_dev *xdna)
+{
+	aie4_debugfs_add_kernel_submit(xdna, false);
+	aie4_debugfs_add_ctx_hysteresis(xdna);
+	aie4_debugfs_add_cert_timeout(xdna);
+}
+
 /* Device lifecycle (platform variants of the aie4_classic_* lifecycle). */
 
 /*
@@ -157,53 +176,21 @@ static void aie4_mailbox_fini(struct amdxdna_dev_hdl *ndev)
 	ndev->aie.mgmt_chann = NULL;
 }
 
-/*
- * Platform equivalent of the PCI aie4_config_fw(): calibrate the clock, attach
- * the DRAM work buffer, and apply the context-switch hysteresis and the CERT
- * opcode timeout.  (The PCI-only NPU3A iommu-bypass echo does not apply here.)
- */
-static int aie4_plat_config_fw(struct amdxdna_dev_hdl *ndev)
-{
-	int ret;
-
-	ret = aie4_calibrate_clock(ndev);
-	if (ret)
-		return ret;
-
-	ret = aie4_attach_work_buffer(ndev, to_dma_addr(ndev->work_buf_hdl, 0),
-				      to_buf_size(ndev->work_buf_hdl));
-	if (ret)
-		return ret;
-
-	/* Best-effort tuning knobs; failure warns internally, does not fail init. */
-	aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
-	aie4_set_cert_timeout(ndev, ndev->cert_timeout_ms);
-	return 0;
-}
-
 static int aie4_plat_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev;
 	int ret;
 
-	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
+	/*
+	 * Kernel-mode submission, set by aie4_dev_hdl_alloc(), is the only mode
+	 * here: the driver rings the doorbell (amdxdna_mailbox_plat_ring_doorbell),
+	 * so the platform has no user-mmap'able doorbell, and user-mode submission
+	 * would hand the shim a doorbell offset whose mmap fails with -EOPNOTSUPP.
+	 */
+	ndev = aie4_dev_hdl_alloc(xdna);
 	if (!ndev)
 		return -ENOMEM;
 
-	ndev->aie.xdna = xdna;
-	xdna->dev_handle = ndev;
-
-	/* Per-cert completion routing state, mirroring the PCI aie4m_pcidev_init(). */
-	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
-	mutex_init(&ndev->cert_comp_lock);
-
-	/*
-	 * Kernel-mode submission: the driver fills the HSA queue and rings the
-	 * doorbell (amdxdna_mailbox_plat_ring_doorbell), so the platform has no
-	 * user-mmap'able doorbell.  Without this, user-mode submission hands a
-	 * doorbell offset to the shim, whose mmap fails with -EOPNOTSUPP.
-	 */
-	ndev->kernel_submit = true;
 	ndev->ctx_switch_hysteresis_us = AIE4_CTX_HYSTERESIS_US;
 	ndev->cert_timeout_ms = AIE4_CERT_TIMEOUT_MS;
 
@@ -254,7 +241,7 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 	if (ret)
 		goto mbox_fini;
 
-	ret = aie4_plat_config_fw(ndev);
+	ret = aie4_config_fw(ndev);
 	if (ret)
 		goto mbox_fini;
 
@@ -262,16 +249,7 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 	if (ret)
 		goto suspend_fw;
 
-	/*
-	 * Shared post-bring-up init, mirroring the PCI aie4_xdna_init(): msg_init
-	 * installs the status/telemetry/health/coredump handlers and the hwctx
-	 * limit, dpt_init brings up firmware-log/DPT services, pm_init enables
-	 * runtime PM, and vbnv_init publishes the device VBNV. dpt_init is
-	 * best-effort (the PCI path ignores its return too).
-	 */
-	aie4_msg_init(ndev);
-	amdxdna_dpt_init(&ndev->aie);
-	amdxdna_pm_init(xdna);
+	aie4_xdna_init(xdna);
 	amdxdna_vbnv_init(xdna);
 
 	return 0;
@@ -299,9 +277,7 @@ static void aie4_plat_fini(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
-	/* Mirror the PCI aie4_xdna_fini(); dpt_fini needs the mailbox still up. */
-	amdxdna_pm_fini(xdna);
-	amdxdna_dpt_fini(&ndev->aie);
+	aie4_xdna_fini(xdna);
 
 	/*
 	 * Suspend the firmware while the mailbox is still alive, mirroring the PCI
@@ -320,9 +296,7 @@ static void aie4_plat_fini(struct amdxdna_dev *xdna)
 	 */
 	amdxdna_async_events_free(&ndev->aie);
 	aie4_free_work_buffer(ndev);
-
-	mutex_destroy(&ndev->cert_comp_lock);
-	xa_destroy(&ndev->cert_comp_xa);
+	aie4_dev_hdl_fini(ndev);
 }
 
 static int aie4_plat_suspend(struct amdxdna_dev *xdna)

@@ -8,6 +8,7 @@
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_cache.h>
 #include <drm/drm_drv.h>
+#include <drm/drm_managed.h>
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
 #include <linux/rcupdate.h>
@@ -27,6 +28,110 @@
 #include "amdxdna_pm.h"
 #include "amdxdna_sensors.h"
 #include "amdxdna_tile_read_write.h"
+
+#define AIE4_MAX_CTX_RESTORE_POOL_SIZE	(PAGE_SIZE << MAX_PAGE_ORDER)
+
+void aie4_free_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+{
+	if (!ndev->restore_pool_hdl)
+		return;
+
+	amdxdna_free_msg_buff(ndev->restore_pool_hdl);
+	ndev->restore_pool_hdl = NULL;
+}
+
+/*
+ * Drop the ids handed out by the graceful destroys. Firmware cannot honour an
+ * id with no pool behind it, so let the next create build a context from
+ * scratch. The parked jobs stay put and are re-driven against it.
+ */
+static void aie4_clear_ctx_restore_ids(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct amdxdna_client *client;
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id;
+	int idx;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	amdxdna_for_each_client(xdna, client) {
+		idx = srcu_read_lock(&client->hwctx_srcu);
+		amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
+			hwctx->priv->restore_id = 0;
+		srcu_read_unlock(&client->hwctx_srcu, idx);
+	}
+}
+
+/*
+ * Firmware drops its context restore pool on suspend. Copy it out while
+ * firmware is still up and every context is already gracefully destroyed,
+ * otherwise the pool is incomplete. Returns 0 only if a pool was saved.
+ */
+static int aie4_save_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct amdxdna_msg_buf_hdl *buf_hdl;
+	u32 size;
+	int ret;
+
+	aie4_free_ctx_restore_pool(ndev);
+
+	ret = aie4_msg_get_ctx_restore_pool_size(ndev, &size);
+	if (ret)
+		return ret;
+
+	if (!size)
+		return -ENODATA;
+
+	if (size > AIE4_MAX_CTX_RESTORE_POOL_SIZE) {
+		XDNA_ERR(xdna, "Ctx restore pool size 0x%x exceeds 0x%lx", size,
+			 AIE4_MAX_CTX_RESTORE_POOL_SIZE);
+		return -EFBIG;
+	}
+
+	buf_hdl = amdxdna_alloc_msg_buff(xdna, size);
+	if (IS_ERR(buf_hdl)) {
+		ret = PTR_ERR(buf_hdl);
+		XDNA_ERR(xdna, "Failed to alloc ctx restore pool, size 0x%x, ret %d",
+			 size, ret);
+		return ret;
+	}
+
+	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
+	amdxdna_cache_flush(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+
+	ret = aie4_msg_get_ctx_restore_pool(ndev, to_dma_addr(buf_hdl, 0),
+					    to_buf_size(buf_hdl));
+	if (ret) {
+		amdxdna_free_msg_buff(buf_hdl);
+		return ret;
+	}
+
+	ndev->restore_pool_hdl = buf_hdl;
+	XDNA_DBG(xdna, "Saved ctx restore pool, size 0x%x", to_buf_size(buf_hdl));
+
+	return 0;
+}
+
+/*
+ * Push the pool back before any context is recreated: a restore id means
+ * nothing to firmware until its pool is in place. A push that fails takes
+ * every entry with it, so drop the ids too.
+ */
+void aie4_restore_ctx_restore_pool(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_msg_buf_hdl *buf_hdl = ndev->restore_pool_hdl;
+
+	if (!buf_hdl)
+		return;
+
+	if (aie4_msg_set_ctx_restore_pool(ndev, to_dma_addr(buf_hdl, 0),
+					  to_buf_size(buf_hdl)))
+		aie4_clear_ctx_restore_ids(ndev);
+
+	aie4_free_ctx_restore_pool(ndev);
+}
 
 int aie4_partition_create(struct amdxdna_dev_hdl *ndev, u32 col_start,
 			  u32 col_count, u32 *part_id)
@@ -58,14 +163,20 @@ void aie4_partition_destroy(struct amdxdna_dev_hdl *ndev, u32 part_id)
 
 	req.partition_id = part_id;
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (!ret)
+		return;
+
 	/*
 	 * Firmware also refuses this while another context still shares the
 	 * partition, which is the common case once partitions are handed out
 	 * per context. It reports that with the same status as a real failure,
-	 * and there is nothing to unwind either way, so this only traces.
+	 * which aie_send_mgmt_msg_wait() has already logged, and there is
+	 * nothing to unwind either way, so only trace it here.
 	 */
-	if (ret)
+	if (AIE4_PART_PER_HWCTX(xdna))
 		XDNA_DBG(xdna, "destroy partition %u failed: %d", part_id, ret);
+	else
+		XDNA_ERR(xdna, "destroy partition %u failed: %d", part_id, ret);
 }
 
 /*
@@ -125,17 +236,110 @@ int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
 }
 
 /*
- * Platform copy of the DPM freq table query.  Unlike the PCI transport there is
- * no host-side default table (ndev->priv is NULL and its layout is PCI-only), so
- * the table is seeded purely from the firmware response; levels the firmware does
- * not report stay zero.
+ * Configure the firmware once its mailbox is up: calibrate the clock, attach
+ * the DRAM work buffer, then apply the tuning knobs. The knobs are
+ * best-effort; a failure is warned inside and does not fail hw start. The
+ * DPM ones are skipped when the firmware lacks the feature, and the CERT
+ * opcode timeout is only sent by a transport that sets one, since 0
+ * disables the checker.
+ */
+int aie4_config_fw(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	ret = aie4_calibrate_clock(ndev);
+	if (ret)
+		return ret;
+
+	/*
+	 * Firmware releases the DRAM work buffer internally during suspend_fw.
+	 * There is none when probe could not allocate it.
+	 */
+	if (ndev->work_buf_hdl) {
+		ret = aie4_attach_work_buffer(ndev,
+					      to_dma_addr(ndev->work_buf_hdl, 0),
+					      to_buf_size(ndev->work_buf_hdl));
+		if (ret)
+			return ret;
+	}
+
+	aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
+	if (ndev->cert_timeout_ms)
+		aie4_set_cert_timeout(ndev, ndev->cert_timeout_ms);
+	aie4_set_dpm_compute_params(ndev);
+	aie4_set_dpm_bw_busyness(ndev);
+	aie4_set_dpm_pwr_ovr_percent_table(ndev);
+	aie4_set_dpm_cap_percent_table(ndev);
+
+	return 0;
+}
+
+/*
+ * Allocate the device handle and set up the state every aie4 transport
+ * shares. The handle is drm-managed; aie4_dev_hdl_fini() undoes the rest.
+ */
+struct amdxdna_dev_hdl *aie4_dev_hdl_alloc(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev;
+
+	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
+	if (!ndev)
+		return NULL;
+
+	ndev->aie.xdna = xdna;
+	xdna->dev_handle = ndev;
+
+	/* The driver fills the HSA queue and rings the doorbell by default. */
+	ndev->kernel_submit = true;
+
+	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
+	mutex_init(&ndev->cert_comp_lock);
+
+	return ndev;
+}
+
+void aie4_dev_hdl_fini(struct amdxdna_dev_hdl *ndev)
+{
+	mutex_destroy(&ndev->cert_comp_lock);
+	xa_destroy(&ndev->cert_comp_xa);
+}
+
+/*
+ * Bring up the services that need a running firmware: the message handlers,
+ * firmware log/trace (best-effort, its result is ignored) and runtime PM.
+ */
+void aie4_xdna_init(struct amdxdna_dev *xdna)
+{
+	aie4_msg_init(xdna->dev_handle);
+	amdxdna_dpt_init(&xdna->dev_handle->aie);
+	amdxdna_pm_init(xdna);
+}
+
+/* Undo aie4_xdna_init(); firmware log/trace teardown needs the mailbox. */
+void aie4_xdna_fini(struct amdxdna_dev *xdna)
+{
+	amdxdna_pm_fini(xdna);
+	amdxdna_dpt_fini(&xdna->dev_handle->aie);
+}
+
+/*
+ * Seed ndev->dpm_clk_tbl from the transport's host-side default table, if it
+ * has one, then overlay the levels the firmware reports. Without a default
+ * table, levels the firmware does not report stay zero.
  */
 int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE_MSG(aie4_msg_get_dpm_freq_table, AIE4_MSG_OP_GET_DPM_FREQ_TABLE);
+	const struct dpm_clk_freq *def_tbl = aie4_default_dpm_clk_tbl(ndev);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	u32 i;
 	int ret;
+
+	if (def_tbl) {
+		for (i = 0; i < AIE4_MAX_DPM_LEVEL_COUNT && def_tbl[i].hclk; i++)
+			ndev->dpm_clk_tbl[i] = def_tbl[i];
+		ndev->max_dpm_level = i ? i - 1 : 0;
+	}
 
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
@@ -165,8 +369,19 @@ int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+/*
+ * Column count the device exposes: the fixed count of parts that cap their
+ * columns, else what firmware reports. The SR-IOV PF never runs
+ * aie4_setup_aie(), so only a capped part has a count there.
+ */
+static u32 aie4_dev_cols(struct amdxdna_dev_hdl *ndev)
+{
+	return ndev->aie.xdna->dev_info->max_cols ?: ndev->total_col;
+}
+
 int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 {
+	u32 max_cols = ndev->aie.xdna->dev_info->max_cols;
 	int ret;
 
 	ret = aie4_query_aie_version(ndev, &ndev->aie.version);
@@ -179,9 +394,12 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 
 	/*
 	 * Do not reset ndev->pw_mode here: this runs on every resume, and
-	 * clobbering the cache would drop the user's power override.
+	 * clobbering the cache would drop the user's power override. The
+	 * cached override is re-applied to firmware by aie4_restore_power_mode().
 	 */
 	ndev->total_col = ndev->aie.metadata.cols;
+	if (max_cols)
+		ndev->total_col = min(ndev->total_col, max_cols);
 	ndev->aie.frame_boundary_preempt_enabled = 1;
 
 	ret = aie4_init_dpm_freq_table(ndev);
@@ -189,11 +407,14 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 		/* if query dpm from fw failed, using default value */
 		(void)aie4_set_dpm(ndev, 0);
 
-	/*
-	 * No device-wide partition here: on this transport each hardware
-	 * context creates the partition it runs in (aie4_hwctx_create), so
-	 * there is nothing to set up until one is asked for.
-	 */
+	/* Parts that partition per hwctx make their own; see aie4_hwctx_create(). */
+	if (!AIE4_PART_PER_HWCTX(ndev->aie.xdna)) {
+		ret = aie4_partition_create(ndev, 0, aie4_dev_cols(ndev),
+					    &ndev->partition_id);
+		if (ret)
+			return ret;
+	}
+
 	/*
 	 * VE2 leaves register_async_event unset: its mailbox has no
 	 * ASYNC_EVENT_REPORT opcode, so it has no pool and reports no tile
@@ -205,7 +426,7 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 		ret = amdxdna_async_events_init(&ndev->aie);
 		if (ret) {
 			XDNA_ERR(ndev->aie.xdna, "Register async events failed, ret %d", ret);
-			return ret;
+			goto partition_fini;
 		}
 	}
 
@@ -217,6 +438,11 @@ int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
 	aie4_restore_power_mode(ndev);
 
 	return 0;
+
+partition_fini:
+	if (!AIE4_PART_PER_HWCTX(ndev->aie.xdna))
+		aie4_partition_destroy(ndev, ndev->partition_id);
+	return ret;
 }
 
 static int aie4_get_power_mode(struct amdxdna_client *client,
@@ -235,6 +461,24 @@ static int aie4_get_power_mode(struct amdxdna_client *client,
 		return -EFAULT;
 
 	return 0;
+}
+
+void aie4_max_clks_at_curr_dpm(struct amdxdna_dev_hdl *ndev,
+			       u32 *npuclk, u32 *hclk)
+{
+	u32 aieclk_level, npuhclk_level;
+	int ret;
+
+	ret = aie4_query_dpm_level(ndev, &aieclk_level, &npuhclk_level);
+	if (ret) {
+		/* Firmware query failed; DPM 0 is the safest known clock to report. */
+		XDNA_WARN_RATELIMITED(ndev->aie.xdna, "cannot get dpm level from fw, using DPM 0");
+		aieclk_level = 0;
+		npuhclk_level = 0;
+	}
+
+	*npuclk = ndev->dpm_clk_tbl[aieclk_level].npuclk;
+	*hclk = ndev->dpm_clk_tbl[npuhclk_level].hclk;
 }
 
 static int aie4_query_clock_metadata(struct amdxdna_client *client,
@@ -272,15 +516,23 @@ static int aie4_query_resource_info(struct amdxdna_client *client,
 	struct amdxdna_drm_get_resource_info res_info = {};
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
+	u32 npuclk, hclk;
 	u32 buf_sz;
 
 	xdna = client->xdna;
 	ndev = xdna->dev_handle;
 
-	aie4_update_counters(ndev);
 	res_info.npu_clk_max = ndev->dpm_clk_tbl[ndev->max_dpm_level].hclk;
-	res_info.npu_tops_max = ndev->aie.max_tops;
-	res_info.npu_tops_curr = ndev->aie.curr_tops;
+	if (AIE_FEATURE_ON(&ndev->aie, AIE4_QUERY_DPM_LEVEL)) {
+		aie4_max_clks_at_curr_dpm(ndev, &npuclk, &hclk);
+		res_info.npu_tops_max = AIE_DPM_TOPS(ndev, res_info.npu_clk_max);
+		res_info.npu_tops_curr = AIE_DPM_TOPS(ndev, hclk);
+		res_info.npu_curr_clk_max = hclk;
+	} else {
+		aie4_update_counters(ndev);
+		res_info.npu_tops_max = ndev->aie.max_tops;
+		res_info.npu_tops_curr = ndev->aie.curr_tops;
+	}
 
 	buf_sz = min(args->buffer_size, sizeof(res_info));
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &res_info, buf_sz))
@@ -480,7 +732,7 @@ int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *ar
 		ret = aie4_query_clock_metadata(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
-		ret = amdxdna_query_sensors(args, ndev->total_col);
+		ret = amdxdna_query_sensors(args, aie4_dev_cols(ndev));
 		break;
 	case DRM_AMDXDNA_QUERY_FIRMWARE_VERSION:
 		ret = amdxdna_get_firmware_version(client, args, &xdna->fw_ver);
@@ -709,6 +961,7 @@ static int aie4_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 
 void aie4_hwctx_suspend_all(struct amdxdna_dev_hdl *ndev, int clean_jobs)
 {
+	bool restore = AIE_FEATURE_ON(&ndev->aie, AIE4_CTX_RESTORE);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	struct amdxdna_client *client;
 	struct amdxdna_hwctx *hwctx;
@@ -724,12 +977,23 @@ void aie4_hwctx_suspend_all(struct amdxdna_dev_hdl *ndev, int clean_jobs)
 			if (clean_jobs) {
 				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_ERROR);
 				aie4_hwctx_wait_for_running(hwctx);
+			} else if (restore) {
+				/*
+				 * Park the ctx in firmware, then drop its jobs
+				 * if firmware preserved nothing.
+				 */
+				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_GRACEFUL);
+				if (hwctx->priv->restore_state == AIE4_CTX_RESTORE_LOST)
+					aie4_hwctx_abort_jobs(hwctx);
 			} else {
 				aie4_hwctx_destroy(hwctx, AIE4_HWCTX_NORMAL);
 			}
 		}
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}
+
+	if (!clean_jobs && restore && aie4_save_ctx_restore_pool(ndev))
+		aie4_clear_ctx_restore_ids(ndev);
 
 	XDNA_DBG(xdna, "Finished hwctx suspend");
 }
@@ -781,6 +1045,8 @@ void aie4_hwctx_disconnect_all(struct amdxdna_dev_hdl *ndev)
 		}
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}
+
+	aie4_free_ctx_restore_pool(ndev);
 }
 
 int aie4_hwctx_reconnect_all(struct amdxdna_dev_hdl *ndev)

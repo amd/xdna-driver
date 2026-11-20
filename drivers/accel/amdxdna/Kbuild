@@ -38,7 +38,10 @@ amdxdna-y := \
 
 amdxdna-y += \
 	aie.o \
+	aie4.o \
 	aie4_ctx.o \
+	aie4_debugfs.o \
+	aie4_dpt.o \
 	aie4_error.o \
 	aie4_message.o \
 	amdxdna_dpt.o \
@@ -87,9 +90,6 @@ endif
 ifneq ($(CONFIG_DRM_ACCEL_AMDXDNA_PLAT),)
 ccflags-y += -DCONFIG_DRM_ACCEL_AMDXDNA_PLAT=1
 amdxdna-y += \
-	aie4.o \
-	aie4_debugfs.o \
-	aie4_dpt.o \
 	aie4_plat.o \
 	amdxdna_mailbox_plat.o \
 	amdxdna_plat_drv.o \
@@ -97,9 +97,6 @@ amdxdna-y += \
 else ifneq ($(CONFIG_DRM_ACCEL_AMDXDNA_VE2),)
 ccflags-y += -DCONFIG_DRM_ACCEL_AMDXDNA_VE2=1
 amdxdna-y += \
-	aie4.o \
-	aie4_debugfs.o \
-	aie4_dpt.o \
 	ve2.o \
 	amdxdna_mailbox_ve2.o \
 	ve2_aie.o \
