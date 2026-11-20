@@ -272,9 +272,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		XDNA_INFO(xdna, "VE2 allocator limited to %u columns", ndev->total_col);
 	}
 
-	aie4_msg_init(ndev);
-	amdxdna_dpt_init(&ndev->aie);
-	amdxdna_pm_init(xdna);
+	aie4_xdna_init(xdna);
 	amdxdna_vbnv_init(xdna);
 	return 0;
 
@@ -293,8 +291,7 @@ static void ve2_fini(struct amdxdna_dev *xdna)
 	if (!ndev)
 		return;
 
-	amdxdna_pm_fini(xdna);
-	amdxdna_dpt_fini(&ndev->aie);
+	aie4_xdna_fini(xdna);
 	ve2_mailbox_fini(ndev);
 	ve2_mbox_release(ndev->mbox);
 	amdxdna_async_events_free(&ndev->aie);

@@ -281,16 +281,7 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 	if (ret)
 		goto suspend_fw;
 
-	/*
-	 * Shared post-bring-up init, mirroring the PCI aie4_xdna_init(): msg_init
-	 * installs the status/telemetry/health/coredump handlers and the hwctx
-	 * limit, dpt_init brings up firmware-log/DPT services, pm_init enables
-	 * runtime PM, and vbnv_init publishes the device VBNV. dpt_init is
-	 * best-effort (the PCI path ignores its return too).
-	 */
-	aie4_msg_init(ndev);
-	amdxdna_dpt_init(&ndev->aie);
-	amdxdna_pm_init(xdna);
+	aie4_xdna_init(xdna);
 	amdxdna_vbnv_init(xdna);
 
 	return 0;
@@ -318,9 +309,7 @@ static void aie4_plat_fini(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
-	/* Mirror the PCI aie4_xdna_fini(); dpt_fini needs the mailbox still up. */
-	amdxdna_pm_fini(xdna);
-	amdxdna_dpt_fini(&ndev->aie);
+	aie4_xdna_fini(xdna);
 
 	/*
 	 * Suspend the firmware while the mailbox is still alive, mirroring the PCI

@@ -1427,19 +1427,6 @@ done:
 	XDNA_ERR(xdna, "reset failed: %d, service offline", ret);
 }
 
-static void aie4_xdna_init(struct amdxdna_dev *xdna)
-{
-	aie4_msg_init(xdna->dev_handle);
-	amdxdna_dpt_init(&xdna->dev_handle->aie);
-	amdxdna_pm_init(xdna);
-}
-
-static void aie4_xdna_fini(struct amdxdna_dev *xdna)
-{
-	amdxdna_pm_fini(xdna);
-	amdxdna_dpt_fini(&xdna->dev_handle->aie);
-}
-
 static int aie4_pf_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev;

@@ -235,6 +235,24 @@ int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
 }
 
 /*
+ * Bring up the services that need a running firmware: the message handlers,
+ * firmware log/trace (best-effort, its result is ignored) and runtime PM.
+ */
+void aie4_xdna_init(struct amdxdna_dev *xdna)
+{
+	aie4_msg_init(xdna->dev_handle);
+	amdxdna_dpt_init(&xdna->dev_handle->aie);
+	amdxdna_pm_init(xdna);
+}
+
+/* Undo aie4_xdna_init(); firmware log/trace teardown needs the mailbox. */
+void aie4_xdna_fini(struct amdxdna_dev *xdna)
+{
+	amdxdna_pm_fini(xdna);
+	amdxdna_dpt_fini(&xdna->dev_handle->aie);
+}
+
+/*
  * Seed ndev->dpm_clk_tbl from the transport's host-side default table, if it
  * has one, then overlay the levels the firmware reports. Without a default
  * table, levels the firmware does not report stay zero.
