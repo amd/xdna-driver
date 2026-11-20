@@ -403,40 +403,16 @@ static int aie4_fw_load(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
-static int aie4_config_fw(struct amdxdna_dev_hdl *ndev)
+static int aie4_pci_config_fw(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = aie4_calibrate_clock(ndev);
-	if (ret)
-		return ret;
-
-	/*
-	 * Firmware releases the DRAM work buffer internally during suspend_fw.
-	 * There is none when probe could not allocate it.
-	 */
-	if (ndev->work_buf_hdl) {
-		ret = aie4_attach_work_buffer(ndev,
-					      to_dma_addr(ndev->work_buf_hdl, 0),
-					      to_buf_size(ndev->work_buf_hdl));
-		if (ret)
-			return ret;
-	}
-
-	/* Best-effort tuning knobs; failure is warned inside and does not fail hw start. */
-	aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
-	aie4_set_dpm_compute_params(ndev);
-	aie4_set_dpm_bw_busyness(ndev);
-	aie4_set_dpm_pwr_ovr_percent_table(ndev);
-	aie4_set_dpm_cap_percent_table(ndev);
-
+	ret = aie4_config_fw(ndev);
 #ifdef AMDXDNA_NPU3A
-	ret = aie4_iommu_bypass_echo(ndev);
-	if (ret)
-		return ret;
+	if (!ret)
+		ret = aie4_iommu_bypass_echo(ndev);
 #endif
-
-	return 0;
+	return ret;
 }
 
 /*
@@ -462,7 +438,7 @@ static int aie4_pf_hw_config(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	return aie4_config_fw(ndev);
+	return aie4_pci_config_fw(ndev);
 }
 
 //FIX this after fw_load can work after FLR
@@ -574,7 +550,7 @@ static int aie4_classic_hw_config(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	ret = aie4_config_fw(ndev);
+	ret = aie4_pci_config_fw(ndev);
 	if (ret)
 		return ret;
 

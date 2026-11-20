@@ -366,6 +366,7 @@ void aie4_restore_power_mode(struct amdxdna_dev_hdl *ndev);
 void aie4_restore_force_preemption(struct amdxdna_dev_hdl *ndev);
 void aie4_restore_hws_debug_mode(struct amdxdna_dev_hdl *ndev);
 int aie4_query_fw(struct amdxdna_dev_hdl *ndev);
+int aie4_config_fw(struct amdxdna_dev_hdl *ndev);
 struct amdxdna_dev_hdl *aie4_dev_hdl_alloc(struct amdxdna_dev *xdna);
 void aie4_dev_hdl_fini(struct amdxdna_dev_hdl *ndev);
 void aie4_xdna_init(struct amdxdna_dev *xdna);

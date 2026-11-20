@@ -236,6 +236,45 @@ int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
 }
 
 /*
+ * Configure the firmware once its mailbox is up: calibrate the clock, attach
+ * the DRAM work buffer, then apply the tuning knobs. The knobs are
+ * best-effort; a failure is warned inside and does not fail hw start. The
+ * DPM ones are skipped when the firmware lacks the feature, and the CERT
+ * opcode timeout is only sent by a transport that sets one, since 0
+ * disables the checker.
+ */
+int aie4_config_fw(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	ret = aie4_calibrate_clock(ndev);
+	if (ret)
+		return ret;
+
+	/*
+	 * Firmware releases the DRAM work buffer internally during suspend_fw.
+	 * There is none when probe could not allocate it.
+	 */
+	if (ndev->work_buf_hdl) {
+		ret = aie4_attach_work_buffer(ndev,
+					      to_dma_addr(ndev->work_buf_hdl, 0),
+					      to_buf_size(ndev->work_buf_hdl));
+		if (ret)
+			return ret;
+	}
+
+	aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
+	if (ndev->cert_timeout_ms)
+		aie4_set_cert_timeout(ndev, ndev->cert_timeout_ms);
+	aie4_set_dpm_compute_params(ndev);
+	aie4_set_dpm_bw_busyness(ndev);
+	aie4_set_dpm_pwr_ovr_percent_table(ndev);
+	aie4_set_dpm_cap_percent_table(ndev);
+
+	return 0;
+}
+
+/*
  * Allocate the device handle and set up the state every aie4 transport
  * shares. The handle is drm-managed; aie4_dev_hdl_fini() undoes the rest.
  */

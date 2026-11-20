@@ -176,30 +176,6 @@ static void aie4_mailbox_fini(struct amdxdna_dev_hdl *ndev)
 	ndev->aie.mgmt_chann = NULL;
 }
 
-/*
- * Platform equivalent of the PCI aie4_config_fw(): calibrate the clock, attach
- * the DRAM work buffer, and apply the context-switch hysteresis and the CERT
- * opcode timeout.  (The PCI-only NPU3A iommu-bypass echo does not apply here.)
- */
-static int aie4_plat_config_fw(struct amdxdna_dev_hdl *ndev)
-{
-	int ret;
-
-	ret = aie4_calibrate_clock(ndev);
-	if (ret)
-		return ret;
-
-	ret = aie4_attach_work_buffer(ndev, to_dma_addr(ndev->work_buf_hdl, 0),
-				      to_buf_size(ndev->work_buf_hdl));
-	if (ret)
-		return ret;
-
-	/* Best-effort tuning knobs; failure warns internally, does not fail init. */
-	aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
-	aie4_set_cert_timeout(ndev, ndev->cert_timeout_ms);
-	return 0;
-}
-
 static int aie4_plat_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev;
@@ -265,7 +241,7 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 	if (ret)
 		goto mbox_fini;
 
-	ret = aie4_plat_config_fw(ndev);
+	ret = aie4_config_fw(ndev);
 	if (ret)
 		goto mbox_fini;
 
