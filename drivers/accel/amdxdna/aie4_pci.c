@@ -817,19 +817,13 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 	unsigned long bars = 0;
 	int ret, i;
 
-	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
+	ndev = aie4_dev_hdl_alloc(xdna);
 	if (!ndev)
 		return -ENOMEM;
 
 	ndev->priv = xdna->dev_info->dev_priv;
-	ndev->aie.xdna = xdna;
-	ndev->kernel_submit = true;
 	ndev->ctx_switch_hysteresis_us = AIE4_CTX_HYSTERESIS_US;
 	ndev->pw_mode = POWER_MODE_DEFAULT;
-	xdna->dev_handle = ndev;
-
-	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
-	mutex_init(&ndev->cert_comp_lock);
 
 	/* Enable managed PCI device */
 	ret = pcim_enable_device(pdev);
@@ -1583,6 +1577,7 @@ static void aie4_pf_fini(struct amdxdna_dev *xdna)
 	aie4_pf_hw_stop(xdna->dev_handle);
 	amdxdna_async_events_free(&xdna->dev_handle->aie);
 	aie4_free_work_buffer(xdna->dev_handle);
+	aie4_dev_hdl_fini(xdna->dev_handle);
 }
 
 static void aie4_vf_fini(struct amdxdna_dev *xdna)
@@ -1591,6 +1586,7 @@ static void aie4_vf_fini(struct amdxdna_dev *xdna)
 	aie4_vf_hw_stop(xdna->dev_handle);
 	aie4_free_ctx_restore_pool(xdna->dev_handle);
 	amdxdna_async_events_free(&xdna->dev_handle->aie);
+	aie4_dev_hdl_fini(xdna->dev_handle);
 }
 
 static void aie4_classic_fini(struct amdxdna_dev *xdna)
@@ -1600,6 +1596,7 @@ static void aie4_classic_fini(struct amdxdna_dev *xdna)
 	aie4_free_ctx_restore_pool(xdna->dev_handle);
 	amdxdna_async_events_free(&xdna->dev_handle->aie);
 	aie4_free_work_buffer(xdna->dev_handle);
+	aie4_dev_hdl_fini(xdna->dev_handle);
 }
 
 int aie4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)

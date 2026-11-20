@@ -205,24 +205,16 @@ static int aie4_plat_init(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev;
 	int ret;
 
-	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
+	/*
+	 * Kernel-mode submission, set by aie4_dev_hdl_alloc(), is the only mode
+	 * here: the driver rings the doorbell (amdxdna_mailbox_plat_ring_doorbell),
+	 * so the platform has no user-mmap'able doorbell, and user-mode submission
+	 * would hand the shim a doorbell offset whose mmap fails with -EOPNOTSUPP.
+	 */
+	ndev = aie4_dev_hdl_alloc(xdna);
 	if (!ndev)
 		return -ENOMEM;
 
-	ndev->aie.xdna = xdna;
-	xdna->dev_handle = ndev;
-
-	/* Per-cert completion routing state, mirroring the PCI aie4m_pcidev_init(). */
-	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
-	mutex_init(&ndev->cert_comp_lock);
-
-	/*
-	 * Kernel-mode submission: the driver fills the HSA queue and rings the
-	 * doorbell (amdxdna_mailbox_plat_ring_doorbell), so the platform has no
-	 * user-mmap'able doorbell.  Without this, user-mode submission hands a
-	 * doorbell offset to the shim, whose mmap fails with -EOPNOTSUPP.
-	 */
-	ndev->kernel_submit = true;
 	ndev->ctx_switch_hysteresis_us = AIE4_CTX_HYSTERESIS_US;
 	ndev->cert_timeout_ms = AIE4_CERT_TIMEOUT_MS;
 
@@ -328,9 +320,7 @@ static void aie4_plat_fini(struct amdxdna_dev *xdna)
 	 */
 	amdxdna_async_events_free(&ndev->aie);
 	aie4_free_work_buffer(ndev);
-
-	mutex_destroy(&ndev->cert_comp_lock);
-	xa_destroy(&ndev->cert_comp_xa);
+	aie4_dev_hdl_fini(ndev);
 }
 
 static int aie4_plat_suspend(struct amdxdna_dev *xdna)

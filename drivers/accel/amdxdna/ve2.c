@@ -219,16 +219,9 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev;
 	int ret;
 
-	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
+	ndev = aie4_dev_hdl_alloc(xdna);
 	if (!ndev)
 		return -ENOMEM;
-
-	ndev->aie.xdna = xdna;
-	xdna->dev_handle = ndev;
-	ndev->kernel_submit = true;
-
-	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
-	mutex_init(&ndev->cert_comp_lock);
 
 	ret = ve2_mailbox_init(ndev);
 	if (ret)
@@ -279,8 +272,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 mbox_fini:
 	ve2_mailbox_fini(ndev);
 xa_fini:
-	mutex_destroy(&ndev->cert_comp_lock);
-	xa_destroy(&ndev->cert_comp_xa);
+	aie4_dev_hdl_fini(ndev);
 	return ret;
 }
 
@@ -295,8 +287,7 @@ static void ve2_fini(struct amdxdna_dev *xdna)
 	ve2_mailbox_fini(ndev);
 	ve2_mbox_release(ndev->mbox);
 	amdxdna_async_events_free(&ndev->aie);
-	mutex_destroy(&ndev->cert_comp_lock);
-	xa_destroy(&ndev->cert_comp_xa);
+	aie4_dev_hdl_fini(ndev);
 }
 
 static int ve2_suspend(struct amdxdna_dev *xdna)

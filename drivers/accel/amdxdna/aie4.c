@@ -8,6 +8,7 @@
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_cache.h>
 #include <drm/drm_drv.h>
+#include <drm/drm_managed.h>
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
 #include <linux/rcupdate.h>
@@ -232,6 +233,36 @@ int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
 	aie4_restore_hws_debug_mode(ndev);
 
 	return 0;
+}
+
+/*
+ * Allocate the device handle and set up the state every aie4 transport
+ * shares. The handle is drm-managed; aie4_dev_hdl_fini() undoes the rest.
+ */
+struct amdxdna_dev_hdl *aie4_dev_hdl_alloc(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev;
+
+	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
+	if (!ndev)
+		return NULL;
+
+	ndev->aie.xdna = xdna;
+	xdna->dev_handle = ndev;
+
+	/* The driver fills the HSA queue and rings the doorbell by default. */
+	ndev->kernel_submit = true;
+
+	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
+	mutex_init(&ndev->cert_comp_lock);
+
+	return ndev;
+}
+
+void aie4_dev_hdl_fini(struct amdxdna_dev_hdl *ndev)
+{
+	mutex_destroy(&ndev->cert_comp_lock);
+	xa_destroy(&ndev->cert_comp_xa);
 }
 
 /*
