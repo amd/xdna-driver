@@ -169,4 +169,12 @@ match_drv(const std::vector<drv_type>& drv_list, device::id_type id, device* dev
   return false;
 }
 
+// Thrown by a test that finds at run time that the device cannot run it, so
+// the test is reported as skipped rather than failed.
+class test_skip : public std::runtime_error
+{
+public:
+  using std::runtime_error::runtime_error;
+};
+
 #endif // _SHIMTEST_DEV_FILTER_H_

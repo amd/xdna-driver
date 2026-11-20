@@ -1898,13 +1898,22 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
 {
   bool failed = is_negative_test(test);
   bool skipped = true;
+  // test_skip skips only the device that threw it. The test is skipped when no
+  // device runs it to completion.
+  auto run_on = [&](device::id_type i, std::shared_ptr<device>& dev) {
+    try {
+      test.func(i, dev, test.arg);
+      skipped = false;
+    } catch (const test_skip& ex) {
+      std::cout << ex.what() << std::endl;
+    }
+  };
 
   std::cout << "====== " << id << ": " << test.name << " started =====" << std::endl;
   try {
     if (test.hw_list.empty()) { // system test
-      skipped = false;
       std::shared_ptr<device> dev = nullptr;
-      test.func(0, dev, test.arg);
+      run_on(0, dev);
     } else { // per user device test
       for (device::id_type i = 0; i < num_of_devices; i++) {
         auto dev = get_userpf_device(i);
@@ -1915,8 +1924,7 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
           continue;
         if (!force && !(match_hw(test.hw_list, i, dev.get()) && match_drv(test.drv_list, i, dev.get())))
           continue;
-        skipped = false;
-        test.func(i, dev, test.arg);
+        run_on(i, dev);
       }
     }
   }
