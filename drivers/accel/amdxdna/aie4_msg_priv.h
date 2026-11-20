@@ -887,7 +887,7 @@ struct aie4_msg_start_fw_trace_req {
 	__u32	timestamp;
 	__u64	buff_addr;
 	__u32	buff_size;
-	__u32	reserved;
+	__u32	pasid;
 } __packed;
 
 struct aie4_msg_start_fw_trace_resp {

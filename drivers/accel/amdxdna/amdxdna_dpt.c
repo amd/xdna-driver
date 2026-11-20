@@ -1275,6 +1275,34 @@ int amdxdna_dpt_resume(struct amdxdna_dev *xdna)
 }
 
 /*
+ * Detach the active rings from firmware ahead of a suspend firmware is not
+ * told about, as on an SR-IOV VF. Firmware keeps a ring nobody stopped and
+ * refuses the attach amdxdna_dpt_resume() then sends for it, so tracing would
+ * silently end at the first runtime suspend. Must run while the mailbox is
+ * still up; amdxdna_dpt_suspend() drains the ring afterwards as usual.
+ */
+void amdxdna_dpt_fw_detach(struct aie_device *aie)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt_chan *chans[] = { &xdna->fw_log, &xdna->fw_trace };
+	struct amdxdna_dpt *dpt;
+	int i, ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	for (i = 0; i < ARRAY_SIZE(chans); i++) {
+		dpt = rcu_dereference_protected(chans[i]->data,
+						lockdep_is_held(&xdna->dev_lock));
+		if (!dpt || READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE)
+			continue;
+
+		ret = chans[i]->desc->fw_fini(aie);
+		if (ret)
+			XDNA_DPT_WARN(dpt, "Detach before suspend failed: %d", ret);
+	}
+}
+
+/*
  * Quiesce both DPT channels for the duration of an FLR.
  *
  * Nothing in the reset path re-issues the per-channel firmware attach

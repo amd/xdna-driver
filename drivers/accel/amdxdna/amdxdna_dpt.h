@@ -175,6 +175,7 @@ int amdxdna_dpt_init(struct aie_device *aie);
 int amdxdna_dpt_fini(struct aie_device *aie);
 int amdxdna_dpt_suspend(struct amdxdna_dev *xdna);
 int amdxdna_dpt_resume(struct amdxdna_dev *xdna);
+void amdxdna_dpt_fw_detach(struct aie_device *aie);
 
 /*
  * FLR counterparts of suspend/resume, driven from the per-generation
