@@ -1211,7 +1211,8 @@ static int fill_indirect_pkt_level1(struct amdxdna_hwctx_priv *priv, u64 slot_id
 	struct host_queue_packet *pkt = &priv->umq_pkts[slot_idx];
 	struct host_indirect_packet_entry *hipe =
 		(struct host_indirect_packet_entry *)(pkt->data);
-	size_t max_entries = sizeof(pkt->data) / sizeof(*hipe);
+	/* parenthesized for clang -Wsizeof-array-div */
+	size_t max_entries = sizeof(pkt->data) / (sizeof(*hipe));
 	u16 i;
 
 	/*
