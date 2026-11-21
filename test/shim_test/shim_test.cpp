@@ -14,6 +14,8 @@
 #include "hwctx.h"
 #include "speed.h"
 #include "bo.h"
+#include "fw_trace.h"
+#include "io.h"
 
 #include "core/common/query_requests.h"
 #include "core/common/sysinfo.h"
@@ -1453,6 +1455,37 @@ TEST_query_telemetry_short_buf(device::id_type id, std::shared_ptr<device>& sdev
       + std::to_string(err));
 }
 
+void
+TEST_fw_trace_poll_read(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  fw_trace_session trace{dev, dev_filter_is_npu3vf(id, dev) ?
+                         FW_TRACE_CAT_GPU_VIEW : FW_TRACE_CAT_ALL};
+
+  auto boset = create_bo_set_for_device(dev);
+  boset->run();
+
+  // No watch read is waiting, so data below the firmware watermark is only
+  // picked up by the read itself. Allow it time to land.
+  auto r = fork_query<fw_trace_read_result>(dev, [](int fd) {
+    fw_trace_read_result res{};
+    for (int i = 0; i < 20; i++) {
+      res = fw_trace_read(fd, 0);
+      if (res.err || res.size)
+        break;
+      usleep(100000);
+    }
+    return res;
+  });
+
+  if (r.err == EPERM)
+    throw std::runtime_error("fw trace read needs CAP_SYS_ADMIN (run as root?)");
+  if (r.err)
+    throw std::runtime_error("fw trace read failed: " + std::string(std::strerror(r.err)));
+  if (!r.size)
+    throw std::runtime_error("fw trace read returned no data after a workload");
+}
+
 struct attribute_state_probe {
   int ret;
   int err;
@@ -1739,6 +1772,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "query telemetry header-only buffer fails", {},
     TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_query_telemetry_short_buf, {}
+  },
+  test_case{ "fw trace read without watch returns new data", {},
+    TEST_POSITIVE, {npu3}, {amdxdna}, TEST_fw_trace_poll_read, {}
   },
   test_case{ "query npu load (idle and in-flight)", {},
     TEST_POSITIVE, {npu3}, {amdxdna}, TEST_query_npu_load, {}

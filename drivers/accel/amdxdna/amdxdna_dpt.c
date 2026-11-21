@@ -755,6 +755,13 @@ static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt,
 	XDNA_DPT_DBG(dpt, "Requested at offset 0x%llx with watch %s",
 		     footer.offset, footer.watch ? "on" : "off");
 
+	/*
+	 * Refresh the tail first. It otherwise moves only on a firmware
+	 * watermark note or while a watcher runs the poll timer, so a
+	 * non-watch read would miss data already in the ring.
+	 */
+	amdxdna_dpt_update_tail(dpt);
+
 	if (footer.offset == READ_ONCE(dpt->tail)) {
 		if (footer.watch) {
 			amdxdna_dpt_timer_get(dpt);
