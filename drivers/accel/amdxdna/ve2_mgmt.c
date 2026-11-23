@@ -483,11 +483,11 @@ static void ve2_clear_context_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 
 /* CERT Status - comprehensive read */
 struct cert_status {
-	u32 cert_idle_status;  /* Bits: CERT_IS_IDLE(4), HSA_QUEUE_NOT_EMPTY(1) */
-	u32 misc_status;       /* Bits: COMPLETION_STATUS_DONE(1) */
-	bool is_idle;          /* CERT sleeping, queue empty */
-	bool queue_not_empty;  /* CERT processing or queue has work */
-	bool completion_done;  /* Command completion available */
+	u32 cert_idle_status;   /* Bits: CERT_IS_IDLE(4), HSA_QUEUE_NOT_EMPTY(1) */
+	u32 completion_status;  /* Bits: COMPLETION_STATUS_DONE(1) */
+	bool is_idle;           /* CERT sleeping, queue empty */
+	bool queue_not_empty;   /* CERT processing or queue has work */
+	bool completion_done;   /* Command completion available */
 };
 
 static void ve2_read_cert_status(struct amdxdna_mgmtctx *mgmtctx, struct cert_status *status)
@@ -500,16 +500,16 @@ static void ve2_read_cert_status(struct amdxdna_mgmtctx *mgmtctx, struct cert_st
 					  sizeof(status->cert_idle_status),
 					  &status->cert_idle_status);
 
-	/* Read misc_status field */
+	/* Read completion_status field */
 	ve2_partition_read_privileged_mem(mgmtctx,
-					  offsetof(struct handshake, misc_status),
-					  sizeof(status->misc_status),
-					  &status->misc_status);
+					  offsetof(struct handshake, completion_status),
+					  sizeof(status->completion_status),
+					  &status->completion_status);
 
 	/* Decode status bits */
 	status->is_idle = (status->cert_idle_status & CERT_IS_IDLE) != 0;
 	status->queue_not_empty = (status->cert_idle_status & HSA_QUEUE_NOT_EMPTY) != 0;
-	status->completion_done = (status->misc_status & COMPLETION_STATUS_DONE) != 0;
+	status->completion_done = (status->completion_status & COMPLETION_STATUS_DONE) != 0;
 }
 
 static void ve2_sched_start_context(struct ve2_scheduler *sched, struct ve2_job *job)
@@ -530,15 +530,20 @@ static void ve2_sched_start_context(struct ve2_scheduler *sched, struct ve2_job 
 	 */
 	ve2_mgmt_handshake_init(mgmtctx, job->hwctx);
 
+	/*
+	 * Publish the new active context before ringing the doorbell, both
+	 * under ctx_lock: the IRQ handler takes ctx_lock and checks
+	 * active_ctx first, so if an IRQ lands right after the doorbell and
+	 * active_ctx is still NULL, it returns without waking any waiters.
+	 */
+	sched->active_ctx = job->hwctx;
+	sched->ctx_switch_requested = false;
+	mgmtctx->active_ctx = job->hwctx;  /* Legacy compatibility */
+
 	/* Now wake CERT - handshake is ready */
 	notify_fw_cmd_ready(mgmtctx);
 
 	mutex_unlock(&mgmtctx->ctx_lock);
-
-	/* Update state */
-	sched->active_ctx = job->hwctx;
-	sched->ctx_switch_requested = false;
-	mgmtctx->active_ctx = job->hwctx;  /* Legacy compatibility */
 
 	/* Remove job from queue */
 	spin_lock_irqsave(&sched->job_lock, flags);
@@ -589,15 +594,20 @@ static bool ve2_sched_switch_context(struct ve2_scheduler *sched, struct ve2_job
 	/* Clear context switch request flag */
 	ve2_clear_context_switch_req(mgmtctx);
 
+	/*
+	 * Publish the new active context before ringing the doorbell, both
+	 * under ctx_lock: the IRQ handler takes ctx_lock and reads
+	 * active_ctx first, so an IRQ landing right after the doorbell must
+	 * see the new context, not the old one or NULL.
+	 */
+	sched->active_ctx = job->hwctx;
+	sched->ctx_switch_requested = false;
+	mgmtctx->active_ctx = job->hwctx;  /* Legacy compatibility */
+
 	/* Now wake CERT - handshake is ready for new context */
 	notify_fw_cmd_ready(mgmtctx);
 
 	mutex_unlock(&mgmtctx->ctx_lock);
-
-	/* Update state */
-	sched->active_ctx = job->hwctx;
-	sched->ctx_switch_requested = false;
-	mgmtctx->active_ctx = job->hwctx;  /* Legacy compatibility */
 
 	/* Remove job from queue */
 	spin_lock_irqsave(&sched->job_lock, flags);
@@ -790,10 +800,18 @@ static void ve2_sched_work_drm(struct work_struct *work)
 				 mgmtctx->start_col, sched->active_ctx, next_ctx);
 			mutex_lock(&mgmtctx->ctx_lock);
 			ve2_request_context_switch(mgmtctx);
+			/*
+			 * Set the flag before ringing the doorbell, both under
+			 * ctx_lock: the IRQ handler takes ctx_lock and checks
+			 * this flag to decide whether to re-arm the scheduler,
+			 * so an IRQ landing right after the doorbell must see
+			 * it already true, or the wakeup is lost until the
+			 * next submit or IRQ.
+			 */
+			sched->ctx_switch_requested = true;
 			/* Wake CERT so it can see the switch request! */
 			notify_fw_cmd_ready(mgmtctx);
 			mutex_unlock(&mgmtctx->ctx_lock);
-			sched->ctx_switch_requested = true;
 			/* Leave job in queue - will switch when CERT halts */
 		}
 
