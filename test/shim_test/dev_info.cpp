@@ -327,7 +327,7 @@ binary_info binary_infos[] = {
       { "DPU:dpu", {0xffffffff} },
     },
     .path = "local_shim_test_data/npu12/bad/bad_op.elf",
-    .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "0"} },
+    .extra = { {"exp_status", exp_status_error}, {"exp_val", "0"} },
     .flow = FULL_ELF,
   },
   {
