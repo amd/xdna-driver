@@ -16,9 +16,11 @@
  * shared-memory and IPI transport. dev_ve2_info still uses the shared aie4
  * context, command, and query ops.
  *
- * VE2 is a kernel-mode queue: user space submits command buffers and does
- * not allocate a host queue. The driver allocates that queue and the shared
- * aie4 submit path fills it. CERT takes two-level indirect packets.
+ * VE2 is a UMQ-format device that always submits from the kernel, like the
+ * npu12 platform: user space allocates the queue BO and the shim sends command
+ * buffers to the driver, which fills the queue (aie4 kernel_submit). With no
+ * PASID the driver uses a private queue buffer. CERT takes two-level
+ * indirect packets.
  *
  * xrt-smi examine prints this VBNV as the device name. This is the
  * Versal 2VE/2VM part, not a RyzenAI NPU.
@@ -41,7 +43,7 @@ static const struct amdxdna_fw_feature_tbl ve2_cert_feature_table[] = {
 
 const struct amdxdna_dev_info dev_ve2_info = {
 	.default_vbnv		= "Versal-2VE-2VM",
-	.device_type		= AMDXDNA_DEV_TYPE_KMQ,
+	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
 	.ops			= &ve2_ops,
 	.partition_per_hwctx	= true,
 	.hsa_level2_indirect	= true,
