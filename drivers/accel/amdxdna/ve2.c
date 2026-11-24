@@ -41,62 +41,6 @@ module_param_named(max_col, ve2_max_col, int, 0644);
 MODULE_PARM_DESC(max_col, "Maximum AIE columns available to the VE2 allocator");
 
 /*
- * Layout aie4_hwctx_umq_init() requires when hsa_level2_indirect is set.
- * The KMQ shim passes no queue, so the driver allocates this buffer.
- */
-static size_t ve2_hsa_queue_size(void)
-{
-	return sizeof(struct host_queue_header) +
-	       CTX_MAX_CMDS * sizeof(struct host_queue_packet) +
-	       CTX_MAX_CMDS * sizeof(struct host_queue_indirect_hdr) +
-	       CTX_MAX_CMDS * HSA_MAX_LEVEL2_INDIRECT_ENTRIES *
-	       sizeof(struct host_indirect_packet_data);
-}
-
-static int ve2_hsa_queue_alloc(struct amdxdna_hwctx *hwctx)
-{
-	struct amdxdna_client *client = hwctx->client;
-	struct amdxdna_drm_create_bo args = {
-		.type = AMDXDNA_BO_SHARE,
-		.size = ve2_hsa_queue_size(),
-	};
-	int ret;
-
-	ret = amdxdna_drm_create_bo_ioctl(&client->xdna->ddev, &args, client->filp);
-	if (ret)
-		return ret;
-
-	hwctx->umq_bo_hdl = args.handle;
-	return 0;
-}
-
-static void ve2_hsa_queue_free(struct amdxdna_hwctx *hwctx)
-{
-	if (hwctx->umq_bo_hdl != AMDXDNA_INVALID_BO_HANDLE)
-		drm_gem_handle_delete(hwctx->client->filp, hwctx->umq_bo_hdl);
-}
-
-static int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
-{
-	int ret;
-
-	ret = ve2_hsa_queue_alloc(hwctx);
-	if (ret)
-		return ret;
-
-	ret = aie4_hwctx_init(hwctx);
-	if (ret)
-		ve2_hsa_queue_free(hwctx);
-	return ret;
-}
-
-static void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
-{
-	aie4_hwctx_fini(hwctx);
-	ve2_hsa_queue_free(hwctx);
-}
-
-/*
  * The doorbell is addressed by priv->hw_ctx_id; register the aie4-owned
  * queue indices with the VE2 transport so a shared partition can schedule
  * this context without changing the aie4 command path.
@@ -309,8 +253,8 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.init			= ve2_init,
 	.fini			= ve2_fini,
 	.debugfs_init		= aie4_debugfs_init,
-	.hwctx_init		= ve2_hwctx_init,
-	.hwctx_fini		= ve2_hwctx_fini,
+	.hwctx_init		= aie4_hwctx_init,
+	.hwctx_fini		= aie4_hwctx_fini,
 	.hwctx_abort		= aie4_hwctx_abort,
 	.hwctx_config		= aie4_hwctx_config,
 	.cmd_submit		= aie4_cmd_submit,
