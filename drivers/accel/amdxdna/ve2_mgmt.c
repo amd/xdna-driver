@@ -615,8 +615,9 @@ static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
 	if (ret < 0 || !misc_status)
 		return false;
 
+	/* Stale level bit with no context to attribute it to; don't block scheduling. */
 	if (!mgmtctx->active_ctx)
-		return true;
+		return false;
 
 	vp = ve2_hw_priv(mgmtctx->active_ctx);
 	if (!vp || vp->misc_intrpt_flag)
@@ -691,10 +692,14 @@ static void ve2_sched_work_drm(struct work_struct *work)
 		struct amdxdna_hwctx *next_ctx;
 		struct cert_status cert_status;
 
+		/* Serialize against ve2_mgmt_destroy_partition() clearing active_ctx. */
+		mutex_lock(&mgmtctx->ctx_lock);
 		if (ve2_check_misc_interrupt(mgmtctx)) {
 			ve2_sched_timeout_pending_jobs(mgmtctx);
+			mutex_unlock(&mgmtctx->ctx_lock);
 			return;
 		}
+		mutex_unlock(&mgmtctx->ctx_lock);
 
 		if (!budget--) {
 			queue_work(sched->wq, &sched->sched_work);
@@ -729,8 +734,11 @@ static void ve2_sched_work_drm(struct work_struct *work)
 			continue;
 		}
 
-		if (sched->active_ctx == next_ctx) {
-			/* Case 2: Same context - just wake CERT (handshake already programmed) */
+		if (sched->active_ctx == next_ctx && !sched->ctx_switch_requested) {
+			/* Case 2: Same context - just wake CERT (handshake already programmed)
+			 * Excluded while a switch is pending: CERT is waiting on the switch
+			 * ack, not a plain doorbell.
+			 */
 			mutex_lock(&mgmtctx->ctx_lock);
 			notify_fw_cmd_ready(mgmtctx);
 			mutex_unlock(&mgmtctx->ctx_lock);
@@ -945,6 +953,7 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	u64 read_index;
 	struct ve2_scheduler *sched = &mgmtctx->scheduler;
 	struct cert_status cert_status;
+	bool misc_fault;
 
 	guard(mutex)(&mgmtctx->ctx_lock);
 	active_ctx = sched->active_ctx;
@@ -962,10 +971,15 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 		return;
 	}
 
+	/* Latch before waking waiters: check_read_index() tests misc_intrpt_flag. */
+	misc_fault = ve2_check_misc_interrupt(mgmtctx);
+
 	/* Wake waiters for completed commands */
 	vp = ve2_hw_priv(active_ctx);
 	if (vp)
 		wake_up_interruptible_all(&vp->waitq);
+
+	ve2_hwctx_queue_completion(active_ctx);
 
 	get_ctx_write_index(active_ctx, &write_index);
 	trace_xdna_irq_exit(active_ctx->name, mgmtctx->partition_id, active_ctx->id,
@@ -982,7 +996,7 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	 * Either status value means "safe to switch now" when a switch is
 	 * pending, so both must re-arm the scheduler here.
 	 */
-	if (ve2_check_misc_interrupt(mgmtctx)) {
+	if (misc_fault) {
 		queue_work(sched->wq, &sched->sched_work);
 	} else if (sched->ctx_switch_requested && (cert_status.is_idle || cert_status.queue_not_empty)) {
 		/* CERT responded to our context switch request */
@@ -1495,14 +1509,18 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 		mgmtctx->scheduler.ctx_switch_requested = false;
 		mutex_unlock(&mgmtctx->ctx_lock);
 
-		ve2_aie_partition_teardown(mgmtctx->aie_dev);
-		ve2_aie_partition_release(mgmtctx->aie_dev);
-		mgmtctx->aie_dev = NULL;
-
-		/* Not under ctx_lock: cancel_work_sync() would deadlock against
+		/* Stop scheduler before teardown so it can't touch aie_dev afterwards.
+		 * Not under ctx_lock: cancel_work_sync() would deadlock against
 		 * scheduler work blocked waiting on it.
 		 */
 		ve2_scheduler_fini(mgmtctx);
+
+		ve2_aie_partition_teardown(mgmtctx->aie_dev);
+		ve2_aie_partition_release(mgmtctx->aie_dev);
+		mgmtctx->aie_dev = NULL;
+	} else {
+		/* Partition still shared; re-arm scheduler for other contexts' queued jobs. */
+		queue_work(mgmtctx->scheduler.wq, &mgmtctx->scheduler.sched_work);
 	}
 
 	vp->mgmtctx = NULL;
