@@ -515,14 +515,10 @@ static void ve2_read_cert_status(struct amdxdna_mgmtctx *mgmtctx, struct cert_st
 static void ve2_sched_start_context(struct ve2_scheduler *sched, struct ve2_job *job)
 {
 	struct amdxdna_mgmtctx *mgmtctx = sched->mgmtctx;
-	struct amdxdna_dev *xdna = mgmtctx->xdna;
 	unsigned long flags;
 
-	/* CRITICAL: Lock ctx_lock to prevent race with concurrent doorbell/reprogram */
+	/* Lock ctx_lock to prevent race with concurrent doorbell/reprogram */
 	mutex_lock(&mgmtctx->ctx_lock);
-
-	XDNA_DBG(xdna, "SCHED: Starting context %p (col=%u)",
-		 job->hwctx, mgmtctx->start_col);
 
 	/* Program handshake for this context
 	 * Note: First time on partition, handshake uninitialized - no idle check needed.
@@ -540,12 +536,10 @@ static void ve2_sched_start_context(struct ve2_scheduler *sched, struct ve2_job 
 	sched->ctx_switch_requested = false;
 	mgmtctx->active_ctx = job->hwctx;  /* Legacy compatibility */
 
-	/* Now wake CERT - handshake is ready */
 	notify_fw_cmd_ready(mgmtctx);
 
 	mutex_unlock(&mgmtctx->ctx_lock);
 
-	/* Remove job from queue */
 	spin_lock_irqsave(&sched->job_lock, flags);
 	list_del(&job->list);
 	spin_unlock_irqrestore(&sched->job_lock, flags);
@@ -557,10 +551,9 @@ static void ve2_sched_start_context(struct ve2_scheduler *sched, struct ve2_job 
 static bool ve2_sched_switch_context(struct ve2_scheduler *sched, struct ve2_job *job)
 {
 	struct amdxdna_mgmtctx *mgmtctx = sched->mgmtctx;
-	struct amdxdna_dev *xdna = mgmtctx->xdna;
 	unsigned long flags;
 
-	/* CRITICAL: Lock ctx_lock to prevent race with concurrent doorbell/reprogram */
+	/* Lock ctx_lock to prevent race with concurrent doorbell/reprogram */
 	mutex_lock(&mgmtctx->ctx_lock);
 
 	/*
@@ -576,22 +569,14 @@ static bool ve2_sched_switch_context(struct ve2_scheduler *sched, struct ve2_job
 		ve2_read_cert_status(mgmtctx, &status);
 		if (!status.is_idle && !status.queue_not_empty) {
 			mutex_unlock(&mgmtctx->ctx_lock);
-			XDNA_DBG(xdna,
-				 "SCHED: Switch not ready yet (col=%u, %p→%p) raw_cert_idle_status=0x%x",
-				 mgmtctx->start_col, sched->active_ctx, job->hwctx,
-				 status.cert_idle_status);
 			/* Leave job in queue, will retry when CERT halts */
 			return false;
 		}
 	}
 
-	XDNA_DBG(xdna, "SCHED: Switching %p → %p (col=%u)",
-		 sched->active_ctx, job->hwctx, mgmtctx->start_col);
-
 	/* Reprogram handshake for new context - safe, CERT confirmed idle */
 	ve2_mgmt_handshake_init(mgmtctx, job->hwctx);
 
-	/* Clear context switch request flag */
 	ve2_clear_context_switch_req(mgmtctx);
 
 	/*
@@ -604,12 +589,10 @@ static bool ve2_sched_switch_context(struct ve2_scheduler *sched, struct ve2_job
 	sched->ctx_switch_requested = false;
 	mgmtctx->active_ctx = job->hwctx;  /* Legacy compatibility */
 
-	/* Now wake CERT - handshake is ready for new context */
 	notify_fw_cmd_ready(mgmtctx);
 
 	mutex_unlock(&mgmtctx->ctx_lock);
 
-	/* Remove job from queue */
 	spin_lock_irqsave(&sched->job_lock, flags);
 	list_del(&job->list);
 	spin_unlock_irqrestore(&sched->job_lock, flags);
@@ -683,7 +666,6 @@ static void ve2_sched_work_drm(struct work_struct *work)
 {
 	struct ve2_scheduler *sched = container_of(work, struct ve2_scheduler, sched_work);
 	struct amdxdna_mgmtctx *mgmtctx = sched->mgmtctx;
-	struct amdxdna_dev *xdna = mgmtctx->xdna;
 	unsigned int budget = VE2_SCHED_WORK_BUDGET;
 	unsigned long flags;
 
@@ -723,10 +705,6 @@ static void ve2_sched_work_drm(struct work_struct *work)
 
 		ve2_read_cert_status(mgmtctx, &cert_status);
 
-		XDNA_DBG(xdna, "SCHED: col=%u cert_idle=%d queue_not_empty=%d completion=%d",
-			 mgmtctx->start_col, cert_status.is_idle,
-			 cert_status.queue_not_empty, cert_status.completion_done);
-
 		/* Get next job from queue (peek, don't remove yet) */
 		spin_lock_irqsave(&sched->job_lock, flags);
 		job = list_first_entry_or_null(&sched->job_queue, struct ve2_job, list);
@@ -742,25 +720,17 @@ static void ve2_sched_work_drm(struct work_struct *work)
 
 		next_ctx = job->hwctx;
 
-		/* Decision matrix - DRM scheduler pattern */
-
 		if (!sched->active_ctx) {
 			/* Case 1: IDLE → RUNNING (first context on this partition)
 			 * On first use, handshake is uninitialized - program it now.
 			 * No CERT idle check needed: CERT is waiting for handshake init.
 			 */
-			XDNA_DBG(xdna, "SCHED: Starting first context (col=%u, ctx=%p)",
-				 mgmtctx->start_col, next_ctx);
 			ve2_sched_start_context(sched, job);
 			continue;
 		}
 
 		if (sched->active_ctx == next_ctx) {
 			/* Case 2: Same context - just wake CERT (handshake already programmed) */
-			XDNA_DBG(xdna, "SCHED: Same ctx=%p (col=%u), waking CERT",
-				 next_ctx, mgmtctx->start_col);
-
-			/* Wake CERT to process new command in existing context */
 			mutex_lock(&mgmtctx->ctx_lock);
 			notify_fw_cmd_ready(mgmtctx);
 			mutex_unlock(&mgmtctx->ctx_lock);
@@ -786,18 +756,11 @@ static void ve2_sched_work_drm(struct work_struct *work)
 			 * now; it will not come back on its own.
 			 */
 			if (cert_status.is_idle || cert_status.queue_not_empty) {
-				XDNA_DBG(xdna, "SCHED: Switch ready (col=%u, %p→%p)",
-					 mgmtctx->start_col, sched->active_ctx, next_ctx);
 				if (ve2_sched_switch_context(sched, job))
 					continue;
-			} else {
-				XDNA_DBG(xdna, "SCHED: Waiting for switch ack (col=%u, %p→%p)",
-					 mgmtctx->start_col, sched->active_ctx, next_ctx);
 			}
 		} else {
 			/* First job from different context - request switch, don't preempt */
-			XDNA_DBG(xdna, "SCHED: Request switch (col=%u, %p→%p)",
-				 mgmtctx->start_col, sched->active_ctx, next_ctx);
 			mutex_lock(&mgmtctx->ctx_lock);
 			ve2_request_context_switch(mgmtctx);
 			/*
@@ -809,7 +772,6 @@ static void ve2_sched_work_drm(struct work_struct *work)
 			 * next submit or IRQ.
 			 */
 			sched->ctx_switch_requested = true;
-			/* Wake CERT so it can see the switch request! */
 			notify_fw_cmd_ready(mgmtctx);
 			mutex_unlock(&mgmtctx->ctx_lock);
 			/* Leave job in queue - will switch when CERT halts */
@@ -830,22 +792,17 @@ static int ve2_scheduler_init(struct amdxdna_mgmtctx *mgmtctx)
 	struct ve2_scheduler *sched = &mgmtctx->scheduler;
 	char wq_name[32];
 
-	/* Initialize job queue */
 	INIT_LIST_HEAD(&sched->job_queue);
 	spin_lock_init(&sched->job_lock);
 
-	/* Initialize state */
 	sched->active_ctx = NULL;
 	sched->ctx_switch_requested = false;
-
-	/* Back-pointer */
 	sched->mgmtctx = mgmtctx;
 
-	/* Initialize statistics */
 	atomic64_set(&sched->total_jobs, 0);
 	atomic64_set(&sched->total_switches, 0);
 
-	/* Create workqueue - ordered, one per partition */
+	/* Ordered: one workqueue per partition, jobs run in submission order. */
 	snprintf(wq_name, sizeof(wq_name), "ve2_sched_%u", mgmtctx->start_col);
 	sched->wq = alloc_ordered_workqueue(wq_name, WQ_MEM_RECLAIM);
 	if (!sched->wq) {
@@ -854,10 +811,8 @@ static int ve2_scheduler_init(struct amdxdna_mgmtctx *mgmtctx)
 		return -ENOMEM;
 	}
 
-	/* Initialize work */
 	INIT_WORK(&sched->sched_work, ve2_sched_work_drm);
 
-	XDNA_INFO(mgmtctx->xdna, "DRM scheduler initialized (col=%u)", mgmtctx->start_col);
 	return 0;
 }
 
@@ -870,25 +825,16 @@ static void ve2_scheduler_fini(struct amdxdna_mgmtctx *mgmtctx)
 	if (!sched->wq)
 		return;
 
-	/* Cancel pending work */
 	cancel_work_sync(&sched->sched_work);
-
-	/* Destroy workqueue */
 	destroy_workqueue(sched->wq);
 	sched->wq = NULL;
 
-	/* Free any remaining jobs in queue */
 	spin_lock_irqsave(&sched->job_lock, flags);
 	list_for_each_entry_safe(job, tmp, &sched->job_queue, list) {
 		list_del(&job->list);
 		kfree(job);
 	}
 	spin_unlock_irqrestore(&sched->job_lock, flags);
-
-	XDNA_INFO(mgmtctx->xdna, "DRM scheduler finalized (col=%u, jobs=%llu, switches=%llu)",
-		  mgmtctx->start_col,
-		  (unsigned long long)atomic64_read(&sched->total_jobs),
-		  (unsigned long long)atomic64_read(&sched->total_switches));
 }
 
 /*
@@ -983,9 +929,6 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 	list_add_tail(&job->list, &sched->job_queue);
 	spin_unlock_irqrestore(&sched->job_lock, flags);
 
-	XDNA_DBG(xdna, "CMD_SUBMIT: job seq=%llu ctx=%p col=%u",
-		 command_index, hwctx, mgmtctx->start_col);
-
 	queue_work(sched->wq, &sched->sched_work);
 
 	trace_xdna_mgmt_schedule_cmd_done(hwctx->name, hwctx->id, mgmtctx->start_col,
@@ -1028,11 +971,6 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	trace_xdna_irq_exit(active_ctx->name, mgmtctx->partition_id, active_ctx->id,
 			    read_index, write_index);
 
-	XDNA_DBG(mgmtctx->xdna,
-		 "IRQ: col=%u read_idx=%llu raw_cert_idle_status=0x%x cert_idle=%d queue_not_empty=%d completion=%d ctx_switch_req=%d",
-		 mgmtctx->start_col, read_index, cert_status.cert_idle_status, cert_status.is_idle,
-		 cert_status.queue_not_empty, cert_status.completion_done, sched->ctx_switch_requested);
-
 	/*
 	 * Determine WHY CERT interrupted us and set appropriate flags.
 	 *
@@ -1045,22 +983,16 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	 * pending, so both must re-arm the scheduler here.
 	 */
 	if (ve2_check_misc_interrupt(mgmtctx)) {
-		XDNA_DBG(mgmtctx->xdna, "IRQ: MISC interrupt detected (col=%u)",
-			 mgmtctx->start_col);
 		queue_work(sched->wq, &sched->sched_work);
 	} else if (sched->ctx_switch_requested && (cert_status.is_idle || cert_status.queue_not_empty)) {
 		/* CERT responded to our context switch request */
-		XDNA_DBG(mgmtctx->xdna, "IRQ: Context switch ready (col=%u)",
-			 mgmtctx->start_col);
-		/* Trigger scheduler to perform the switch */
 		queue_work(sched->wq, &sched->sched_work);
-	} else if (cert_status.completion_done) {
-		/* Command completion only - CERT still active */
-		XDNA_DBG(mgmtctx->xdna, "IRQ: Completion (col=%u)", mgmtctx->start_col);
-		/* No scheduler trigger needed - CERT will continue processing */
 	}
-	/* If no switch requested and CERT went idle, it just finished work -
-	 * scheduler will be triggered by next command submission */
+	/* Otherwise CERT either just completed a command (still active, no
+	 * scheduler trigger needed) or went idle with no switch requested (it
+	 * just finished work; the scheduler will be triggered by the next
+	 * command submission).
+	 */
 }
 
 /**
