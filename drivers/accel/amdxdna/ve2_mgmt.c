@@ -1504,8 +1504,12 @@ void ve2_mgmt_quiesce_ctx(struct amdxdna_hwctx *hwctx)
  * next context right after clearing active_ctx can hit the Case 1 "first
  * use" path, which skips the idle check and would reprogram the handshake
  * while CERT may still be executing @hwctx.
+ *
+ * Returns false only if @hwctx was the active context and CERT never
+ * confirmed yielding it - the caller must not re-arm the scheduler in that
+ * case, since CERT may still be executing @hwctx.
  */
-static void ve2_mgmt_quiesce_active_ctx(struct amdxdna_mgmtctx *mgmtctx,
+static bool ve2_mgmt_quiesce_active_ctx(struct amdxdna_mgmtctx *mgmtctx,
 					struct amdxdna_hwctx *hwctx)
 {
 	unsigned long deadline;
@@ -1514,7 +1518,7 @@ static void ve2_mgmt_quiesce_active_ctx(struct amdxdna_mgmtctx *mgmtctx,
 	mutex_lock(&mgmtctx->ctx_lock);
 	if (mgmtctx->active_ctx != hwctx) {
 		mutex_unlock(&mgmtctx->ctx_lock);
-		return;
+		return true;
 	}
 	ve2_read_cert_status(mgmtctx, &status);
 	if (!status.is_idle && !status.queue_not_empty) {
@@ -1528,12 +1532,13 @@ static void ve2_mgmt_quiesce_active_ctx(struct amdxdna_mgmtctx *mgmtctx,
 	while (time_before(jiffies, deadline)) {
 		ve2_read_cert_status(mgmtctx, &status);
 		if (status.is_idle || status.queue_not_empty)
-			return;
+			return true;
 		schedule_timeout_uninterruptible(msecs_to_jiffies(1));
 	}
 
 	XDNA_ERR(mgmtctx->xdna, "Timed out waiting for CERT to yield hwctx %u on col %u",
 		 hwctx->id, mgmtctx->start_col);
+	return false;
 }
 
 int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
@@ -1542,6 +1547,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 	bool release_aie_part = false;
 	struct amdxdna_mgmtctx *mgmtctx;
 	struct solver_state *xrs;
+	bool quiesced;
 
 	mgmtctx = vp ? vp->mgmtctx : NULL;
 	if (!mgmtctx) {
@@ -1564,7 +1570,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 	 */
 	ve2_sched_remove_ctx_jobs_sync(&mgmtctx->scheduler, hwctx);
 
-	ve2_mgmt_quiesce_active_ctx(mgmtctx, hwctx);
+	quiesced = ve2_mgmt_quiesce_active_ctx(mgmtctx, hwctx);
 
 	mutex_lock(&mgmtctx->ctx_lock);
 	if (mgmtctx->active_ctx == hwctx) {
@@ -1600,10 +1606,16 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 		ve2_aie_partition_teardown(mgmtctx->aie_dev);
 		ve2_aie_partition_release(mgmtctx->aie_dev);
 		mgmtctx->aie_dev = NULL;
-	} else {
+	} else if (quiesced) {
 		/* Partition still shared; re-arm scheduler for other contexts' queued jobs. */
 		queue_work(mgmtctx->scheduler.wq, &mgmtctx->scheduler.sched_work);
 	}
+	/*
+	 * Else: CERT never confirmed yielding hwctx. Leave the scheduler
+	 * un-armed rather than risk Case 1 reprogramming the handshake while
+	 * CERT may still be executing it; other queued contexts stay pending
+	 * until an unrelated IRQ or submission re-triggers the scheduler.
+	 */
 
 	vp->mgmtctx = NULL;
 

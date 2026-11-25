@@ -465,14 +465,6 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 
 	mgmtctx = vp->mgmtctx;
 
-	flush_work(&mgmtctx->scheduler.sched_work);
-
-	if (mgmtctx->active_ctx != hwctx) {
-		XDNA_ERR(xdna, "Coredump: hwctx %u is not the active context", hwctx->id);
-		ret = -EPERM;
-		goto out;
-	}
-
 	/* Required buffer: num_col * num_rows * tile_size. Reject a wrapped product. */
 	if (check_mul_overflow(hwctx->num_col, mgmtctx->num_rows, &tiles) ||
 	    check_mul_overflow(tiles, (u32)TILE_ADDRESS_SPACE, &rel_size)) {
@@ -494,7 +486,24 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		goto out;
 	}
 
+	flush_work(&mgmtctx->scheduler.sched_work);
+
+	/*
+	 * Hold ctx_lock across the check and the read: a scheduler pass or
+	 * destroy can only change active_ctx under this same lock, so this is
+	 * the only way to guarantee the data read below actually belongs to
+	 * hwctx instead of whatever took over mid-read.
+	 */
+	mutex_lock(&mgmtctx->ctx_lock);
+	if (mgmtctx->active_ctx != hwctx) {
+		mutex_unlock(&mgmtctx->ctx_lock);
+		XDNA_ERR(xdna, "Coredump: hwctx %u is not the active context", hwctx->id);
+		ret = -EPERM;
+		goto out;
+	}
+
 	ret = ve2_aie_coredump(mgmtctx->aie_dev, rel_size, local_buf);
+	mutex_unlock(&mgmtctx->ctx_lock);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "AIE partition coredump failed: %d", ret);
 		goto out;
