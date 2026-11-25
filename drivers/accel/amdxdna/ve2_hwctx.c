@@ -1162,6 +1162,7 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_ctx_priv *vp;
+	int ret;
 
 	if (!priv)
 		return;
@@ -1195,10 +1196,15 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	if (enable_polling && vp)
 		timer_delete_sync(&vp->event_timer);
-	ve2_mgmt_destroy_partition(hwctx);
+	ret = ve2_mgmt_destroy_partition(hwctx);
 	if (vp)
 		cancel_work_sync(&vp->completion_work);
-	ve2_free_hsa_queue(hwctx);
+	if (ret == -EBUSY)
+		XDNA_ERR(hwctx->client->xdna,
+			 "hwctx %u: CERT never yielded, leaking its HSA queue instead of a possible use-after-free",
+			 hwctx->id);
+	else
+		ve2_free_hsa_queue(hwctx);
 
 	if (enable_debug_queue && vp && vp->dbg_queue.dbg_queue_p) {
 		timer_delete_sync(&vp->dbg_q_timer);
@@ -1535,6 +1541,48 @@ static void ve2_completion_work(struct work_struct *work)
 		trace_amdxdna_debug_point(hwctx->name, job->seq, "job complete");
 		trace_xdna_cmd_complete(hwctx->name, hwctx->id, job->seq,
 					amdxdna_cmd_get_state(job->cmd_bo));
+		ve2_hwctx_job_release(hwctx, job);
+		ve2_job_put(job);
+	}
+	mutex_unlock(&queue->hq_lock);
+}
+
+/*
+ * Retire every pending job as TIMEOUT. Unlike ve2_completion_work(), this
+ * doesn't wait for read_index to pass each job's seq - for a context whose
+ * handshake never got programmed (e.g. ve2_mgmt_handshake_init() failed),
+ * read_index can never advance, so a poll-only client (nobody blocked in
+ * ve2_cmd_wait() to self-retire) would otherwise hold the job and its BO
+ * references until the context is destroyed.
+ */
+void ve2_hwctx_fail_pending_jobs(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_hsa_queue *queue;
+	int i;
+
+	if (!vp)
+		return;
+
+	queue = &vp->hsa_queue;
+	if (!queue->hsa_queue_p)
+		return;
+
+	mutex_lock(&queue->hq_lock);
+	for (i = 0; i < HWCTX_MAX_CMDS; i++) {
+		struct amdxdna_sched_job *job;
+
+		mutex_lock(&vp->privctx_lock);
+		job = vp->pending[i];
+		if (job)
+			kref_get(&job->refcnt);
+		mutex_unlock(&vp->privctx_lock);
+
+		if (!job)
+			continue;
+
+		XDNA_ERR(hwctx->client->xdna, "marking pending job seq=%llu TIMEOUT", job->seq);
+		amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 		ve2_hwctx_job_release(hwctx, job);
 		ve2_job_put(job);
 	}

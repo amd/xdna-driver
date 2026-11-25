@@ -134,6 +134,7 @@ int ve2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf
 int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms);
 void ve2_hwctx_queue_completion(struct amdxdna_hwctx *hwctx);
+void ve2_hwctx_fail_pending_jobs(struct amdxdna_hwctx *hwctx);
 
 /* verbosity >= this level enables extra VE2 debug dumps (packets, FW state). */
 #define VERBOSITY_LEVEL_DBG	2

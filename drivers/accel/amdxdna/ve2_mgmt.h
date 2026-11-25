@@ -66,6 +66,13 @@ struct ve2_scheduler {
 struct amdxdna_mgmtctx {
 	struct device			*aie_dev;
 	struct amdxdna_hwctx		*active_ctx;
+	/*
+	 * Set when CERT never confirmed yielding a destroyed context. Until
+	 * cleared by the next real AIE partition (re)request, the scheduler
+	 * must not fast-start a new context without an idle check, and
+	 * nothing may free that context's DMA-visible buffers.
+	 */
+	bool				wedged;
 	struct mutex			ctx_lock;/* protects active_ctx and partition lifecycle */
 	u32				start_col;
 	u32				num_col;
@@ -155,7 +162,12 @@ int ve2_mgmtctx_registry_init(struct amdxdna_dev_hdl *hdl);
 /* Request XRS resources and create the AIE management partition for @hwctx. */
 int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx);
 
-/* Tear down the AIE management partition and release XRS resources. */
+/*
+ * Tear down the AIE management partition and release XRS resources.
+ * Returns -EBUSY if CERT never confirmed yielding hwctx on a partition still
+ * shared by another context - the caller must not free hwctx's DMA-visible
+ * buffers (HSA queue) in that case, since CERT may still be using them.
+ */
 int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx);
 
 /* Drain @hwctx's queued/in-flight scheduler work before freeing its buffers. */

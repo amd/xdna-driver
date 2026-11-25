@@ -671,7 +671,7 @@ static void ve2_sched_handshake_init_failed(struct ve2_scheduler *sched,
 
 	vp->misc_intrpt_flag = true;
 	wake_up_interruptible_all(&vp->waitq);
-	ve2_sched_timeout_pending_jobs(hwctx);
+	ve2_hwctx_fail_pending_jobs(hwctx);
 	ve2_sched_remove_ctx_jobs(sched, hwctx);
 
 	/* Other contexts may be queued behind the one that just failed; nothing
@@ -770,7 +770,7 @@ static void ve2_sched_work_drm(struct work_struct *work)
 	if (!hwctx)
 		return;
 
-	if (!mgmtctx->active_ctx) {
+	if (!mgmtctx->active_ctx && !mgmtctx->wedged) {
 		/* Case 1: IDLE → RUNNING (first context on this partition)
 		 * On first use, handshake is uninitialized - program it now.
 		 * No CERT idle check needed: CERT is waiting for handshake init.
@@ -778,6 +778,13 @@ static void ve2_sched_work_drm(struct work_struct *work)
 		ve2_sched_start_context(sched, hwctx);
 		return;
 	}
+
+	/*
+	 * Wedged: active_ctx is NULL but CERT never confirmed yielding the
+	 * context that used to be active, so the fast path above is not safe.
+	 * Case 3 below handles it instead - it works with active_ctx == NULL
+	 * too, and only reprograms once CERT itself reports idle/queue_not_empty.
+	 */
 
 	if (mgmtctx->active_ctx == hwctx && !sched->ctx_switch_requested) {
 		/* Case 2: Same context - just wake CERT (handshake already programmed)
@@ -1415,6 +1422,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 		mgmtctx->num_col = num_col;
 		mgmtctx->num_rows = xdna_hdl->aie_dev_info.rows;
 		mgmtctx->active_ctx = NULL;
+		mgmtctx->wedged = false;
 		memset(&mgmtctx->async_errs_cache.err, 0,
 		       sizeof(mgmtctx->async_errs_cache.err));
 
@@ -1538,6 +1546,11 @@ static bool ve2_mgmt_quiesce_active_ctx(struct amdxdna_mgmtctx *mgmtctx,
 
 	XDNA_ERR(mgmtctx->xdna, "Timed out waiting for CERT to yield hwctx %u on col %u",
 		 hwctx->id, mgmtctx->start_col);
+
+	mutex_lock(&mgmtctx->ctx_lock);
+	mgmtctx->wedged = true;
+	mutex_unlock(&mgmtctx->ctx_lock);
+
 	return false;
 }
 
@@ -1619,7 +1632,15 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 
 	vp->mgmtctx = NULL;
 
-	return 0;
+	/*
+	 * release_aie_part physically tears down and releases the AIE
+	 * partition regardless of quiesced, which resets CERT at the hardware
+	 * level - safe for the caller to free hwctx's DMA buffers either way.
+	 * Otherwise, if CERT never confirmed yielding, tell the caller not to:
+	 * it may still be executing hwctx on the partition other contexts
+	 * keep sharing.
+	 */
+	return (!release_aie_part && !quiesced) ? -EBUSY : 0;
 }
 
 int notify_fw_cmd_ready(struct amdxdna_mgmtctx *mgmtctx)
