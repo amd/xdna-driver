@@ -67,6 +67,9 @@ public:
   int
   export_drm_bo(uint32_t boh) const;
   
+  // Imports the dma-buf and takes a reference on the returned GEM handle.
+  // The caller owns that reference and must release it with
+  // xdna_edgedev::bo_handle_release() if it does not end up in a live xdna_bo.
   uint32_t
   import_drm_bo(xrt_core::shared_handle::export_handle fd, uint32_t*, size_t*) const;
 public:
@@ -146,6 +149,9 @@ public:
 
   const xrt_core::device *m_core_device;
   std::shared_ptr<xdna_edgedev> m_edev;
+  // Process that acquired m_handle. A forked child inherits the object but not
+  // ownership of the handle, see ~xdna_bo().
+  const pid_t m_owner_pid = getpid();
   void* m_ptr = nullptr;
   size_t m_aligned_size = 0;
   uint64_t m_flags = 0;

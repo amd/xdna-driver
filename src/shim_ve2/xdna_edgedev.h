@@ -28,8 +28,30 @@ namespace shim_xdna_edge {
 
 class xdna_edgedev {
 public:
+  // GEM handles are not reference counted by the kernel.  There is one
+  // handle per object per DRM file, so importing a dma-buf exported from
+  // this same file returns the exporter's existing handle.  Every xdna_bo
+  // holding a handle is therefore an owner, and DRM_IOCTL_GEM_CLOSE must be
+  // issued only when the last owner releases it.
+  //
+  // m_bo_ref_mtx is held across the ioctls that hand out or close a handle,
+  // not only across the map update.  Otherwise a handle can be closed
+  // between PRIME_FD_TO_HANDLE and the reference being taken, or between the
+  // last reference being dropped and GEM_CLOSE running.
+
+  // Take a reference on a handle freshly returned by CREATE_BO.
   void bo_handle_ref_inc(uint32_t hdl);
-  bool bo_handle_ref_dec(uint32_t hdl);
+
+  // Import a dma-buf with DRM_IOCTL_PRIME_FD_TO_HANDLE and take a reference
+  // on the returned handle.  Throws, without taking a reference, if the
+  // ioctl fails.  Release with bo_handle_release().
+  uint32_t bo_handle_import(int fd);
+
+  // Drop a reference.  Issues DRM_IOCTL_GEM_CLOSE when it was the last one.
+  // A handle with no reference held (e.g. a BO inherited across fork()) is
+  // ignored, not closed.  For a handle returned by CREATE_BO that has not been
+  // given a reference yet, call bo_handle_ref_inc() first.
+  void bo_handle_release(uint32_t hdl);
 
   void
   ioctl(unsigned long cmd, void* arg) const;
