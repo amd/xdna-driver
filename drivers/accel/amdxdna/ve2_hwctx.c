@@ -1180,9 +1180,12 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		ve2_get_firmware_status(hwctx);
 
 	/*
-	 * Free the coherent handshake buffer before tearing the partition
-	 * down: aie_dev becomes invalid after the adapter releases it.
+	 * Quiesce the scheduler before freeing the handshake buffer: a
+	 * concurrently running scheduler pass can still be using it via
+	 * ve2_mgmt_handshake_init(). Free it before tearing the partition
+	 * down, while aie_dev is still valid.
 	 */
+	ve2_mgmt_quiesce_ctx(hwctx);
 	if (vp && vp->hs_buf_va && vp->mgmtctx && vp->mgmtctx->aie_dev) {
 		dma_free_coherent(vp->mgmtctx->aie_dev, vp->hs_buf_size,
 				  vp->hs_buf_va, vp->hs_buf_dma);

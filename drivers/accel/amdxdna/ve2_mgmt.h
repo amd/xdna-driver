@@ -158,6 +158,9 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx);
 /* Tear down the AIE management partition and release XRS resources. */
 int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx);
 
+/* Drain @hwctx's queued/in-flight scheduler work before freeing its buffers. */
+void ve2_mgmt_quiesce_ctx(struct amdxdna_hwctx *hwctx);
+
 /* Schedule a command on the host queue commit path. */
 int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 			  u64 command_index);
