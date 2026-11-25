@@ -14,6 +14,7 @@
 #include "hwctx.h"
 #include "speed.h"
 #include "bo.h"
+#include "io.h"
 
 #include "core/common/query_requests.h"
 #include "core/common/sysinfo.h"
@@ -24,6 +25,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -1487,6 +1489,247 @@ TEST_query_frame_boundary_preempt(device::id_type id, std::shared_ptr<device>& s
     throw std::runtime_error("aie4 GET_FRAME_BOUNDARY_PREEMPT_STATE expected enabled");
 }
 
+// Firmware trace categories. A VF may enable only GPU_VIEW.
+constexpr uint32_t fw_trace_cat_gpu_view = 0x800;
+constexpr uint32_t fw_trace_cat_all = 0xffffffff;
+
+// Large enough for the whole 4 MiB trace ring.
+constexpr uint32_t fw_trace_read_size = 4 * 1024 * 1024 + sizeof(amdxdna_dpt_metadata);
+
+// Start (categories != 0) or stop firmware tracing. Returns 0 or errno.
+int
+fw_trace_set(int fd, uint32_t categories)
+{
+  amdxdna_drm_set_dpt_state state = {
+    .action = categories ? 1U : 0U,
+    .config = categories,
+  };
+  amdxdna_drm_set_state arg = {
+    .param = DRM_AMDXDNA_SET_FW_TRACE_STATE,
+    .buffer_size = sizeof(state),
+    .buffer = reinterpret_cast<uintptr_t>(&state),
+  };
+
+  return ioctl(fd, DRM_IOCTL_AMDXDNA_SET_STATE, &arg) ? errno : 0;
+}
+
+// Returns 1 if firmware tracing is on, else 0.
+int
+fw_trace_active(int fd)
+{
+  amdxdna_drm_get_dpt_state state{};
+  amdxdna_drm_get_array arg = {
+    .param = DRM_AMDXDNA_FW_TRACE_CONFIG,
+    .element_size = sizeof(state),
+    .num_element = 1,
+    .buffer = reinterpret_cast<uintptr_t>(&state),
+  };
+
+  return !ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg) && state.status;
+}
+
+// Starts firmware tracing on dev, or on the accel node at path if given, and
+// stops it when the test leaves. Tracing that is already on is left alone.
+struct fw_trace_session {
+  device* dev;
+  std::string path;
+  bool started = false;
+
+  fw_trace_session(device* d, uint32_t categories, std::string p = {})
+    : dev(d), path(std::move(p))
+  {
+    if (call(fw_trace_active))
+      return;
+    int err = call([categories](int fd) { return fw_trace_set(fd, categories); });
+    if (err)
+      throw std::runtime_error("failed to start fw trace: " + std::string(std::strerror(err)));
+    started = true;
+  }
+
+  ~fw_trace_session()
+  {
+    try {
+      if (started)
+        call([](int fd) { return fw_trace_set(fd, 0); });
+    } catch (...) {
+    }
+  }
+
+  fw_trace_session(const fw_trace_session&) = delete;
+  fw_trace_session& operator=(const fw_trace_session&) = delete;
+
+  // Run op in a forked child on an fd of dev, or of the node at path.
+  int
+  call(const std::function<int(int fd)>& op)
+  {
+    const std::string& p = path;
+    return fork_query<int>(dev, [&p, &op](int fd) {
+      if (p.empty())
+        return op(fd);
+      int node_fd = open(p.c_str(), O_RDWR);
+      if (node_fd < 0)
+        return errno;
+      int ret = op(node_fd);
+      close(node_fd);
+      return ret;
+    });
+  }
+};
+
+struct fw_trace_read_result {
+  int err;
+  uint32_t size;
+  uint64_t offset;
+};
+
+// Read the trace from offset, waiting up to secs seconds for new data. A wait
+// that times out reports EINTR.
+fw_trace_read_result
+fw_trace_read(device* dev, uint64_t offset, unsigned int secs)
+{
+  return fork_query<fw_trace_read_result>(dev, [offset, secs](int fd) {
+    std::vector<uint8_t> buf(fw_trace_read_size);
+    auto md = reinterpret_cast<amdxdna_dpt_metadata*>(buf.data() + buf.size() -
+                                                      sizeof(amdxdna_dpt_metadata));
+    md->offset = offset;
+    md->watch = 1;
+
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_FW_TRACE,
+      .element_size = static_cast<uint32_t>(buf.size()),
+      .num_element = 1,
+      .buffer = reinterpret_cast<uintptr_t>(buf.data()),
+    };
+
+    // No SA_RESTART, so the alarm interrupts the waiting ioctl.
+    struct sigaction sa = {};
+    sa.sa_handler = [](int) {};
+    sigaction(SIGALRM, &sa, nullptr);
+    alarm(secs);
+
+    fw_trace_read_result r{};
+    r.err = ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg) ? errno : 0;
+    alarm(0);
+    r.size = md->size;
+    r.offset = md->offset;
+    return r;
+  });
+}
+
+// Wait for trace data past offset and return the offset after it.
+uint64_t
+fw_trace_expect_data(device* dev, uint64_t offset)
+{
+  auto r = fw_trace_read(dev, offset, 10);
+
+  if (r.err == EINTR || (!r.err && !r.size))
+    throw std::runtime_error("no fw trace data within 10 seconds");
+  if (r.err)
+    throw std::runtime_error("fw trace read failed: " + std::string(std::strerror(r.err)));
+  return r.offset;
+}
+
+// Keeps the PF of a VF awake while held. A PF suspend restarts firmware,
+// which hides a VF trace that was not stopped. Does nothing in a VM.
+struct pf_runtime_hold {
+  std::string path;
+  std::string saved;
+
+  explicit pf_runtime_hold(device* dev)
+  {
+    const auto sysfs = resolve_device_sysfs(dev);
+    if (!sysfs)
+      return;
+    const std::string p = *sysfs + "/physfn/power/control";
+    std::ifstream in(p);
+    if (!std::getline(in, saved))
+      return;
+    std::ofstream out(p);
+    if (out << "on" << std::flush)
+      path = p;
+  }
+
+  ~pf_runtime_hold()
+  {
+    if (!path.empty())
+      std::ofstream(path) << saved;
+  }
+
+  pf_runtime_hold(const pf_runtime_hold&) = delete;
+  pf_runtime_hold& operator=(const pf_runtime_hold&) = delete;
+};
+
+// Accel node of the PF of a VF, or empty in a VM.
+std::string
+pf_accel_node(device* dev)
+{
+  const auto sysfs = resolve_device_sysfs(dev);
+  if (!sysfs)
+    return {};
+  std::error_code ec;
+  for (const auto& e : std::filesystem::directory_iterator(*sysfs + "/physfn/accel", ec))
+    return "/dev/accel/" + e.path().filename().string();
+  return {};
+}
+
+// Firmware lets a VF trace only while the PF traces. arg[0] != 0: also
+// suspend the VF while tracing and expect new data after resume.
+void
+TEST_fw_trace_vf(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  std::optional<fw_trace_session> pf_trace;
+  auto pf_node = pf_accel_node(dev);
+  if (!pf_node.empty())
+    pf_trace.emplace(dev, fw_trace_cat_all, pf_node);
+
+  auto try_start = [dev](uint32_t categories) {
+    return fork_query<int>(dev, [categories](int fd) {
+      int ret = fw_trace_set(fd, categories);
+      if (!ret)
+        fw_trace_set(fd, 0);
+      return ret;
+    });
+  };
+
+  // Firmware without VF trace support rejects every VF start, as does one
+  // whose PF is not tracing.
+  int err = try_start(fw_trace_cat_gpu_view);
+  if (err == EINVAL) {
+    std::cout << "firmware lacks VF trace support or PF tracing is off, accepting as pass"
+              << std::endl;
+    return;
+  }
+  if (err)
+    throw std::runtime_error("failed to start fw trace: " + std::string(std::strerror(err)));
+
+  err = try_start(fw_trace_cat_all);
+  if (err != EINVAL)
+    throw std::runtime_error("VF fw trace with all categories should fail EINVAL, got "
+                             + std::to_string(err));
+
+  fw_trace_session trace{dev, fw_trace_cat_gpu_view};
+  auto boset = create_bo_set_for_device(dev);
+
+  boset->run();
+  uint64_t offset = fw_trace_expect_data(dev, 0);
+
+  if (!arg[0])
+    return;
+
+  pf_runtime_hold pf_hold{dev};
+  require_runtime_suspend(dev);
+  // Take the data left from before the suspend, so only new data passes the
+  // last check. This read also resumes the VF.
+  auto r = fw_trace_read(dev, offset, 1);
+  if (r.err && r.err != EINTR)
+    throw std::runtime_error("fw trace read failed: " + std::string(std::strerror(r.err)));
+  if (!r.err)
+    offset = r.offset;
+  boset->run();
+  fw_trace_expect_data(dev, offset);
+}
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "get_xrt_info", {},
@@ -1718,6 +1961,12 @@ std::vector<test_case> test_list {
   },
   test_case{ "destroy a hw context while the device is auto-suspended", {},
     TEST_POSITIVE, {npu3}, {amdxdna}, TEST_ctx_destroy_while_suspended, {}
+  },
+  test_case{ "fw trace on VF", {},
+    TEST_POSITIVE, {npu3vf}, {amdxdna}, TEST_fw_trace_vf, { 0 }
+  },
+  test_case{ "fw trace on VF resumes after auto-suspend", {},
+    TEST_POSITIVE, {npu3vf}, {amdxdna}, TEST_fw_trace_vf, { 1 }
   },
   test_case{ "io test timeout run for context health report", {},
     TEST_POSITIVE, {npu4, npu3, npu3vf, npu12}, {}, TEST_io_timeout, {}
