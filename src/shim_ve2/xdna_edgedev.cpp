@@ -400,18 +400,41 @@ void xdna_edgedev::bo_handle_ref_inc(uint32_t hdl)
   m_bo_refcnt[hdl]++;          // insert or increment
 }
 
-bool xdna_edgedev::bo_handle_ref_dec(uint32_t hdl)
+uint32_t xdna_edgedev::bo_handle_import(int fd)
 {
-  if (!hdl) return true;
+  drm_prime_handle imp_bo = {AMDXDNA_INVALID_BO_HANDLE, 0, fd};
+
+  std::lock_guard<std::mutex> lk(m_bo_ref_mtx);
+  ioctl(DRM_IOCTL_PRIME_FD_TO_HANDLE, &imp_bo);
+  m_bo_refcnt[imp_bo.handle]++;
+  return imp_bo.handle;
+}
+
+void xdna_edgedev::bo_handle_release(uint32_t hdl)
+{
+  if (!hdl) return;
+
+  // Held across GEM_CLOSE so a concurrent import cannot be handed this
+  // handle after the last reference is gone but before it is closed.
   std::lock_guard<std::mutex> lk(m_bo_ref_mtx);
   auto it = m_bo_refcnt.find(hdl);
-  if (it == m_bo_refcnt.end())
-    return true;
-  if (--it->second == 0) {
-    m_bo_refcnt.erase(it);
-    return true;
+  if (it == m_bo_refcnt.end()) {
+    // Every xdna_bo takes a reference when it acquires a handle, so there is
+    // no entry only if the map was cleared under it, i.e. after the fork()
+    // reset in open().  ~xdna_bo() already refuses to release a BO inherited
+    // from another process; this is the backstop, and cannot tell an
+    // inherited handle from one the child was later given with the same
+    // number.
+    shim_debug("bo_handle_release: no reference held for handle %u, not closing", hdl);
+    return;
   }
-  return false;
+
+  if (--it->second > 0)
+    return;
+  m_bo_refcnt.erase(it);
+
+  drm_gem_close close_bo{ hdl, 0 };
+  ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
 }
 } // namespace shim_xdna_edge
 

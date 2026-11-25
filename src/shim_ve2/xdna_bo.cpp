@@ -14,6 +14,26 @@ namespace shim_xdna_edge {
 // restricted DDR access, so round small sizes up to this.
 static constexpr size_t MIN_BO_SIZE = 8 * 1024;
 
+// Runs fn(); if it throws, gives back the reference on 'hdl' (closing the GEM
+// handle if it was the last one) and rethrows.  Used by xdna_bo constructors,
+// whose destructor does not run when they throw, so a handle acquired before
+// the throw would otherwise be leaked.  A failing release must not mask the
+// original error.
+template <typename Fn>
+static void
+release_on_failure(const std::shared_ptr<xdna_edgedev>& edev, uint32_t hdl, Fn&& fn)
+{
+  try {
+    fn();
+  } catch (...) {
+    try {
+      edev->bo_handle_release(hdl);
+    } catch (...) {
+    }
+    throw;
+  }
+}
+
 static void
 init_metadata_buffer(xdna_bo& mdata_base_bo,
 		     uint32_t boh,
@@ -35,8 +55,10 @@ init_metadata_buffer(xdna_bo& mdata_base_bo,
   if (flag == XRT_BO_USE_LOG)
     mdata->buf_type = AMDXDNA_FW_BUF_LOG;
 
+  // The driver walks min(hwctx columns, num_ucs) columns for both attach and
+  // detach, so num_ucs must be set for detach too or nothing is cleared.
+  mdata->num_ucs = total_cols;
   if (attach) {
-    mdata->num_ucs = total_cols;
     mdata->bo_handle = boh;
     for (const auto& pair : buf_sizes) {
       mdata->uc_info[pair.first].index = pair.first;
@@ -134,20 +156,41 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
   , m_owner_ctx_id(ctx_id)
   , m_map_offset(0)
 {
-  alloc_bo(mem_bitmap);
-  m_edev->bo_handle_ref_inc(m_handle);
-  xcl_bo_flags xflags{ m_flags };
-  if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
-      xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
-    attach_to_ctx(xflags.use);
+  alloc_bo(mem_bitmap);  // takes the reference on m_handle
+  // The handle and its reference are owned by this object from here on, but
+  // the destructor does not run if the rest of the constructor throws.  Give
+  // them back on failure so the handle is not leaked.
+  release_on_failure(m_edev, m_handle, [&] {
+    xcl_bo_flags xflags{ m_flags };
+    bool attach_attempted = false;
+    try {
+      if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
+          xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG) {
+        // Set before the call: the driver configures columns one at a time
+        // and stops at the first failure, so a failed attach can still have
+        // left some columns pointing at this BO.
+        attach_attempted = true;
+        attach_to_ctx(xflags.use);
+      }
 
-  // Freshly allocated pages may carry stale dirty cache lines. If this BO is
-  // used as an output, those lines could later write back over the device's
-  // DMA results and corrupt them. Flush once right after allocation so the
-  // BO starts clean; subsequent coherency is the app's responsibility via
-  // explicit sync().
-  if (m_type == AMDXDNA_BO_SHARE)
-    sync(direction::host2device, m_aligned_size, 0);
+      // Freshly allocated pages may carry stale dirty cache lines. If this BO is
+      // used as an output, those lines could later write back over the device's
+      // DMA results and corrupt them. Flush once right after allocation so the
+      // BO starts clean; subsequent coherency is the app's responsibility via
+      // explicit sync().
+      if (m_type == AMDXDNA_BO_SHARE)
+        sync(direction::host2device, m_aligned_size, 0);
+    } catch (...) {
+      // Do not leave the context pointing at a BO that is about to be closed.
+      if (attach_attempted) {
+        try {
+          detach_from_ctx(xflags.use);
+        } catch (...) {
+        }
+      }
+      throw;
+    }
+  });
 
   shim_debug("Allocated DRM BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
 	     m_ptr, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
@@ -172,8 +215,7 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
   tbl->va_entries[0].vaddr = reinterpret_cast<uintptr_t>(m_uptr);
   tbl->va_entries[0].len = m_aligned_size;
 
-  alloc_userptr_bo(buf);
-  m_edev->bo_handle_ref_inc(m_handle);
+  alloc_userptr_bo(buf);  // takes the reference on m_handle
 
   shim_debug("Allocated DRM BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
 	     m_ptr, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
@@ -184,9 +226,10 @@ xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl)
   : m_core_device(&device)
   , m_edev(device.get_edev())
 {
+  // import_drm_bo() takes a reference on the handle under the same lock as
+  // PRIME_FD_TO_HANDLE.
   uint32_t boh = import_drm_bo(ehdl, &m_type, &m_aligned_size);
-  m_edev->bo_handle_ref_inc(boh);
-  get_drm_bo_info(boh);
+  release_on_failure(m_edev, boh, [&] { get_drm_bo_info(boh); });
 
   // The exporting device's bank numbering means nothing on this device, and
   // there is no requested bank on an import. Report the region the driver
@@ -199,20 +242,34 @@ xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl)
 xdna_bo::
 ~xdna_bo()
 {
-  if (m_handle == 1)
-	return;
+  // A BO inherited across fork() belongs to the parent: its handle lives in the
+  // parent's DRM file, which the child may still share (same open file) or may
+  // have replaced with its own, where the same number can mean another BO.
+  // Either way detaching or closing it here would hit the wrong object.
+  if (m_owner_pid != getpid()) {
+    shim_debug("Not releasing drm_bo %u inherited from pid %d (now pid %d)",
+               m_handle, m_owner_pid, getpid());
+    return;
+  }
 
-  xcl_bo_flags xflags{ m_flags };
-  if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
-      xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
-    detach_from_ctx(xflags.use);
+  // A destructor must not throw: a failing detach or close would terminate
+  // the process.  Log and carry on.
+  try {
+    xcl_bo_flags xflags{ m_flags };
+    if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
+        xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
+      detach_from_ctx(xflags.use);
+  } catch (const std::exception& e) {
+    shim_debug("Failed to detach drm_bo %u from ctx: %s", m_handle, e.what());
+  } catch (...) {
+  }
 
-  if (m_handle) {
-    bool last = m_edev->bo_handle_ref_dec(m_handle);
-    if (last) {
-      drm_gem_close close_bo{ m_handle, 0 };
-      m_edev->ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
-    }
+  try {
+    if (m_handle)
+      m_edev->bo_handle_release(m_handle);
+  } catch (const std::exception& e) {
+    shim_debug("Failed to release drm_bo %u: %s", m_handle, e.what());
+  } catch (...) {
   }
 }
 
@@ -264,7 +321,11 @@ alloc_userptr_bo(void *buf)
     }
   }
 
-  get_drm_bo_info(cbo.handle);
+  // The handle exists in the kernel now.  Take the reference that the caller
+  // (this xdna_bo) owns; if the info query fails nothing else owns it, so
+  // release it, closing the handle, rather than leaking it.
+  m_edev->bo_handle_ref_inc(cbo.handle);
+  release_on_failure(m_edev, cbo.handle, [&] { get_drm_bo_info(cbo.handle); });
 }
 
 void
@@ -318,8 +379,11 @@ alloc_bo(uint32_t mem_bitmap)
     }
   }
 
-  // Cache the BO info here
-  get_drm_bo_info(cbo.handle);
+  // Cache the BO info here.  The handle exists in the kernel now.  Take the
+  // reference that this xdna_bo owns; if the query fails nothing else owns
+  // it, so release it, closing the handle, rather than leaking it.
+  m_edev->bo_handle_ref_inc(cbo.handle);
+  release_on_failure(m_edev, cbo.handle, [&] { get_drm_bo_info(cbo.handle); });
 #if 0
   uint32_t boh = alloc_drm_bo(m_pdev, m_type, NULL, m_aligned_size);
 
@@ -519,10 +583,21 @@ detach_from_ctx(uint32_t flag)
     return;
 
   auto boh = get_drm_bo_handle();
-  auto mdata_size = sizeof(struct amdxdna_fw_buffer_metadata);
+  uint32_t total_cols = get_total_cols(m_core_device, m_owner_ctx_id);
+  if (total_cols == 0) {
+    // The context no longer exists, and the driver freed its per-column
+    // buffer configuration with it. Nothing left to detach.
+    shim_debug("Skipping detach of drm_bo %d: no partition info for ctx %d",
+               boh, m_owner_ctx_id);
+    return;
+  }
+
+  // The driver rejects metadata smaller than one entry per hwctx column, and
+  // only clears the columns listed in it, so size and fill it for all columns.
+  auto mdata_size = sizeof(struct amdxdna_fw_buffer_metadata) + total_cols * sizeof(struct amdxdna_uc_info_entry);
   auto xdev = static_cast<const device_xdna*>(m_core_device);
   xdna_bo mdata_bo = xdna_bo(*xdev, m_owner_ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_SHARE);
-  init_metadata_buffer(mdata_bo, 0, 0, flag, std::map<uint32_t, size_t>{}, false);
+  init_metadata_buffer(mdata_bo, 0, total_cols, flag, std::map<uint32_t, size_t>{}, false);
   shim_debug("Detaching drm_bo %d from ctx: %d", boh, m_owner_ctx_id);
   config_drm_bo(m_edev, m_owner_ctx_id, mdata_bo.get_drm_bo_handle(), mdata_size, false);
 }
@@ -601,13 +676,19 @@ uint32_t
 xdna_bo::
 import_drm_bo(xrt_core::shared_handle::export_handle fd, uint32_t *type, size_t *size) const
 {
-  drm_prime_handle imp_bo = {AMDXDNA_INVALID_BO_HANDLE, 0, fd};
-  m_edev->ioctl(DRM_IOCTL_PRIME_FD_TO_HANDLE, &imp_bo);
+  // Query the size first: it needs no handle, and failing here leaves no
+  // reference to give back.
+  off_t sz = lseek(fd, 0, SEEK_END);
+  if (sz < 0 || lseek(fd, 0, SEEK_SET) < 0) {
+    int saved_errno = errno;
+    shim_err(saved_errno, "Failed to get size of dma-buf fd %d: %s",
+             fd, errno_to_str(saved_errno));
+  }
   *type = AMDXDNA_BO_SHARE;
-  *size = lseek(fd, 0, SEEK_END);
-  lseek(fd, 0, SEEK_SET);
+  *size = static_cast<size_t>(sz);
 
-  return imp_bo.handle;
+  // Takes a reference on the returned handle, see bo_handle_import().
+  return m_edev->bo_handle_import(fd);
 }
 
 } // namespace shim_xdna
