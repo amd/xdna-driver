@@ -745,8 +745,20 @@ static struct amdxdna_hwctx *ve2_sched_reconcile_head(struct ve2_scheduler *sche
 			list_del(&job->list);
 			kfree(job);
 			atomic64_inc(&sched->total_jobs);
+		} else {
+			job = NULL;
 		}
 		spin_unlock_irqrestore(&sched->job_lock, flags);
+
+		/*
+		 * CERT can complete a command before ve2_hwctx_add_job() ever
+		 * runs (the HSA packet goes live first), so the IRQ that
+		 * confirmed it found nothing in vp->pending[] yet and skipped
+		 * queuing the completion worker. Nudge it now that the job
+		 * is visible there, or a poll-only client could wait forever.
+		 */
+		if (job)
+			ve2_hwctx_queue_completion(hwctx);
 	}
 }
 
@@ -1538,8 +1550,25 @@ static bool ve2_mgmt_quiesce_active_ctx(struct amdxdna_mgmtctx *mgmtctx,
 
 	deadline = jiffies + msecs_to_jiffies(VE2_QUIESCE_TIMEOUT_MS);
 	while (time_before(jiffies, deadline)) {
+		bool done;
+
+		mutex_lock(&mgmtctx->ctx_lock);
+		/*
+		 * Once the scheduler has already switched to another sharer,
+		 * cert_status reflects that sharer's activity, not whether
+		 * hwctx was yielded - polling it further would eventually
+		 * misreport a timeout even though hwctx was safely switched
+		 * away from.
+		 */
+		if (mgmtctx->active_ctx != hwctx) {
+			mutex_unlock(&mgmtctx->ctx_lock);
+			return true;
+		}
 		ve2_read_cert_status(mgmtctx, &status);
-		if (status.is_idle || status.queue_not_empty)
+		done = status.is_idle || status.queue_not_empty;
+		mutex_unlock(&mgmtctx->ctx_lock);
+
+		if (done)
 			return true;
 		schedule_timeout_uninterruptible(msecs_to_jiffies(1));
 	}
