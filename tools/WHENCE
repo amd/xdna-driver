@@ -6,73 +6,73 @@
 # reproducible; tools/sync_from_whence.py reads "# whence-commit:" and downloads
 # every versioned file from that commit.
 # whence-ref: amd-ipu-staging
-# whence-commit: 188fc744f208a1e430929870d2a70b5fe3f7127f
+# whence-commit: f69e79911b36a67d2da5bd6272e5a0100fdefb7c
 
 Driver: amdxdna - AMD Inference processor
 
 File: amdnpu/1502_00/1.5_npu.sbin.1.5.5.391
 File: amdnpu/17f0_10/1.7_npu.sbin.1.1.2.64
 File: amdnpu/17f0_11/1.7_npu.sbin.1.1.2.65
-File: amdnpu/17f1_10/2.0_npu.sbin.2.24.2.238
+File: amdnpu/17f1_10/2.0_npu.sbin.2.24.3.248
 File: amdnpu/17f1_10/2.0_cert.sbin.1.12.1.53
-File: amdnpu/17f1_10/2.0_npu.rsa.sbin.2.24.2.238
+File: amdnpu/17f1_10/2.0_npu.rsa.sbin.2.24.3.248
 File: amdnpu/17f1_10/2.0_cert.rsa.sbin.1.12.1.53
-File: amdnpu/17f1_10/2.0_npu.mbin.2.24.2.238
+File: amdnpu/17f1_10/2.0_npu.mbin.2.24.3.248
 File: amdnpu/17f1_10/2.0_cert.lms.sbin.1.12.1.53
-File: amdnpu/17f1_13/2.0_npu.sbin.2.24.2.238
-File: amdnpu/17f1_13/2.0_npu.rsa.sbin.2.24.2.238
-File: amdnpu/17f1_13/2.0_npu.mbin.2.24.2.238
-File: amdnpu/17f1_14/2.0_npu.sbin.2.24.2.239
+File: amdnpu/17f1_13/2.0_npu.sbin.2.24.3.248
+File: amdnpu/17f1_13/2.0_npu.rsa.sbin.2.24.3.248
+File: amdnpu/17f1_13/2.0_npu.mbin.2.24.3.248
+File: amdnpu/17f1_14/2.0_npu.sbin.2.24.3.248
 File: amdnpu/17f1_14/2.0_cert.sbin.1.12.1.53
-File: amdnpu/17f1_14/2.0_npu.rsa.sbin.2.24.2.239
+File: amdnpu/17f1_14/2.0_npu.rsa.sbin.2.24.3.248
 File: amdnpu/17f1_14/2.0_cert.rsa.sbin.1.12.1.53
 Link: amdnpu/1502_00/npu.dev.sbin -> 1.5_npu.sbin.1.5.5.391
 Link: amdnpu/17f0_10/npu.dev.sbin -> 1.7_npu.sbin.1.1.2.64
 Link: amdnpu/17f0_11/npu.dev.sbin -> 1.7_npu.sbin.1.1.2.65
 Link: amdnpu/17f0_20/npu.dev.sbin -> ../17f0_10/1.7_npu.sbin.1.1.2.64
-Link: amdnpu/17f1_10/npu.dev.sbin -> 2.0_npu.sbin.2.24.2.238
+Link: amdnpu/17f1_10/npu.dev.sbin -> 2.0_npu.sbin.2.24.3.248
 Link: amdnpu/17f1_10/cert.dev.sbin -> 2.0_cert.sbin.1.12.1.53
-Link: amdnpu/17f1_13/npu.dev.sbin -> 2.0_npu.sbin.2.24.2.238
+Link: amdnpu/17f1_13/npu.dev.sbin -> 2.0_npu.sbin.2.24.3.248
 Link: amdnpu/17f1_13/cert.dev.sbin -> ../17f1_10/2.0_cert.sbin.1.12.1.53
-Link: amdnpu/17f1_14/npu.dev.sbin -> 2.0_npu.sbin.2.24.2.239
+Link: amdnpu/17f1_14/npu.dev.sbin -> 2.0_npu.sbin.2.24.3.248
 Link: amdnpu/17f1_14/cert.dev.sbin -> 2.0_cert.sbin.1.12.1.53
-Link: amdnpu/17f1_15/npu.dev.sbin -> ../17f1_13/2.0_npu.sbin.2.24.2.238
+Link: amdnpu/17f1_15/npu.dev.sbin -> ../17f1_13/2.0_npu.sbin.2.24.3.248
 Link: amdnpu/17f1_15/cert.dev.sbin -> ../17f1_10/2.0_cert.sbin.1.12.1.53
-Link: amdnpu/17f2_10/npu.dev.sbin -> ../17f1_10/2.0_npu.sbin.2.24.2.238
+Link: amdnpu/17f2_10/npu.dev.sbin -> ../17f1_10/2.0_npu.sbin.2.24.3.248
 Link: amdnpu/17f2_10/cert.dev.sbin -> ../17f1_10/2.0_cert.sbin.1.12.1.53
-Link: amdnpu/17f2_13/npu.dev.sbin -> ../17f1_13/2.0_npu.sbin.2.24.2.238
+Link: amdnpu/17f2_13/npu.dev.sbin -> ../17f1_13/2.0_npu.sbin.2.24.3.248
 Link: amdnpu/17f2_13/cert.dev.sbin -> ../17f1_10/2.0_cert.sbin.1.12.1.53
-Link: amdnpu/17f2_14/npu.dev.sbin -> ../17f1_14/2.0_npu.sbin.2.24.2.239
+Link: amdnpu/17f2_14/npu.dev.sbin -> ../17f1_14/2.0_npu.sbin.2.24.3.248
 Link: amdnpu/17f2_14/cert.dev.sbin -> ../17f1_14/2.0_cert.sbin.1.12.1.53
-Link: amdnpu/17f2_15/npu.dev.sbin -> ../17f1_13/2.0_npu.sbin.2.24.2.238
+Link: amdnpu/17f2_15/npu.dev.sbin -> ../17f1_13/2.0_npu.sbin.2.24.3.248
 Link: amdnpu/17f2_15/cert.dev.sbin -> ../17f1_10/2.0_cert.sbin.1.12.1.53
-Link: amdnpu/17f1_10/npu.rsa.sbin -> 2.0_npu.rsa.sbin.2.24.2.238
+Link: amdnpu/17f1_10/npu.rsa.sbin -> 2.0_npu.rsa.sbin.2.24.3.248
 Link: amdnpu/17f1_10/cert.rsa.sbin -> 2.0_cert.rsa.sbin.1.12.1.53
-Link: amdnpu/17f1_10/npu.lms.sbin -> 2.0_npu.mbin.2.24.2.238
+Link: amdnpu/17f1_10/npu.lms.sbin -> 2.0_npu.mbin.2.24.3.248
 Link: amdnpu/17f1_10/cert.lms.sbin -> 2.0_cert.lms.sbin.1.12.1.53
-Link: amdnpu/17f1_13/npu.rsa.sbin -> 2.0_npu.rsa.sbin.2.24.2.238
+Link: amdnpu/17f1_13/npu.rsa.sbin -> 2.0_npu.rsa.sbin.2.24.3.248
 Link: amdnpu/17f1_13/cert.rsa.sbin -> ../17f1_10/2.0_cert.rsa.sbin.1.12.1.53
-Link: amdnpu/17f1_13/npu.lms.sbin -> 2.0_npu.mbin.2.24.2.238
+Link: amdnpu/17f1_13/npu.lms.sbin -> 2.0_npu.mbin.2.24.3.248
 Link: amdnpu/17f1_13/cert.lms.sbin -> ../17f1_10/2.0_cert.lms.sbin.1.12.1.53
-Link: amdnpu/17f1_14/npu.rsa.sbin -> 2.0_npu.rsa.sbin.2.24.2.239
+Link: amdnpu/17f1_14/npu.rsa.sbin -> 2.0_npu.rsa.sbin.2.24.3.248
 Link: amdnpu/17f1_14/cert.rsa.sbin -> 2.0_cert.rsa.sbin.1.12.1.53
-Link: amdnpu/17f1_15/npu.rsa.sbin -> ../17f1_13/2.0_npu.rsa.sbin.2.24.2.238
+Link: amdnpu/17f1_15/npu.rsa.sbin -> ../17f1_13/2.0_npu.rsa.sbin.2.24.3.248
 Link: amdnpu/17f1_15/cert.rsa.sbin -> ../17f1_10/2.0_cert.rsa.sbin.1.12.1.53
-Link: amdnpu/17f1_15/npu.lms.sbin -> ../17f1_13/2.0_npu.mbin.2.24.2.238
+Link: amdnpu/17f1_15/npu.lms.sbin -> ../17f1_13/2.0_npu.mbin.2.24.3.248
 Link: amdnpu/17f1_15/cert.lms.sbin -> ../17f1_10/2.0_cert.lms.sbin.1.12.1.53
-Link: amdnpu/17f2_10/npu.rsa.sbin -> ../17f1_10/2.0_npu.rsa.sbin.2.24.2.238
+Link: amdnpu/17f2_10/npu.rsa.sbin -> ../17f1_10/2.0_npu.rsa.sbin.2.24.3.248
 Link: amdnpu/17f2_10/cert.rsa.sbin -> ../17f1_10/2.0_cert.rsa.sbin.1.12.1.53
-Link: amdnpu/17f2_10/npu.lms.sbin -> ../17f1_10/2.0_npu.mbin.2.24.2.238
+Link: amdnpu/17f2_10/npu.lms.sbin -> ../17f1_10/2.0_npu.mbin.2.24.3.248
 Link: amdnpu/17f2_10/cert.lms.sbin -> ../17f1_10/2.0_cert.lms.sbin.1.12.1.53
-Link: amdnpu/17f2_13/npu.rsa.sbin -> ../17f1_13/2.0_npu.rsa.sbin.2.24.2.238
+Link: amdnpu/17f2_13/npu.rsa.sbin -> ../17f1_13/2.0_npu.rsa.sbin.2.24.3.248
 Link: amdnpu/17f2_13/cert.rsa.sbin -> ../17f1_10/2.0_cert.rsa.sbin.1.12.1.53
-Link: amdnpu/17f2_13/npu.lms.sbin -> ../17f1_13/2.0_npu.mbin.2.24.2.238
+Link: amdnpu/17f2_13/npu.lms.sbin -> ../17f1_13/2.0_npu.mbin.2.24.3.248
 Link: amdnpu/17f2_13/cert.lms.sbin -> ../17f1_10/2.0_cert.lms.sbin.1.12.1.53
-Link: amdnpu/17f2_14/npu.rsa.sbin -> ../17f1_14/2.0_npu.rsa.sbin.2.24.2.239
+Link: amdnpu/17f2_14/npu.rsa.sbin -> ../17f1_14/2.0_npu.rsa.sbin.2.24.3.248
 Link: amdnpu/17f2_14/cert.rsa.sbin -> ../17f1_14/2.0_cert.rsa.sbin.1.12.1.53
-Link: amdnpu/17f2_15/npu.rsa.sbin -> ../17f1_13/2.0_npu.rsa.sbin.2.24.2.238
+Link: amdnpu/17f2_15/npu.rsa.sbin -> ../17f1_13/2.0_npu.rsa.sbin.2.24.3.248
 Link: amdnpu/17f2_15/cert.rsa.sbin -> ../17f1_10/2.0_cert.rsa.sbin.1.12.1.53
-Link: amdnpu/17f2_15/npu.lms.sbin -> ../17f1_13/2.0_npu.mbin.2.24.2.238
+Link: amdnpu/17f2_15/npu.lms.sbin -> ../17f1_13/2.0_npu.mbin.2.24.3.248
 Link: amdnpu/17f2_15/cert.lms.sbin -> ../17f1_10/2.0_cert.lms.sbin.1.12.1.53
 
 Licence: Redistributable. See LICENSE.amdnpu for details.
