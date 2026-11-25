@@ -1047,6 +1047,7 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	init_waitqueue_head(&priv->job_free_wq);
 	mutex_init(&vp->privctx_lock);
+	mutex_init(&vp->submit_lock);
 	mutex_init(&vp->coredump_cache.lock);
 	init_waitqueue_head(&vp->waitq);
 	INIT_WORK(&vp->completion_work, ve2_completion_work);
@@ -1148,6 +1149,7 @@ destroy_partition:
 	ve2_mgmt_destroy_partition(hwctx);
 free_priv:
 	mutex_destroy(&vp->coredump_cache.lock);
+	mutex_destroy(&vp->submit_lock);
 	mutex_destroy(&vp->privctx_lock);
 	kfree(vp);
 	kfree(priv);
@@ -1210,6 +1212,7 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		vp->hwctx_config = NULL;
 		vfree(vp->coredump_cache.buf);
 		mutex_destroy(&vp->coredump_cache.lock);
+		mutex_destroy(&vp->submit_lock);
 		mutex_destroy(&vp->privctx_lock);
 		kfree(vp);
 		priv->hw_priv = NULL;
@@ -1323,13 +1326,17 @@ int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u
 
 	trace_xdna_cmd_submit_start(hwctx->name, hwctx->id, hwctx->start_col);
 
+	/* Serialize per hwctx so concurrent chains can't interleave into one host queue. */
+	mutex_lock(&vp->submit_lock);
 	if (op == ERT_CMD_CHAIN)
 		ret = ve2_submit_cmd_chain(hwctx, job, seq);
 	else
 		ret = ve2_submit_cmd_single(hwctx, job, seq);
+	mutex_unlock(&vp->submit_lock);
 	if (ret) {
+		/* Queue full after retrying; -EBUSY is a real errno, -ERESTARTSYS is not. */
 		if (ret == -EAGAIN)
-			return -ERESTARTSYS;
+			return -EBUSY;
 		return ret;
 	}
 

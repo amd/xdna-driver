@@ -74,6 +74,7 @@ struct ve2_coredump_cache {
 struct amdxdna_ctx_priv {
 	struct amdxdna_hwctx		*hwctx;
 	struct mutex			privctx_lock;	/* protect VE2 hwctx state */
+	struct mutex			submit_lock;	/* serialize ve2_cmd_submit() per hwctx */
 	u32				state;
 	u32				submitted;
 	u32				completed;
