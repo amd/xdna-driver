@@ -19,6 +19,7 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
+#include <linux/workqueue.h>
 
 #include "drm/amdxdna_accel.h"
 
@@ -463,6 +464,8 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	}
 
 	mgmtctx = vp->mgmtctx;
+
+	flush_work(&mgmtctx->scheduler.sched_work);
 
 	if (mgmtctx->active_ctx != hwctx) {
 		XDNA_ERR(xdna, "Coredump: hwctx %u is not the active context", hwctx->id);
