@@ -40,7 +40,6 @@ struct ve2_job {
 	struct list_head		list;
 	struct amdxdna_hwctx		*hwctx;
 	u64				seq;
-	ktime_t				submit_ts;
 };
 
 /* Per-partition scheduler - DRM-inspired design */
@@ -49,8 +48,6 @@ struct ve2_scheduler {
 	struct list_head		job_queue;       /* Pending jobs */
 	spinlock_t			job_lock;        /* Protects job_queue */
 
-	/* Current state */
-	struct amdxdna_hwctx		*active_ctx;     /* Currently running */
 	bool				ctx_switch_requested;
 
 	/* Workqueue */
@@ -59,10 +56,6 @@ struct ve2_scheduler {
 
 	/* Back-pointer */
 	struct amdxdna_mgmtctx		*mgmtctx;
-
-	/* Statistics */
-	atomic64_t			total_jobs;
-	atomic64_t			total_switches;
 };
 
 struct amdxdna_mgmtctx {
