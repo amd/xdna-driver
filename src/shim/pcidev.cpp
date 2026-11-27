@@ -296,6 +296,14 @@ driver_sync_bo(const buffer& bo, xrt_core::buffer_handle::direction dir,
   if (offset > bo.size() || size > bo.size() - offset)
     shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, size);
 
+  // Userptr registration rounds the length up to a page, and the kernel only
+  // syncs that whole mapping. A sync of the whole logical BO is that mapping.
+  // A smaller range is left unchanged so the kernel rejects a partial sync.
+  if (bo.is_userptr() && offset == 0 && size == bo.size()) {
+    const size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    size = (size + page_size - 1) & ~(page_size - 1);
+  }
+
   sync_bo_arg arg = {
     .bo = bo.id(),
     .direction = dir,

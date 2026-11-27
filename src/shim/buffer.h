@@ -116,6 +116,10 @@ public:
   size_t
   size() const;
 
+  bool
+  is_userptr() const
+  { return m_uptr != nullptr; }
+
   virtual void
   bind_hwctx(const hwctx& hwctx);
 

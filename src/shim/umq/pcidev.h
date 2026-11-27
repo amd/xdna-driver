@@ -51,11 +51,16 @@ private:
 // not kept in sync by hardware. Driver-allocated BOs are backed by coherent
 // (non-cacheable) DMA memory, so xrt::bo::sync() is a no-op (inherited from
 // pdev_umq). An imported cacheable dmabuf cannot be cache-maintained by the
-// kernel either, so importing one is warned about rather than synced.
+// kernel either, so importing one is warned about rather than synced. However,
+// Userptr BOs need directional DMA synchronization through the driver.
 class pdev_umq_nc : public pdev_umq
 {
 public:
   using pdev_umq::pdev_umq;
+
+  void
+  sync_bo(buffer& bo, xrt_core::buffer_handle::direction dir,
+          size_t size, size_t offset) const override;
 
   // Non-coherent: the kernel cannot maintain caches for an imported cacheable
   // dmabuf, so xrt::bo::sync() on an imported BO is a no-op. Warn once per
