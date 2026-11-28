@@ -963,7 +963,8 @@ static int amdxdna_dpt_suspend_chan(struct amdxdna_dev *xdna,
 	 * validates the footer signature and resumes from the saved
 	 * offsets. Detaching the buffer (size=0 attach) makes the firmware
 	 * start a fresh ring with head = tail = 0 on the next attach,
-	 * discarding any saved state.
+	 * discarding any saved state. A VF stops its rings first in
+	 * amdxdna_dpt_fw_detach(), which keeps the saved state.
 	 */
 
 	/*
@@ -1272,6 +1273,34 @@ int amdxdna_dpt_resume(struct amdxdna_dev *xdna)
 	ret2 = amdxdna_dpt_resume_chan(xdna, &xdna->fw_trace, false);
 
 	return ret ? ret : ret2;
+}
+
+/*
+ * Stop the active rings before an SR-IOV VF suspends. Firmware is not told
+ * about a VF suspend, so it would still hold the rings and refuse the start
+ * sent on resume. The stop keeps the ring state in the footer, so resume
+ * continues from it. Call before the partition is destroyed, which also
+ * releases the rings in firmware.
+ */
+void amdxdna_dpt_fw_detach(struct aie_device *aie)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt_chan *chans[] = { &xdna->fw_log, &xdna->fw_trace };
+	struct amdxdna_dpt *dpt;
+	int i, ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	for (i = 0; i < ARRAY_SIZE(chans); i++) {
+		dpt = rcu_dereference_protected(chans[i]->data,
+						lockdep_is_held(&xdna->dev_lock));
+		if (!dpt || READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE)
+			continue;
+
+		ret = amdxdna_dpt_msg_fini(dpt);
+		if (ret)
+			XDNA_DPT_WARN(dpt, "Detach before suspend failed: %d", ret);
+	}
 }
 
 /*

@@ -43,9 +43,9 @@ static const struct aie4_role_allow aie4_opcode_allow[] = {
 	{ AIE4_MSG_OP_SUSPEND,				AIE4_OP_ALL },
 	{ AIE4_MSG_OP_ASYNC_EVENT_REPORT,		AIE4_OP_ALL },
 	{ AIE4_MSG_OP_GET_TELEMETRY,			AIE4_OP_CP },
-	{ AIE4_MSG_OP_START_FW_TRACE,			AIE4_OP_CP },
-	{ AIE4_MSG_OP_STOP_FW_TRACE,			AIE4_OP_CP },
-	{ AIE4_MSG_OP_SET_FW_TRACE_CATEGORIES,		AIE4_OP_CP },
+	{ AIE4_MSG_OP_START_FW_TRACE,			AIE4_OP_ALL },
+	{ AIE4_MSG_OP_STOP_FW_TRACE,			AIE4_OP_ALL },
+	{ AIE4_MSG_OP_SET_FW_TRACE_CATEGORIES,		AIE4_OP_ALL },
 	{ AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION,	AIE4_OP_ALL },
 	{ AIE4_MSG_OP_GET_NPUFW_TIME,			AIE4_OP_ALL },
 	{ AIE4_MSG_OP_SET_RUNTIME_CONFIG,		AIE4_OP_ALL },
@@ -1139,6 +1139,7 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
 	req.categories = categories;
 	req.buff_addr = addr;
 	req.buff_size = size;
+	req.pasid = 0;
 
 	ret = aie4_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {

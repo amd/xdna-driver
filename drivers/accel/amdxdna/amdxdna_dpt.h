@@ -169,12 +169,14 @@ void amdxdna_dpt_chan_fini(struct amdxdna_dev *xdna);
  * amdxdna_dpt_init auto-starts the log channel only; the trace channel
  * remains inactive at probe and is opt-in via the
  * DRM_AMDXDNA_SET_FW_TRACE_STATE ioctl to avoid generating large trace
- * payloads unconditionally.
+ * payloads unconditionally. amdxdna_dpt_fw_detach stops the rings before
+ * an SR-IOV VF suspends.
  */
 int amdxdna_dpt_init(struct aie_device *aie);
 int amdxdna_dpt_fini(struct aie_device *aie);
 int amdxdna_dpt_suspend(struct amdxdna_dev *xdna);
 int amdxdna_dpt_resume(struct amdxdna_dev *xdna);
+void amdxdna_dpt_fw_detach(struct aie_device *aie);
 
 /*
  * FLR counterparts of suspend/resume, driven from the per-generation
